@@ -1,0 +1,27 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0001": ["navo.ico"]
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "1.0.0.0",
+          "product_version": "1.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "FileDescription": "Navo Network Manager",
+            "ProductName": "Navo",
+            "CompanyName": "Navo",
+            "LegalCopyright": "Copyright (C) 2026",
+            "OriginalFilename": "navo.exe",
+            "InternalName": "navo"
+          }
+        }
+      }
+    }
+  }
+}

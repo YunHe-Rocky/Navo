@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "navo_app",
+  "outputfilename": "navo_app",
+  "frontend:install": "npm.cmd --cache ../../.cache/npm ci",
+  "frontend:build": "npm.cmd --cache ../../.cache/npm run build",
+  "frontend:dev:watcher": "npm.cmd --cache ../../.cache/npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Navo"
+  },
+  "info": {
+    "productName": "Navo",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright (C) 2026"
+  }
+}

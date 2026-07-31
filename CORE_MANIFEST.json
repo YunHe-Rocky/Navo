@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "cores": [
+    {
+      "type": "mihomo",
+      "version": "1.19.29",
+      "relative_path": "third_party/mihomo/mihomo.exe",
+      "sha256": "4316ff91fecec2fca9acb5612d7400ba228c069ffd325b1f17f46f1d4ef7e0cd",
+      "config_format": "yaml",
+      "version_args": ["-v"],
+      "validation_args": ["-t", "-f", "{config}"],
+      "run_args": ["-f", "{config}"]
+    },
+    {
+      "type": "xray",
+      "version": "26.3.27",
+      "relative_path": "third_party/xray/xray.exe",
+      "sha256": "15c2d007954ac53ba69b80ec91242786b3c0b71d52649165b4ca1d5cc96ef8f1",
+      "config_format": "json",
+      "version_args": ["version"],
+      "validation_args": ["run", "-test", "-c", "{config}"],
+      "run_args": ["run", "-c", "{config}"]
+    },
+    {
+      "type": "sing-box",
+      "version": "1.13.14",
+      "relative_path": "third_party/sing-box/sing-box.exe",
+      "sha256": "db0d779948214cf761011d154c3a5da36df20394fa01a9fc798f1dc39fe9d183",
+      "config_format": "json",
+      "version_args": ["version"],
+      "validation_args": ["check", "-c", "{config}"],
+      "run_args": ["run", "-c", "{config}"]
+    }
+  ]
+}

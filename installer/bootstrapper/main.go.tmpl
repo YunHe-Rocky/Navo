@@ -1,0 +1,59 @@
+//go:build windows
+
+package main
+
+import (
+	_ "embed"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"syscall"
+	"unsafe"
+)
+
+//go:embed payload.msi
+var installer []byte
+
+func main() {
+	if err := run(); err != nil {
+		showError(err.Error())
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	tempDir, err := os.MkdirTemp("", "Navo-Setup-*")
+	if err != nil {
+		return fmt.Errorf("create temporary directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	msiPath := filepath.Join(tempDir, "Navo.msi")
+	if err := os.WriteFile(msiPath, installer, 0o600); err != nil {
+		return fmt.Errorf("extract installer: %w", err)
+	}
+
+	args := append([]string{"/i", msiPath}, os.Args[1:]...)
+	command := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "msiexec.exe"), args...)
+	if err := command.Run(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok && exitError.ExitCode() == 1602 {
+			return nil // User cancelled the UAC or installer dialog.
+		}
+		return fmt.Errorf("Windows Installer failed: %w", err)
+	}
+	return nil
+}
+
+func showError(message string) {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	messageBox := user32.NewProc("MessageBoxW")
+	text, _ := syscall.UTF16PtrFromString(message)
+	title, _ := syscall.UTF16PtrFromString("Navo Setup")
+	_, _, _ = messageBox.Call(
+		0,
+		uintptr(unsafe.Pointer(text)),
+		uintptr(unsafe.Pointer(title)),
+		0x10,
+	)
+}

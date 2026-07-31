@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Navo"
+    Manufacturer="Navo"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="A95DA7EF-0B97-4C2D-A336-4B2798CB42A9"
+    Language="2052"
+    InstallerVersion="500"
+    Scope="perMachine"
+    Compressed="yes">
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Navo is already installed."
+      Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="NavoIcon" SourceFile="$(var.PayloadDir)\app_ui\tray_icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="NavoIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Navo" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="PayloadComponents" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PayloadDir)\**" />
+    </ComponentGroup>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Navo">
+        <Component Id="ApplicationShortcuts" Guid="B128E894-96E8-483B-B3AC-41DD66928EF1">
+          <Shortcut
+            Id="ApplicationStartMenuShortcut"
+            Name="Navo"
+            Description="Navo Network Manager"
+            Target="[INSTALLFOLDER]navo.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="NavoIcon" />
+          <Shortcut
+            Id="ApplicationDesktopShortcut"
+            Directory="DesktopFolder"
+            Name="Navo"
+            Description="Navo Network Manager"
+            Target="[INSTALLFOLDER]navo.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="NavoIcon" />
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue
+            Root="HKLM"
+            Key="Software\Navo"
+            Name="Installed"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Feature Id="MainFeature" Title="Navo" Level="1">
+      <ComponentGroupRef Id="PayloadComponents" />
+      <ComponentRef Id="ApplicationShortcuts" />
+    </Feature>
+  </Package>
+</Wix>

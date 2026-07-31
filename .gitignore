@@ -1,0 +1,14 @@
+*.exe
+*.test
+coverage.out
+.cache/
+.tmp/
+gocache*/
+navo_app/build/
+navo_app/frontend/dist/
+navo_app/node_modules/
+navo_app/wailsjs/
+release/
+.env
+.env.*
+!.env.example
