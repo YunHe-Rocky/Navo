@@ -21,8 +21,8 @@ type mockTun struct {
 	cleanErr  error
 }
 
-func (m *mockTun) Create(ctx context.Context, name string) error { m.created = true; return nil }
-func (m *mockTun) Destroy(ctx context.Context) error             { m.created = false; return nil }
+func (m *mockTun) Create(ctx context.Context, name string) error        { m.created = true; return nil }
+func (m *mockTun) Destroy(ctx context.Context) error                    { m.created = false; return nil }
 func (m *mockTun) Configure(ctx context.Context, cfg *tun.Config) error { return nil }
 func (m *mockTun) Status() *tun.Status {
 	return &tun.Status{Name: "Navo-TUN", Installed: m.installed, Created: m.created}
@@ -41,9 +41,9 @@ func (m *mockTun) Cleanup(ctx context.Context) (*tun.CleanupResult, error) {
 }
 
 type mockRoute struct {
-	routes    []tun.Route
-	cleanErr  error
-	cleanedN  int
+	routes   []tun.Route
+	cleanErr error
+	cleanedN int
 }
 
 func (r *mockRoute) AddRoutes(ctx context.Context, n string, routes []tun.Route) error {
@@ -235,15 +235,32 @@ func TestReconciler_CleanupFailure(t *testing.T) {
 	r.MarkDirtyShutdown(12345, 0, "Navo-TUN", nil)
 
 	result, err := r.Reconcile(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected cleanup failure")
 	}
-	// Should still complete even if TUN cleanup fails
-	if result.RecoveryState != host.RecoveryReady {
-		t.Errorf("expected Ready despite cleanup failure, got %s", result.RecoveryState)
+	if result.RecoveryState != host.RecoveryDirty {
+		t.Errorf("expected Dirty after cleanup failure, got %s", result.RecoveryState)
 	}
 	if len(result.IssuesUnfixed) == 0 {
 		t.Error("expected unfixed issues from cleanup failure")
+	}
+}
+
+func TestReconciler_CorruptedStateFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := filepath.Join(dir, "recovery.json")
+	if err := os.WriteFile(stateFile, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewReconciler(&mockTun{}, &mockRoute{}, &mockDNS{})
+	r.SetStateFilePath(stateFile)
+	result, err := r.Reconcile(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected corrupted state error")
+	}
+	if result.RecoveryState != host.RecoveryDirty {
+		t.Fatalf("expected Dirty for corrupted state, got %s", result.RecoveryState)
 	}
 }
 

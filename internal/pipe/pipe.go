@@ -22,6 +22,8 @@ const frameMagic = 0x4E564F50 // "NVOP" = Navo Pipe
 // FrameHeaderSize is the size of the frame header in bytes.
 const FrameHeaderSize = 8
 
+const maxFramePayload = 10 * 1024 * 1024
+
 // Frame is a length-delimited message frame.
 // On the wire: [4 bytes magic][4 bytes length][length bytes JSON payload]
 
@@ -38,7 +40,7 @@ func ReadFrame(r io.Reader) ([]byte, error) {
 	}
 
 	length := binary.LittleEndian.Uint32(header[4:8])
-	if length == 0 || length > 10*1024*1024 { // 10MB max
+	if length == 0 || length > maxFramePayload {
 		return nil, fmt.Errorf("invalid frame length: %d", length)
 	}
 
@@ -52,21 +54,35 @@ func ReadFrame(r io.Reader) ([]byte, error) {
 
 // WriteFrame writes a single frame to a writer.
 func WriteFrame(w io.Writer, payload []byte) error {
-	if len(payload) > 10*1024*1024 {
-		return fmt.Errorf("payload too large: %d bytes", len(payload))
+	if len(payload) == 0 || len(payload) > maxFramePayload {
+		return fmt.Errorf("invalid payload size: %d bytes", len(payload))
 	}
 
 	header := make([]byte, FrameHeaderSize)
 	binary.LittleEndian.PutUint32(header[:4], frameMagic)
 	binary.LittleEndian.PutUint32(header[4:8], uint32(len(payload)))
 
-	if _, err := w.Write(header); err != nil {
+	if err := writeFull(w, header); err != nil {
 		return fmt.Errorf("write header: %w", err)
 	}
-	if _, err := w.Write(payload); err != nil {
+	if err := writeFull(w, payload); err != nil {
 		return fmt.Errorf("write payload: %w", err)
 	}
 
+	return nil
+}
+
+func writeFull(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		if err != nil {
+			return err
+		}
+		if n <= 0 || n > len(data) {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
 	return nil
 }
 

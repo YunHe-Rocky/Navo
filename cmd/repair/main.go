@@ -1,15 +1,11 @@
-// Package main provides the Navo network repair tool.
-// repair.exe diagnoses and fixes TUN/route/DNS state when the service
-// cannot start due to network corruption from a previous crash.
+// Package main provides offline diagnostics. Network mutation is deliberately
+// owned by the runtime Reconciler and is never reconstructed here.
 //
 // Usage:
 //
 //	repair check       - diagnostic scan only (no changes)
-//	repair fix         - automatic repair
-//	repair reset       - full reset (adapter + routes + DNS)
-//	repair tun-reset   - reset only TUN adapter
-//	repair route-fix   - fix only routing table
-//	repair dns-reset   - reset only DNS settings
+//	repair fix         - read-only recovery report; runtime owns mutation
+//	repair reset       - read-only full-recovery report; runtime owns mutation
 package main
 
 import (
@@ -41,12 +37,6 @@ func main() {
 		result := runReset(ctx)
 		output, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(output))
-	case "tun-reset":
-		fmt.Println("tun-reset: not yet implemented on this platform")
-	case "route-fix":
-		fmt.Println("route-fix: not yet implemented on this platform")
-	case "dns-reset":
-		fmt.Println("dns-reset: not yet implemented on this platform")
 	default:
 		fmt.Printf("unknown command: %s\n", cmd)
 		printUsage()
@@ -61,19 +51,16 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  check        Diagnostic scan (read-only)")
-	fmt.Println("  fix          Automatic repair")
-	fmt.Println("  reset        Full reset (adapter + routes + DNS)")
-	fmt.Println("  tun-reset    Reset only TUN adapter")
-	fmt.Println("  route-fix    Fix only routing table")
-	fmt.Println("  dns-reset    Reset only DNS settings")
+	fmt.Println("  fix          Read-only recovery report (start Navo to reconcile)")
+	fmt.Println("  reset        Read-only full-recovery report (start Navo to reconcile)")
 }
 
 // DiagnosticResult is the JSON output format for repair operations.
 type DiagnosticResult struct {
-	IssuesFound int      `json:"issues_found"`
-	Issues      []Issue  `json:"issues"`
-	Fixable     bool     `json:"fixable"`
-	Fixed       int      `json:"fixed,omitempty"`
+	IssuesFound int     `json:"issues_found"`
+	Issues      []Issue `json:"issues"`
+	Fixable     bool    `json:"fixable"`
+	Fixed       int     `json:"fixed,omitempty"`
 }
 
 // Issue represents a single diagnostic finding.
@@ -138,48 +125,16 @@ func runCheck(ctx context.Context) DiagnosticResult {
 
 func runFix(ctx context.Context) DiagnosticResult {
 	checkResult := runCheck(ctx)
-	if !checkResult.Fixable {
-		return checkResult
-	}
-
-	fixed := 0
-	for _, issue := range checkResult.Issues {
-		switch issue.Type {
-		case "dirty_shutdown":
-			// Clear recovery state file
-			programData := os.Getenv("PROGRAMDATA")
-			if programData == "" {
-				programData = `C:\ProgramData`
-			}
-			stateFile := programData + `\Navo\service\recovery_state.json`
-			normalState := map[string]string{"state": "NORMAL"}
-			data, _ := json.Marshal(normalState)
-			os.MkdirAll(programData+`\Navo\service`, 0755)
-			if os.WriteFile(stateFile, data, 0644) == nil {
-				fixed++
-			}
+	for index := range checkResult.Issues {
+		if checkResult.Issues[index].Type == "dirty_shutdown" {
+			checkResult.Issues[index].Detail += "; start Navo and use its verified network recovery path"
 		}
 	}
-
-	checkResult.Fixed = fixed
-	checkResult.Fixable = fixed < checkResult.IssuesFound
+	checkResult.Fixed = 0
+	checkResult.Fixable = false
 	return checkResult
 }
 
 func runReset(ctx context.Context) DiagnosticResult {
-	checkResult := runCheck(ctx)
-
-	// Reset recovery state
-	programData := os.Getenv("PROGRAMDATA")
-	if programData == "" {
-		programData = `C:\ProgramData`
-	}
-	stateFile := programData + `\Navo\service\recovery_state.json`
-	os.Remove(stateFile)
-
-	return DiagnosticResult{
-		IssuesFound: checkResult.IssuesFound,
-		Fixable:     false,
-		Fixed:       1,
-	}
+	return runFix(ctx)
 }

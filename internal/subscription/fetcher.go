@@ -24,17 +24,59 @@ type Fetcher struct {
 // NewFetcher creates a new Fetcher with safe defaults.
 func NewFetcher() *Fetcher {
 	return &Fetcher{
-		secureClient:   newHTTPClient(false),
-		insecureClient: newHTTPClient(true),
+		secureClient:   newSafeHTTPClient(false, net.DefaultResolver),
+		insecureClient: newSafeHTTPClient(true, net.DefaultResolver),
 		maxSize:        10 * 1024 * 1024, // 10MB
 	}
 }
 
 func newHTTPClient(skipTLSVerify bool) *http.Client {
+	return newClientWithDialer(skipTLSVerify, (&net.Dialer{Timeout: 10 * time.Second}).DialContext)
+}
+
+type ipResolver interface {
+	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
+}
+
+func newSafeHTTPClient(skipTLSVerify bool, resolver ipResolver) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	secureDial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("invalid destination: %w", err)
+		}
+		var addresses []net.IPAddr
+		if parsed := net.ParseIP(host); parsed != nil {
+			addresses = []net.IPAddr{{IP: parsed}}
+		} else {
+			addresses, err = resolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("resolve subscription host: %w", err)
+			}
+		}
+		if len(addresses) == 0 {
+			return nil, fmt.Errorf("subscription host resolved to no addresses")
+		}
+		for _, candidate := range addresses {
+			if isForbiddenIP(candidate.IP) {
+				return nil, fmt.Errorf("subscription host resolved to forbidden address")
+			}
+		}
+		// Dial the already-validated address; never hand the hostname back to a
+		// resolver where DNS rebinding could change the destination.
+		return dialer.DialContext(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
+	}
+	return newClientWithDialer(skipTLSVerify, secureDial)
+}
+
+func newClientWithDialer(
+	skipTLSVerify bool,
+	dialContext func(context.Context, string, string) (net.Conn, error),
+) *http.Client {
 	return &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
-			DialContext:       (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			DialContext:       dialContext,
 			DisableKeepAlives: true,
 			TLSClientConfig: &tls.Config{
 				MinVersion: tls.VersionTLS12,
@@ -150,29 +192,28 @@ func validateURL(rawURL string) error {
 
 	// Forbid private IP ranges
 	ip := net.ParseIP(host)
-	if ip != nil && isPrivateIP(ip) {
-		return fmt.Errorf("private IP %q is forbidden (SSRF)", host)
+	if ip != nil && isForbiddenIP(ip) {
+		return fmt.Errorf("forbidden IP %q (SSRF)", host)
 	}
 
 	return nil
 }
 
 func isPrivateIP(ip net.IP) bool {
-	if ip4 := ip.To4(); ip4 != nil {
-		// 10.0.0.0/8
-		if ip4[0] == 10 {
-			return true
-		}
-		// 172.16.0.0/12
-		if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
-			return true
-		}
-		// 192.168.0.0/16
-		if ip4[0] == 192 && ip4[1] == 168 {
-			return true
-		}
-		// 169.254.0.0/16 (link-local)
-		if ip4[0] == 169 && ip4[1] == 254 {
+	return ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+func isForbiddenIP(ip net.IP) bool {
+	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		return true
+	}
+	for _, cidr := range []string{
+		"0.0.0.0/8", "100.64.0.0/10", "192.0.2.0/24", "198.51.100.0/24",
+		"203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4", "2001:db8::/32",
+	} {
+		_, block, _ := net.ParseCIDR(cidr)
+		if block.Contains(ip) {
 			return true
 		}
 	}

@@ -1,4 +1,4 @@
-import type { SubscriptionRequest, UpstreamRequest } from "./types";
+import type { LogQuery, SubscriptionRequest, UpstreamRequest } from "./types";
 
 function app() {
   const bridge = window.go?.main?.App;
@@ -12,13 +12,16 @@ export const api = {
   hostStatus: () => app().GetHostStatus(),
   runProxyBenchmark: () => app().RunProxyBenchmark(),
   cancelProxyBenchmark: () => app().CancelProxyBenchmark(),
+	runLatencyTest: (id: string) => app().RunLatencyTest(id),
+	runTrafficTransfer: (sizeMiB: number, direction: string) => app().RunTrafficTransfer(sizeMiB, direction),
   checkCoreUpdates: () => app().CheckCoreUpdates(),
   openCoreRelease: (id: string) => app().OpenCoreRelease(id),
   routes: () => app().ListRoutes(),
   subscriptions: () => app().ListSubscriptions(),
-  logs: () => app().TailLogs(),
+	queryLogs: (query: LogQuery) => app().QueryLogs(query),
+	logMetadata: () => app().GetLogMetadata(),
+	clearPersistedLogs: () => app().ClearPersistedLogs(),
   setCore: (id: string) => app().SetCore(id),
-  setCoreRunning: (running: boolean) => app().SetCoreRunning(running),
   setSystemProxy: (enabled: boolean) => app().SetSystemProxy(enabled),
   setTUN: (enabled: boolean) => app().SetTUN(enabled),
   setCaptureMode: (mode: string) => app().SetCaptureMode(mode),

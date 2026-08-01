@@ -20,6 +20,7 @@ import (
 	"navo/internal/domain/capture"
 	"navo/internal/domain/core"
 	"navo/internal/domain/endpoint"
+	"navo/internal/fsatomic"
 	"navo/internal/winprocess"
 )
 
@@ -266,26 +267,5 @@ func truncateOutput(value string, limit int) string {
 }
 
 func writeFileAtomically(path string, content []byte, mode os.FileMode) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), ".navo-config-*")
-	if err != nil {
-		return err
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(mode); err != nil {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tempPath, path)
+	return fsatomic.WriteFile(path, content, mode)
 }

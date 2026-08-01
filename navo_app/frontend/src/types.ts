@@ -26,7 +26,7 @@ export interface CoreStatus {
   core_id: string;
   state: string;
   pid: number;
-  uptime: number;
+  uptime_seconds: number;
   config_hash: string;
   restart_count: number;
   last_error: string;
@@ -55,6 +55,18 @@ export interface MetricsStatus {
   upload_bytes: number;
   download_bytes: number;
   connections: number;
+	local_available: boolean;
+	local_unavailable_reason: string;
+	local_upload_bps: number;
+	local_download_bps: number;
+	proxy_upload_bps: number;
+	proxy_download_bps: number;
+	local_upload_total: number;
+	local_download_total: number;
+	proxy_upload_total: number;
+	proxy_download_total: number;
+	traffic_source_state: "ready" | "partial" | "unavailable" | "reset";
+	traffic_sampled_at: string;
 }
 
 export interface Dashboard {
@@ -105,9 +117,9 @@ export interface IPDetectionResult {
   provider: string;
   mobile: boolean;
   proxy: boolean;
-  hosting: boolean;
-  checked_at: string;
-  error: string;
+	hosting: boolean;
+	checked_at: string;
+	error: string;
 }
 
 export interface IPDetection {
@@ -117,11 +129,27 @@ export interface IPDetection {
 
 export interface TrafficPoint {
   timestamp: number;
-  uploadBps: number;
-  downloadBps: number;
-  uploadBytes: number;
-  downloadBytes: number;
+	localUploadBps: number;
+	localDownloadBps: number;
+	proxyUploadBps: number;
+	proxyDownloadBps: number;
+	localUploadTotal: number;
+	localDownloadTotal: number;
+	proxyUploadTotal: number;
+	proxyDownloadTotal: number;
   routeID: string;
+	simulated?: boolean;
+}
+
+export type TrafficSeries =
+	| "localUploadBps"
+	| "localDownloadBps"
+	| "proxyUploadBps"
+	| "proxyDownloadBps";
+
+export interface TrafficChartPreferences {
+	visibleSeries: TrafficSeries[];
+	windowSeconds: number;
 }
 
 export interface RouteInfo {
@@ -205,6 +233,22 @@ export interface ProxyBenchmark {
   checked_at: string;
 }
 
+export interface LatencyResult {
+	outbound_id: string;
+	state: "testing" | "completed" | "partial" | "failed";
+	tcp_connect_ms: number;
+	proxy_handshake_ms: number;
+	dns_ms: number;
+	tls_ms: number;
+	ttfb_ms: number;
+	total_ms: number;
+	exit_ip?: string;
+	checked_at: string;
+	error_code?: string;
+	error_message?: string;
+	dns_observable: boolean;
+}
+
 export interface CoreUpdateStatus {
   id: string;
   name: string;
@@ -214,6 +258,9 @@ export interface CoreUpdateStatus {
   integrity_ok: boolean;
   release_url: string;
   error: string;
+	state: "checking" | "update_available" | "up_to_date" | "failed";
+	install_supported: boolean;
+	install_blocked_reason?: string;
 }
 
 export interface CoreUpdateReport {
@@ -221,6 +268,32 @@ export interface CoreUpdateReport {
   checked_at: string;
 }
 
-export interface Logs {
-  lines: string[];
+export interface LogEntry {
+	id: number;
+	timestamp: string;
+	level: "DEBUG" | "INFO" | "WARN" | "ERROR";
+	service: string;
+	component: string;
+	message: string;
+	fields?: Record<string, unknown>;
+}
+
+export interface LogQuery {
+	levels: string[];
+	services: string[];
+	from: string;
+	to: string;
+	after_id: number;
+	limit: number;
+}
+
+export interface LogQueryResult {
+	entries: LogEntry[];
+	next_cursor: number;
+	has_more: boolean;
+}
+
+export interface LogMetadata {
+	levels: string[];
+	services: string[];
 }

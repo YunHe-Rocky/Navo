@@ -19,6 +19,8 @@ import (
 	"navo/internal/domain/revision"
 	"navo/internal/domain/selection"
 	"navo/internal/domain/source"
+	"navo/internal/fsatomic"
+	"navo/internal/logstore"
 	"navo/internal/supervisor"
 )
 
@@ -561,17 +563,8 @@ func (s *Service) saveRuntimeStateLocked(configDir string) error {
 	if err != nil {
 		return fmt.Errorf("encode runtime state: %w", err)
 	}
-	tempPath := filepath.Join(configDir, "runtime_state.json.tmp")
 	finalPath := filepath.Join(configDir, "runtime_state.json")
-	if err := os.WriteFile(tempPath, data, 0600); err != nil {
-		return fmt.Errorf("write runtime state: %w", err)
-	}
-	if err := os.Remove(finalPath); err != nil && !os.IsNotExist(err) {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("replace runtime state: %w", err)
-	}
-	if err := os.Rename(tempPath, finalPath); err != nil {
-		_ = os.Remove(tempPath)
+	if err := fsatomic.WriteFile(finalPath, data, 0600); err != nil {
 		return fmt.Errorf("activate runtime state: %w", err)
 	}
 	return nil
@@ -844,6 +837,9 @@ func sanitizeID(name string) string {
 }
 
 func errorResponse(requestID, code string, err error) map[string]interface{} {
+	_ = logstore.Emit(logstore.LevelError, "Service", "IPC", "request failed", map[string]any{
+		"request_id": requestID, "error_code": code,
+	})
 	return map[string]interface{}{
 		"request_id": requestID,
 		"type":       "ERROR",

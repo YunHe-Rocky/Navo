@@ -162,8 +162,11 @@ func (s *Service) prepareTUNLocked(ctx context.Context) (map[string]interface{},
 func (s *Service) rollbackCaptureLocked(ctx context.Context) error {
 	var result error
 	if s.networkManager != nil {
-		result = errors.Join(result, s.networkManager.Deactivate(ctx))
-		s.networkManager = nil
+		if err := s.networkManager.Deactivate(ctx); err != nil {
+			result = errors.Join(result, err)
+		} else {
+			s.networkManager = nil
+		}
 	}
 	result = errors.Join(result, s.stopCoreForCapture(ctx))
 	result = errors.Join(result, s.destroyTUNAdapter(ctx, s.runtimeTUNName()))

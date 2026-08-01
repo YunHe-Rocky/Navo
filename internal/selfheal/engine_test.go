@@ -1,0 +1,181 @@
+package selfheal
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func testPolicy(code ErrorCode, calls *atomic.Int32) PolicyFuncs {
+	return PolicyFuncs{
+		PolicyName: "test-policy",
+		Def: Definition{
+			Code: code, Category: CategoryMonitor, Severity: SeverityError,
+			Retryable: true, AutoRepair: true,
+			Budget: Budget{MaxAttempts: 2, Window: time.Hour, Cooldown: time.Hour},
+		},
+		CheckFunc: func(context.Context, ErrorEvent) (bool, error) { return true, nil },
+		RepairFunc: func(context.Context, ErrorEvent) (RepairAction, error) {
+			calls.Add(1)
+			return RepairAction{Name: "repair", Mutated: true}, nil
+		},
+		VerifyFunc: func(context.Context, ErrorEvent, RepairAction) (VerificationResult, error) {
+			return VerificationResult{Recovered: true, Evidence: "verified"}, nil
+		},
+	}
+}
+
+func newTestEngine(t *testing.T, cfg Config, policy Policy) *Engine {
+	t.Helper()
+	registry, err := NewRegistry(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(cfg, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.sleep = func(context.Context, time.Duration) error { return nil }
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(engine.Stop)
+	return engine
+}
+
+func waitFor(t *testing.T, predicate func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if predicate() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition was not reached")
+}
+
+func TestUnknownCodeNeverRuns(t *testing.T) {
+	var calls atomic.Int32
+	cfg := DefaultConfig("")
+	engine := newTestEngine(t, cfg, testPolicy(CodeTrafficCollectorStale, &calls))
+	if engine.Submit(ErrorEvent{Code: CodeCoreCrashed, SourceService: "Supervisor"}) {
+		t.Fatal("unknown error code was accepted")
+	}
+	if calls.Load() != 0 {
+		t.Fatal("unknown error triggered repair")
+	}
+}
+
+func TestObserveOnlyDoesNotRepairOrConsumeBudget(t *testing.T) {
+	var calls atomic.Int32
+	cfg := DefaultConfig(filepath.Join(t.TempDir(), "selfheal-state.json"))
+	cfg.ObserveOnly = true
+	engine := newTestEngine(t, cfg, testPolicy(CodeTrafficCollectorStale, &calls))
+	event := ErrorEvent{Code: CodeTrafficCollectorStale, SourceService: "Monitor", ResourceID: "collector"}
+	if !engine.Submit(event) {
+		t.Fatal("event was not accepted")
+	}
+	waitFor(t, func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return len(engine.pending) == 0
+	})
+	if calls.Load() != 0 {
+		t.Fatal("observe-only executed repair")
+	}
+	if _, err := os.Stat(cfg.StateFile); !os.IsNotExist(err) {
+		t.Fatalf("observe-only mutated budget state: %v", err)
+	}
+}
+
+func TestVerificationFailureRollsBackAndOpensCircuit(t *testing.T) {
+	var repairs, rollbacks atomic.Int32
+	policy := testPolicy(CodeDNSMismatch, &repairs)
+	policy.Def.Budget.MaxAttempts = 1
+	policy.VerifyFunc = func(context.Context, ErrorEvent, RepairAction) (VerificationResult, error) {
+		return VerificationResult{}, errors.New("DNS still mismatched")
+	}
+	policy.RollbackFunc = func(context.Context, ErrorEvent, RepairAction) error {
+		rollbacks.Add(1)
+		return nil
+	}
+	cfg := DefaultConfig(filepath.Join(t.TempDir(), "selfheal-state.json"))
+	engine := newTestEngine(t, cfg, policy)
+	event := ErrorEvent{Code: CodeDNSMismatch, SourceService: "Network", ResourceID: "secret.example"}
+	if !engine.Submit(event) {
+		t.Fatal("event was not accepted")
+	}
+	waitFor(t, func() bool {
+		if rollbacks.Load() != 1 {
+			return false
+		}
+		_, err := os.Stat(cfg.StateFile)
+		return err == nil
+	})
+	if repairs.Load() != 1 {
+		t.Fatalf("repair calls = %d", repairs.Load())
+	}
+	data, err := os.ReadFile(cfg.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret.example") {
+		t.Fatal("raw resource identifier persisted")
+	}
+	if !strings.Contains(string(data), `"open_until"`) {
+		t.Fatal("circuit did not open")
+	}
+}
+
+func TestDuplicateStormCoalescesRepair(t *testing.T) {
+	var calls atomic.Int32
+	policy := testPolicy(CodeTrafficCollectorStale, &calls)
+	gate := make(chan struct{})
+	policy.CheckFunc = func(ctx context.Context, _ ErrorEvent) (bool, error) {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-gate:
+			return true, nil
+		}
+	}
+	cfg := DefaultConfig("")
+	engine := newTestEngine(t, cfg, policy)
+	event := ErrorEvent{Code: CodeTrafficCollectorStale, SourceService: "Monitor", ResourceID: "traffic"}
+	for range 100 {
+		if !engine.Submit(event) {
+			t.Fatal("duplicate event was not coalesced")
+		}
+	}
+	close(gate)
+	waitFor(t, func() bool { return calls.Load() == 1 })
+}
+
+func TestStopCancelsPendingRepair(t *testing.T) {
+	var calls atomic.Int32
+	policy := testPolicy(CodeTrafficCollectorStale, &calls)
+	policy.CheckFunc = func(ctx context.Context, _ ErrorEvent) (bool, error) {
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
+	cfg := DefaultConfig("")
+	registry, _ := NewRegistry(policy)
+	engine, err := New(cfg, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	engine.Submit(ErrorEvent{Code: CodeTrafficCollectorStale, SourceService: "Monitor"})
+	engine.Stop()
+	if calls.Load() != 0 {
+		t.Fatal("repair ran during shutdown")
+	}
+}

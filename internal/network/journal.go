@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"navo/internal/fsatomic"
 	"time"
 )
 
@@ -55,28 +57,7 @@ func writeJournal(path string, value *journal) error {
 	if err != nil {
 		return fmt.Errorf("encode network journal: %w", err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".network-journal-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary journal: %w", err)
-	}
-	tempName := temp.Name()
-	defer os.Remove(tempName)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return fmt.Errorf("secure journal: %w", err)
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return fmt.Errorf("write journal: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return fmt.Errorf("sync journal: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close journal: %w", err)
-	}
-	if err := os.Rename(tempName, path); err != nil {
+	if err := fsatomic.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("replace journal: %w", err)
 	}
 	return nil

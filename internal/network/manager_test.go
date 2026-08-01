@@ -113,6 +113,44 @@ func TestAllNetworkUndoCommandsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestEndpointBypassSelectsOneTypedPhysicalRoute(t *testing.T) {
+	for _, endpoint := range []string{"203.0.113.7", "2001:db8::7"} {
+		family := IPv6Tunnel
+		cfg := testConfig(t)
+		cfg.IPv6Mode = family
+		cfg.TUNIPv6Gateway = "fd00::2"
+		cfg.ProxyEndpointIPs = []string{endpoint}
+		manager, err := NewManager(cfg, &fakeExecutor{}, fakePlatform{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := manager.operations("scalar")[0].apply.Args[len(manager.operations("scalar")[0].apply.Args)-1]
+		for _, required := range []string{
+			"Select-Object -First 1",
+			"[uint32]$r.InterfaceIndex",
+			"[string]$r.NextHop",
+			"InterfaceAlias -ne 'Navo'",
+			"$interfaceIndex",
+			"$nextHop",
+		} {
+			if !strings.Contains(script, required) {
+				t.Fatalf("%s route script missing %q: %s", endpoint, required, script)
+			}
+		}
+		if strings.Contains(script, "-InterfaceIndex $r.InterfaceIndex") || strings.Contains(script, "-NextHop $r.NextHop") {
+			t.Fatalf("%s route script forwards an unbounded result: %s", endpoint, script)
+		}
+	}
+}
+
+func TestPowerShellCommandsForceUTF8Output(t *testing.T) {
+	command := powershell("Write-Output '测试'")
+	script := command.Args[len(command.Args)-1]
+	if !strings.Contains(script, "[Console]::OutputEncoding") || !strings.Contains(script, "$OutputEncoding") {
+		t.Fatalf("PowerShell encoding prelude missing: %s", script)
+	}
+}
+
 func TestManagerRollsBackFailedActivation(t *testing.T) {
 	cfg := testConfig(t)
 	executor := &fakeExecutor{failAt: 3}

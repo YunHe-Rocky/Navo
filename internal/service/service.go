@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"navo/internal/ai"
 	"navo/internal/compiler"
 	"navo/internal/coreadapter"
 	"navo/internal/credential"
@@ -26,10 +25,12 @@ import (
 	"navo/internal/domain/selection"
 	"navo/internal/host"
 	"navo/internal/ipdetect"
+	"navo/internal/logstore"
 	"navo/internal/monitor"
 	"navo/internal/network"
 	"navo/internal/network/tun"
 	"navo/internal/pipe"
+	"navo/internal/selfheal"
 	"navo/internal/subscription"
 	"navo/internal/supervisor"
 	"navo/internal/upstreamproxy"
@@ -44,17 +45,20 @@ type Config struct {
 	ConfigDir           string               // directory for config storage
 	PipeName            string               // named pipe name for IPC, e.g. "Navo.Agent.Service.v1"
 	ProxyPort           int                  // local mixed inbound port
-	SelectionRepository selection.Repository // optional cloud-backed selection store
-	RevisionRepository  revision.Repository  // optional cloud-backed revision store
+	SelectionRepository selection.Repository // local active-selection store
+	RevisionRepository  revision.Repository  // local revision-history store
 	CredentialStore     credential.Store     // optional override for tests
 	DeferCoreStart      bool                 // combined desktop starts disconnected
+	EnableExternalPipe  bool                 // standalone Service IPC only; disabled in desktop process
 }
 
 // Service is the Windows Service that manages the proxy core and TUN infrastructure.
 type Service struct {
-	cfg  Config
-	host host.CoreHost
-	sup  *supervisor.Supervisor
+	cfg            Config
+	host           host.CoreHost
+	sup            *supervisor.Supervisor
+	selfHeal       *selfheal.Engine
+	selfHealEvents <-chan supervisor.StateEvent
 
 	reconciler *network.Reconciler
 	tunManager tun.Manager
@@ -71,6 +75,7 @@ type Service struct {
 	upstreamMgr        *upstreamproxy.Manager
 	credentialStore    credential.Store
 	collector          *monitor.Collector
+	trafficSampler     monitor.TrafficSampler
 	metricsMu          sync.Mutex
 	metricsReader      coreadapter.MetricsReader
 	metricsInitialized bool
@@ -80,9 +85,6 @@ type Service struct {
 	prober             *monitor.Prober
 	ipDetector         *ipdetect.Detector
 	directIPDetector   *ipdetect.Detector
-	aiAssistant        *ai.Assistant
-	aiConfig           ai.Config
-	aiMu               sync.RWMutex
 	endpointStatusMu   sync.RWMutex
 	endpointStatuses   map[string]EndpointStatus
 	diagnosticMu       sync.RWMutex
@@ -98,10 +100,12 @@ type Service struct {
 	revisionRepo  revision.Repository
 	coreAdapters  *coreadapter.Registry
 
-	mu       sync.Mutex
-	running  bool
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	mu        sync.Mutex
+	running   bool
+	stopCh    chan struct{}
+	stopOnce  sync.Once
+	readyCh   chan struct{}
+	readyOnce sync.Once
 }
 
 // New creates a new Service with TUN infrastructure wired in.
@@ -116,10 +120,10 @@ func New(cfg Config) (*Service, error) {
 		cfg.ProxyPort = 12080
 	}
 
-	binaryPath, err := host.FindBinary()
-	if err != nil {
-		binaryPath = cfg.SingBoxPath
-	}
+	// The launcher validates and pins this exact binary. Never replace it with
+	// an environment/PATH discovery result after the trust decision.
+	binaryPath := cfg.SingBoxPath
+	var err error
 
 	tunMgr := tun.NewManagerWithDLL(
 		filepath.Join(filepath.Dir(cfg.SingBoxPath), "wintun.dll"),
@@ -127,6 +131,9 @@ func New(cfg Config) (*Service, error) {
 	routeMgr := tun.NewRouteManager()
 	dnsMgr := tun.NewDNSManager()
 	reconciler := network.NewReconciler(tunMgr, routeMgr, dnsMgr)
+	if cfg.ConfigDir != "" {
+		reconciler.SetStateFilePath(filepath.Join(cfg.ConfigDir, "recovery_state.json"))
+	}
 
 	credentialStore := cfg.CredentialStore
 	if credentialStore == nil {
@@ -164,23 +171,6 @@ func New(cfg Config) (*Service, error) {
 	)
 	directIPDet := ipdetect.NewDetector()
 
-	aiCfg := ai.Config{
-		BaseURL:        os.Getenv("NAVO_AI_BASE_URL"),
-		APIKey:         os.Getenv("NAVO_AI_API_KEY"),
-		Model:          os.Getenv("NAVO_AI_MODEL"),
-		TimeoutSeconds: 60,
-	}
-	if stored, err := loadAIConfig(cfg.ConfigDir); err == nil {
-		aiCfg = stored
-	} else if !os.IsNotExist(err) {
-		log.Printf("[service] AI settings load failed: %v", err)
-	}
-	if aiCfg.Model == "" {
-		aiCfg.Model = "deepseek-v4-pro"
-	}
-	aiBackend := ai.NewHTTPBackend(aiCfg)
-	aiAssistant := ai.NewAssistant(aiBackend)
-
 	runtime := loadRuntimeState(cfg.ConfigDir)
 	coreHost, err := newCoreHost(cfg, runtime.CoreID, binaryPath)
 	if err != nil {
@@ -189,11 +179,24 @@ func New(cfg Config) (*Service, error) {
 		coreHost = host.NewSingBoxHost(binaryPath, "")
 	}
 	sup := supervisor.NewSupervisor(coreHost, reconciler)
+	selfHealState := ""
+	if cfg.ConfigDir != "" {
+		selfHealState = filepath.Join(cfg.ConfigDir, "state", "selfheal-state.json")
+	}
+	selfHealRegistry, err := selfheal.NewRegistry(selfheal.DefaultObserverPolicies()...)
+	if err != nil {
+		return nil, fmt.Errorf("initialize self-heal policy registry: %w", err)
+	}
+	selfHealEngine, err := selfheal.New(selfheal.DefaultConfig(selfHealState), selfHealRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("initialize self-heal engine: %w", err)
+	}
 
 	service := &Service{
 		cfg:              cfg,
 		host:             coreHost,
 		sup:              sup,
+		selfHeal:         selfHealEngine,
 		reconciler:       reconciler,
 		tunManager:       tunMgr,
 		subMgr:           subMgr,
@@ -203,13 +206,12 @@ func New(cfg Config) (*Service, error) {
 		prober:           prober,
 		ipDetector:       ipDet,
 		directIPDetector: directIPDet,
-		aiAssistant:      aiAssistant,
-		aiConfig:         aiCfg,
 		endpointStatuses: make(map[string]EndpointStatus),
 		selectionRepo:    cfg.SelectionRepository,
 		revisionRepo:     cfg.RevisionRepository,
 		coreAdapters:     coreadapter.NewDefaultRegistry(),
 		stopCh:           make(chan struct{}),
+		readyCh:          make(chan struct{}),
 	}
 	service.runtime = runtime
 	return service, nil
@@ -274,19 +276,30 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 		log.Printf("[service] supervisor running (PID: %d)", s.sup.Status().PID)
 	}
+	if err := s.selfHeal.Start(ctx); err != nil {
+		if s.sup.State() != supervisor.StateStopped {
+			_ = s.sup.Stop(context.Background())
+		}
+		return fmt.Errorf("start self-heal engine: %w", err)
+	}
+	s.selfHealEvents = s.sup.Events()
+	go s.watchSupervisorEvents(ctx, s.selfHealEvents)
 	go s.monitorTUNAdapter(ctx)
 
-	// Start named pipe listener
-	listener, err := pipe.NewListener(s.cfg.PipeName)
-	if err != nil {
-		log.Printf("[service] WARNING: pipe listener failed: %v", err)
-	} else {
+	if s.cfg.EnableExternalPipe {
+		listener, err := pipe.NewListener(s.cfg.PipeName)
+		if err != nil {
+			s.selfHeal.Stop()
+			if s.sup.State() != supervisor.StateStopped {
+				_ = s.sup.Stop(context.Background())
+			}
+			return fmt.Errorf("start service pipe: %w", err)
+		}
 		s.pipeListener = listener
 		log.Printf("[service] pipe listening on %s", listener.Addr())
-
-		// Accept connections in background
 		go s.acceptConnections(ctx)
 	}
+	s.readyOnce.Do(func() { close(s.readyCh) })
 
 	// Wait for stop signal
 	select {
@@ -298,6 +311,10 @@ func (s *Service) Run(ctx context.Context) error {
 
 	return s.shutdown()
 }
+
+// Ready is closed only after runtime restoration and optional IPC startup
+// complete successfully.
+func (s *Service) Ready() <-chan struct{} { return s.readyCh }
 
 func (s *Service) prepareRuntimeConfig(ctx context.Context) error {
 	return s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", "")
@@ -323,6 +340,13 @@ func (s *Service) Status() supervisor.SupervisorStatus {
 // shutdown performs graceful shutdown.
 func (s *Service) shutdown() error {
 	log.Printf("[service] shutting down...")
+	if s.selfHealEvents != nil {
+		s.sup.Unsubscribe(s.selfHealEvents)
+		s.selfHealEvents = nil
+	}
+	if s.selfHeal != nil {
+		s.selfHeal.Stop()
+	}
 
 	// Stop accepting new pipe connections
 	if s.pipeListener != nil {
@@ -363,6 +387,29 @@ func (s *Service) shutdown() error {
 	return nil
 }
 
+func (s *Service) watchSupervisorEvents(ctx context.Context, events <-chan supervisor.StateEvent) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if event.Event != supervisor.EventCrash {
+				continue
+			}
+			s.runtimeMu.Lock()
+			coreID := s.runtime.CoreID
+			s.runtimeMu.Unlock()
+			s.selfHeal.Submit(selfheal.ErrorEvent{
+				Code: selfheal.CodeCoreCrashed, OccurredAt: event.Timestamp,
+				SourceService: "Supervisor", ResourceID: "active-core", CoreID: coreID,
+			})
+		}
+	}
+}
+
 // acceptConnections handles incoming pipe connections.
 func (s *Service) acceptConnections(ctx context.Context) {
 	for {
@@ -400,7 +447,10 @@ func (s *Service) handleConnection(ctx context.Context, ch *pipe.Channel) {
 		}
 
 		// Set a read deadline so we don't block forever
-		ch.SetDeadline(time.Now().Add(30 * time.Second))
+		if err := ch.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			log.Printf("[service] set read deadline: %v", err)
+			return
+		}
 
 		var msg map[string]interface{}
 		if err := ch.Receive(&msg); err != nil {
@@ -413,9 +463,20 @@ func (s *Service) handleConnection(ctx context.Context, ch *pipe.Channel) {
 		log.Printf("[service] received: method=%v", msg["method"])
 
 		// Dispatch based on method
-		response := s.dispatch(ctx, msg)
+		requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		response := s.dispatch(requestCtx, msg)
+		cancel()
 		if response != nil {
-			ch.Send(response)
+			if err := ch.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				log.Printf("[service] set write deadline: %v", err)
+				return
+			}
+			if err := ch.Send(response); err != nil {
+				if !isExpectedPipeDisconnect(err) {
+					log.Printf("[service] send error: %v", err)
+				}
+				return
+			}
 		}
 	}
 }
@@ -439,27 +500,20 @@ func (s *Service) Dispatch(ctx context.Context, msg map[string]interface{}) map[
 func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[string]interface{} {
 	method, _ := msg["method"].(string)
 	requestID, _ := msg["request_id"].(string)
+	_ = logstore.Emit(logstore.LevelDebug, logServiceForMethod(method), "IPC", "request received", map[string]any{
+		"method": method, "request_id": requestID,
+	})
+	if _, supplied := msg["config_path"]; supplied {
+		return errorResponse(requestID, "INVALID_ARGUMENT", fmt.Errorf("config_path is not accepted over IPC"))
+	}
 
 	switch method {
-	case "core.start":
-		return s.handleCoreStart(requestID, msg)
-	case "core.stop":
-		return s.handleCoreStop(requestID)
 	case "core.status":
 		return s.handleCoreStatus(requestID)
 	case "core.list":
 		return s.handleCoreList(requestID)
 	case "core.select":
 		return s.handleCoreSelect(ctx, requestID, msg)
-	case "core.restart":
-		return s.handleCoreRestart(requestID, msg)
-	case "service.shutdown":
-		// Respond first so the caller can observe a clean shutdown handshake.
-		go func() {
-			time.Sleep(50 * time.Millisecond)
-			s.Stop()
-		}()
-		return response(requestID, map[string]interface{}{"status": "stopping"})
 	case "tun.enable":
 		return s.handleTUNEnable(requestID, msg)
 	case "tun.disable":
@@ -508,20 +562,19 @@ func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[
 		return s.handleDiagnosticsExport(ctx, requestID)
 	case "core.log.tail":
 		return s.handleCoreLogTail(requestID)
-	case "ai.rule.generate":
-		return s.handleAIRuleGenerate(requestID, msg)
-	case "ai.diagnose":
-		return s.handleAIDiagnose(requestID)
-	case "ai.explain":
-		return s.handleAIExplain(requestID)
-	case "ai.config.get":
-		return s.handleAIConfigGet(requestID)
-	case "ai.config.set":
-		return s.handleAIConfigSet(requestID, msg)
-	case "ai.config.test":
-		return s.handleAIConfigTest(requestID)
 	case "log.tail":
 		return s.handleLogTail(requestID)
+	case "logs.query":
+		return s.handleLogsQuery(requestID, msg)
+	case "logs.services":
+		return response(requestID, map[string]interface{}{"services": logstore.Default().Services()})
+	case "logs.levels":
+		return response(requestID, map[string]interface{}{"levels": []string{"DEBUG", "INFO", "WARN", "ERROR"}})
+	case "logs.clear.persisted":
+		if err := logstore.Default().Clear(); err != nil {
+			return errorResponse(requestID, "LOG_CLEAR_FAILED", err)
+		}
+		return response(requestID, map[string]interface{}{"cleared": true})
 	default:
 		return map[string]interface{}{
 			"request_id": requestID,
@@ -531,84 +584,6 @@ func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[
 				"message": fmt.Sprintf("unknown method: %s", method),
 			},
 		}
-	}
-}
-
-func (s *Service) handleCoreStart(requestID string, msg map[string]interface{}) map[string]interface{} {
-	configPath, _ := msg["config_path"].(string)
-	if configPath == "" {
-		configPath = s.cfg.ConfigPath
-	}
-
-	status := s.sup.Status()
-	if status.State == supervisor.StateRunning {
-		return map[string]interface{}{
-			"request_id": requestID,
-			"type":       "RESPONSE",
-			"payload": map[string]interface{}{
-				"pid":    status.PID,
-				"status": "already_running",
-			},
-		}
-	}
-
-	err := s.sup.Start(context.Background(), configPath)
-	if err != nil {
-		return map[string]interface{}{
-			"request_id": requestID,
-			"type":       "ERROR",
-			"payload": map[string]interface{}{
-				"code":    "CORE_002",
-				"message": err.Error(),
-			},
-		}
-	}
-	if err := s.commitHealthyRuntime(context.Background()); err != nil {
-		_ = s.sup.Stop(context.Background())
-		return errorResponse(requestID, "CORE_COMMIT_FAILED", err)
-	}
-
-	newStatus := s.sup.Status()
-	return map[string]interface{}{
-		"request_id": requestID,
-		"type":       "RESPONSE",
-		"payload": map[string]interface{}{
-			"pid":    newStatus.PID,
-			"status": "running",
-		},
-	}
-}
-
-func (s *Service) handleCoreStop(requestID string) map[string]interface{} {
-	status := s.sup.Status()
-	if status.State != supervisor.StateRunning {
-		return map[string]interface{}{
-			"request_id": requestID,
-			"type":       "RESPONSE",
-			"payload": map[string]interface{}{
-				"status": "already_stopped",
-			},
-		}
-	}
-
-	err := s.sup.Stop(context.Background())
-	if err != nil {
-		return map[string]interface{}{
-			"request_id": requestID,
-			"type":       "ERROR",
-			"payload": map[string]interface{}{
-				"code":    "CORE_003",
-				"message": err.Error(),
-			},
-		}
-	}
-
-	return map[string]interface{}{
-		"request_id": requestID,
-		"type":       "RESPONSE",
-		"payload": map[string]interface{}{
-			"status": "stopped",
-		},
 	}
 }
 
@@ -753,13 +728,8 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func (s *Service) handleCoreRestart(requestID string, msg map[string]interface{}) map[string]interface{} {
-	configPath, _ := msg["config_path"].(string)
-	if configPath == "" {
-		configPath = s.cfg.ConfigPath
-	}
-
-	err := s.sup.Restart(context.Background(), configPath)
+func (s *Service) handleCoreRestart(requestID string) map[string]interface{} {
+	err := s.sup.Restart(context.Background(), s.cfg.ConfigPath)
 	if err != nil {
 		return map[string]interface{}{
 			"request_id": requestID,
@@ -1088,17 +1058,42 @@ func (s *Service) handleMetricsCurrent(requestID string) map[string]interface{} 
 			reason = metricsErr.Error()
 		}
 	}
+	localUp, localDown, localErr := monitor.ReadSystemBytes()
+	proxyUp, proxyDown := uint64(0), uint64(0)
+	if available {
+		proxyUp, proxyDown = uint64(max(totalUp, 0)), uint64(max(totalDown, 0))
+	}
+	traffic := s.trafficSampler.Sample(
+		time.Now(), localUp, localDown, proxyUp, proxyDown,
+		localErr == nil, available,
+	)
+	localReason := ""
+	if localErr != nil {
+		localReason = localErr.Error()
+	}
 	payload := map[string]interface{}{
-		"mode":               mode,
-		"active_outbound":    activeID,
-		"reachable":          s.sup.State() == supervisor.StateRunning,
-		"available":          available,
-		"unavailable_reason": reason,
-		"core_name":          coreID,
-		"latency_ms":         nil,
-		"upload_bytes":       totalUp,
-		"download_bytes":     totalDown,
-		"connections":        connections,
+		"mode":                     mode,
+		"active_outbound":          activeID,
+		"reachable":                s.sup.State() == supervisor.StateRunning,
+		"available":                available,
+		"unavailable_reason":       reason,
+		"core_name":                coreID,
+		"latency_ms":               nil,
+		"upload_bytes":             totalUp,
+		"download_bytes":           totalDown,
+		"connections":              connections,
+		"local_available":          localErr == nil,
+		"local_unavailable_reason": localReason,
+		"local_upload_bps":         traffic.LocalUploadBPS,
+		"local_download_bps":       traffic.LocalDownloadBPS,
+		"proxy_upload_bps":         traffic.ProxyUploadBPS,
+		"proxy_download_bps":       traffic.ProxyDownloadBPS,
+		"local_upload_total":       traffic.LocalUploadTotal,
+		"local_download_total":     traffic.LocalDownloadTotal,
+		"proxy_upload_total":       traffic.ProxyUploadTotal,
+		"proxy_download_total":     traffic.ProxyDownloadTotal,
+		"traffic_source_state":     traffic.SourceState,
+		"traffic_sampled_at":       traffic.Timestamp,
 	}
 	return map[string]interface{}{
 		"request_id": requestID, "type": "RESPONSE",
@@ -1181,86 +1176,6 @@ func (s *Service) handleIPCheck(requestID string) map[string]interface{} {
 				"error":      proxyResult.Error,
 			},
 		},
-	}
-}
-
-func (s *Service) handleAIRuleGenerate(requestID string, msg map[string]interface{}) map[string]interface{} {
-	userReq, _ := msg["request"].(string)
-	if userReq == "" {
-		return map[string]interface{}{
-			"request_id": requestID, "type": "ERROR",
-			"payload": map[string]interface{}{"code": "INVALID", "message": "request text required"},
-		}
-	}
-
-	s.aiMu.RLock()
-	assistant := s.aiAssistant
-	s.aiMu.RUnlock()
-	gen := ai.NewRuleGen(assistant)
-	rules, err := gen.Generate(context.Background(), userReq, nil, nil)
-	if err != nil {
-		return map[string]interface{}{
-			"request_id": requestID, "type": "ERROR",
-			"payload": map[string]interface{}{"code": "AI_001", "message": err.Error()},
-		}
-	}
-
-	list := make([]interface{}, len(rules))
-	for i, r := range rules {
-		list[i] = r
-	}
-	return map[string]interface{}{
-		"request_id": requestID, "type": "RESPONSE",
-		"payload": map[string]interface{}{"rules": list},
-	}
-}
-
-func (s *Service) handleAIDiagnose(requestID string) map[string]interface{} {
-	stats := s.collector.Stats()
-	snapshot := &ai.NetworkSnapshot{
-		Outbounds: make([]ai.OutboundState, 0),
-		Metrics:   make([]ai.MetricState, 0),
-		Errors:    []string{},
-	}
-	for _, st := range stats {
-		snapshot.Metrics = append(snapshot.Metrics, ai.MetricState{
-			OutboundID: st.OutboundID,
-			Upload:     st.Upload,
-			Download:   st.Download,
-		})
-	}
-
-	result := ai.QuickAnalyze(snapshot)
-	return map[string]interface{}{
-		"request_id": requestID, "type": "RESPONSE",
-		"payload": map[string]interface{}{
-			"severity": result.Severity, "summary": result.Summary,
-			"issues": result.Issues, "suggestions": result.Suggestions,
-		},
-	}
-}
-
-func (s *Service) handleAIExplain(requestID string) map[string]interface{} {
-	stats := s.collector.Stats()
-	obState := make([]ai.OutboundState, 0)
-	for _, st := range stats {
-		obState = append(obState, ai.OutboundState{
-			ID: st.OutboundID, Healthy: true,
-		})
-	}
-	snapshot := &ai.NetworkSnapshot{Outbounds: obState}
-
-	s.aiMu.RLock()
-	assistant := s.aiAssistant
-	s.aiMu.RUnlock()
-	ex := ai.NewExplain(assistant)
-	text, err := ex.ExplainNetwork(context.Background(), snapshot)
-	if err != nil {
-		text = "当前无法生成 AI 解释。请检查 AI 服务配置。"
-	}
-	return map[string]interface{}{
-		"request_id": requestID, "type": "RESPONSE",
-		"payload": map[string]interface{}{"text": text},
 	}
 }
 

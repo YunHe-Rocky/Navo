@@ -10,6 +10,7 @@ import (
 	"navo/internal/compiler"
 	"navo/internal/domain/capture"
 	"navo/internal/domain/core"
+	"navo/internal/domain/endpoint"
 	"navo/internal/domain/selection"
 	"navo/internal/domain/source"
 )
@@ -47,7 +48,7 @@ func TestAdaptersCompileNativeFormats(t *testing.T) {
 			}},
 			Outbounds: []compiler.Outbound{
 				{ID: "direct", Type: compiler.OutboundDirect, Enabled: true},
-				{ID: "node", Type: compiler.OutboundVLESS, Server: "example.com", Port: 443, UUID: "id", Enabled: true},
+				{ID: "node", Type: compiler.OutboundVLESS, Server: "example.com", Port: 443, UUID: "bf000d23-0752-40b4-affe-68f7707a9661", Enabled: true},
 			},
 			FinalOutbound: "node",
 		},
@@ -94,5 +95,13 @@ func TestHealthProbeRejectsMissingReadinessPorts(t *testing.T) {
 	})
 	if result.Healthy || result.Error == "" {
 		t.Fatal("health probe accepted a process without readiness ports")
+	}
+}
+
+func TestCapabilitiesDoNotAdvertiseIncompleteWireGuard(t *testing.T) {
+	for _, adapter := range []CoreAdapter{NewSingBoxAdapter(), NewMihomoAdapter(), NewXrayAdapter()} {
+		if adapter.Capabilities(Version{}).Protocols[endpoint.ProtocolWireGuard] {
+			t.Fatalf("%s advertised incomplete WireGuard support", adapter.Type())
+		}
 	}
 }

@@ -1,7 +1,11 @@
 package subscription
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"navo/internal/compiler"
@@ -12,14 +16,15 @@ type Normalizer struct{}
 
 func NewNormalizer() *Normalizer { return &Normalizer{} }
 
-// Normalize deduplicates outbounds by server+port+protocol and fills defaults.
+// Normalize deduplicates by canonical connectivity identity. Credentials are
+// represented only by a digest and are never emitted in logs or IDs.
 func (n *Normalizer) Normalize(outbounds []compiler.Outbound) []compiler.Outbound {
 	seen := make(map[string]bool)
 	usedIDs := make(map[string]bool)
 	result := make([]compiler.Outbound, 0, len(outbounds))
 
 	for _, ob := range outbounds {
-		key := fmt.Sprintf("%s:%d:%s", ob.Server, ob.Port, string(ob.Type))
+		key := connectivityFingerprint(ob)
 		if seen[key] {
 			continue
 		}
@@ -50,7 +55,7 @@ func (n *Normalizer) Normalize(outbounds []compiler.Outbound) []compiler.Outboun
 func (n *Normalizer) Merge(existing, newOutbounds []compiler.Outbound) []compiler.Outbound {
 	existingMap := make(map[string]compiler.Outbound)
 	for _, ob := range existing {
-		key := fmt.Sprintf("%s:%d:%s", ob.Server, ob.Port, string(ob.Type))
+		key := connectivityFingerprint(ob)
 		existingMap[key] = ob
 	}
 
@@ -59,7 +64,7 @@ func (n *Normalizer) Merge(existing, newOutbounds []compiler.Outbound) []compile
 
 	// Reserve existing IDs first so the selected outbound remains stable.
 	for i, ob := range normalized {
-		key := fmt.Sprintf("%s:%d:%s", ob.Server, ob.Port, string(ob.Type))
+		key := connectivityFingerprint(ob)
 		if ex, ok := existingMap[key]; ok {
 			normalized[i].Enabled = ex.Enabled
 			normalized[i].ID = ex.ID
@@ -67,7 +72,7 @@ func (n *Normalizer) Merge(existing, newOutbounds []compiler.Outbound) []compile
 		}
 	}
 	for i, ob := range normalized {
-		key := fmt.Sprintf("%s:%d:%s", ob.Server, ob.Port, string(ob.Type))
+		key := connectivityFingerprint(ob)
 		if _, ok := existingMap[key]; ok {
 			continue
 		}
@@ -76,6 +81,21 @@ func (n *Normalizer) Merge(existing, newOutbounds []compiler.Outbound) []compile
 	}
 
 	return normalized
+}
+
+func connectivityFingerprint(ob compiler.Outbound) string {
+	credential := sha256.Sum256([]byte(strings.Join([]string{
+		ob.Username, ob.Password, ob.Password2, ob.UUID, ob.Method,
+	}, "\x00")))
+	canonical := strings.Join([]string{
+		strings.ToLower(strings.TrimSpace(ob.ProviderID)),
+		string(ob.Type), strings.ToLower(strings.TrimSpace(ob.Server)), strconv.Itoa(ob.Port),
+		hex.EncodeToString(credential[:]), strings.ToLower(ob.Method), strings.ToLower(ob.Network),
+		ob.TransportPath, strings.ToLower(ob.TransportHost), strings.ToLower(ob.SNI),
+		strconv.FormatBool(ob.TLS), ob.RealityPublicKey, ob.RealityShortID, ob.ServiceName,
+	}, "\x1f")
+	digest := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(digest[:])
 }
 
 func uniqueOutboundID(base string, used map[string]bool) string {

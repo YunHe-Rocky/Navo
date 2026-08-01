@@ -189,13 +189,20 @@ func (a *Agent) captureFailure(
 	if rollbackErr == nil {
 		rollbackErr = a.captureJournal.Clear()
 	}
+	committedMode := journal.From
+	adapter := capture.AdapterStatus{State: capture.AdapterMissing, Name: "Navo"}
+	if rollbackErr == nil {
+		committedMode = capture.ModeOff
+	} else {
+		adapter = a.serviceAdapterStatus()
+	}
 	faultID := fmt.Sprintf("capture-fault-%d", time.Now().UnixNano())
 	a.setCaptureSnapshot(capture.Snapshot{
 		State: capture.StateFaulted, Phase: capture.PhaseFaulted,
-		DesiredMode: target, CommittedMode: capture.ModeOff,
+		DesiredMode: target, CommittedMode: committedMode,
 		FaultID: faultID, LastError: errors.Join(cause, rollbackErr).Error(),
 		CanRetryTUN: target == capture.ModeTUN,
-		Adapter:     capture.AdapterStatus{State: capture.AdapterMissing, Name: "Navo"},
+		Adapter:     adapter,
 		UpdatedAt:   time.Now().UTC(),
 	})
 	return errors.Join(cause, rollbackErr)
@@ -276,7 +283,6 @@ func (a *Agent) refreshCaptureFault(tunStatus map[string]interface{}) {
 	current.State = capture.StateFaulted
 	current.Phase = capture.PhaseFaulted
 	current.DesiredMode = capture.ModeTUN
-	current.CommittedMode = capture.ModeOff
 	current.FaultID = faultID
 	current.LastError = message
 	current.CanRetryTUN = true

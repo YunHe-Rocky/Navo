@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -441,18 +442,6 @@ func TestGetLogs_EmptyBuffer(t *testing.T) {
 	}
 }
 
-func TestReconcile_NoStateFile(t *testing.T) {
-	h := NewSingBoxHost("C:\\test\\sing-box.exe", "")
-
-	result, err := h.Reconcile(nil)
-	if err != nil {
-		t.Errorf("Reconcile() error: %v", err)
-	}
-	if result.RecoveryState != RecoveryNormal {
-		t.Errorf("RecoveryState = %s, want %s", result.RecoveryState, RecoveryNormal)
-	}
-}
-
 func TestReload_NotSupported(t *testing.T) {
 	h := NewSingBoxHost("C:\\test\\sing-box.exe", "")
 	err := h.Reload(nil, "config.json")
@@ -672,6 +661,30 @@ func TestSingBoxHost_Restart(t *testing.T) {
 	}
 }
 
+func TestHostMonitorReportsCrashWithoutRestarting(t *testing.T) {
+	h := NewSingBoxHost(`C:\missing\sing-box.exe`, "")
+	h.status = HostStatus{State: HostStateRunning, PID: 42}
+	h.exitCh = make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		h.monitor()
+		close(done)
+	}()
+	h.exitCh <- errors.New("simulated crash")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("host monitor did not observe process exit")
+	}
+	status := h.Status()
+	if status.State != HostStateFailed || status.PID != 0 {
+		t.Fatalf("status after crash = %#v", status)
+	}
+	if status.RestartCount != 0 || h.cmd != nil {
+		t.Fatalf("host attempted restart: status=%#v cmd=%v", status, h.cmd)
+	}
+}
+
 func TestFindBinary_MultiplePaths(t *testing.T) {
 	// Test that FindBinary returns first match when multiple paths exist
 	tmpDir := t.TempDir()
@@ -759,38 +772,6 @@ func TestValidateBinary_FileNotFound(t *testing.T) {
 	err := ValidateBinary("C:\\nonexistent\\path\\sing-box.exe")
 	if err == nil {
 		t.Error("ValidateBinary() expected error for nonexistent file")
-	}
-}
-
-func TestReconcile_WithGarbageStateFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "recovery.json"), []byte("garbage"), 0644)
-
-	h := NewSingBoxHost("C:\\test\\sing-box.exe", tmpDir)
-	h.listenPort = 0
-
-	result, err := h.Reconcile(context.Background())
-	if err != nil {
-		t.Fatalf("Reconcile() error: %v", err)
-	}
-	// With garbage state file, should still execute and not panic
-	if result.RecoveryState == "" {
-		t.Error("RecoveryState should not be empty")
-	}
-}
-
-func TestReconcile_NormalStateFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "recovery.json"), []byte("NORMAL"), 0644)
-
-	h := NewSingBoxHost("C:\\test\\sing-box.exe", tmpDir)
-
-	result, err := h.Reconcile(context.Background())
-	if err != nil {
-		t.Fatalf("Reconcile() error: %v", err)
-	}
-	if result.RecoveryState != RecoveryNormal {
-		t.Errorf("RecoveryState = %s, want NORMAL", result.RecoveryState)
 	}
 }
 

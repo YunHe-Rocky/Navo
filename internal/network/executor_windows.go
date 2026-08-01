@@ -7,6 +7,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 
 	"navo/internal/winprocess"
 )
@@ -25,7 +29,18 @@ func (systemExecutor) Run(ctx context.Context, command Command) error {
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s failed: %w: %s", command.Name, err, output.String())
+		return fmt.Errorf("%s failed: %w: %s", command.Name, err, decodeCommandOutput(output.Bytes()))
 	}
 	return nil
+}
+
+func decodeCommandOutput(output []byte) string {
+	if utf8.Valid(output) {
+		return string(output)
+	}
+	decoded, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), output)
+	if err == nil {
+		return string(decoded)
+	}
+	return string(output)
 }

@@ -428,6 +428,48 @@ func TestValidate_DNSNoServers(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsDuplicateAndDanglingReferences(t *testing.T) {
+	cfg := &Config{
+		SchemaVersion: 1,
+		Inbounds: []InboundConfig{
+			{Type: "mixed", Tag: "duplicate", Listen: "127.0.0.1", ListenPort: 1080},
+			{Type: "http", Tag: "duplicate", Listen: "127.0.0.1", ListenPort: 1081},
+		},
+		Outbounds: []Outbound{
+			{ID: "same", Type: OutboundDirect}, {ID: "same", Type: OutboundDirect},
+		},
+		FinalOutbound: "missing",
+		RoutingRules: []RoutingRule{
+			{ID: "rule", RuleType: RulePort, Values: []string{"0-70000"}, OutboundID: "same"},
+			{ID: "rule", RuleType: RuleDomainRegex, Values: []string{"["}, OutboundID: "same"},
+		},
+		DNS: &DNSConfig{Enabled: true, Final: "missing", Servers: []DNSServer{
+			{Type: "udp", Tag: "duplicate", Server: "1.1.1.1", ServerPort: 53},
+			{Type: "udp", Tag: "duplicate", Server: "8.8.8.8", ServerPort: 53},
+		}},
+	}
+	if result := Validate(cfg); result.Valid || len(result.Errors) < 6 {
+		t.Fatalf("invalid references passed validation: %#v", result.Errors)
+	}
+}
+
+func TestValidateTransportAndTUNBoundaries(t *testing.T) {
+	cfg := &Config{
+		SchemaVersion: 1,
+		Outbounds: []Outbound{{
+			ID: "node", Type: OutboundTrojan, Server: "edge.example", Port: 443,
+			Password: "secret", Network: "grpc",
+		}},
+		TUN: &TUNConfig{
+			Enabled: true, InterfaceName: "Navo", MTU: 100,
+			Address: []string{"not-a-cidr", "fd00::1/64"}, IPv6Enabled: false,
+		},
+	}
+	if result := Validate(cfg); result.Valid || len(result.Errors) < 4 {
+		t.Fatalf("invalid transport/TUN passed validation: %#v", result.Errors)
+	}
+}
+
 func TestCompile_ValidConfig(t *testing.T) {
 	c := NewDefaultCompiler("", "")
 	cfg := makeTestConfig()

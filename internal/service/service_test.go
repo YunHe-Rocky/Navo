@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -9,10 +10,85 @@ import (
 	"time"
 
 	"navo/internal/compiler"
+	"navo/internal/credential"
 	"navo/internal/domain/capture"
 	"navo/internal/host"
 	"navo/internal/supervisor"
 )
+
+func TestDispatchRejectsExternalConfigPath(t *testing.T) {
+	svc, err := New(Config{
+		SingBoxPath:     filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
+		ConfigDir:       t.TempDir(),
+		CredentialStore: credential.NewMemoryStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := svc.Dispatch(context.Background(), map[string]interface{}{
+		"request_id":  "untrusted-path",
+		"method":      "core.start",
+		"config_path": `C:\untrusted\config.json`,
+	})
+	if result["type"] != "ERROR" {
+		t.Fatalf("external config path was accepted: %#v", result)
+	}
+	payload, _ := result["payload"].(map[string]interface{})
+	if payload["code"] != "INVALID_ARGUMENT" {
+		t.Fatalf("unexpected rejection: %#v", payload)
+	}
+}
+
+func TestDispatchDoesNotExposeServiceShutdown(t *testing.T) {
+	svc, err := New(Config{
+		SingBoxPath:     filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
+		ConfigDir:       t.TempDir(),
+		CredentialStore: credential.NewMemoryStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := svc.Dispatch(context.Background(), map[string]interface{}{
+		"request_id": "shutdown", "method": "service.shutdown",
+	})
+	if result["type"] != "ERROR" {
+		t.Fatalf("service.shutdown unexpectedly exposed: %#v", result)
+	}
+}
+
+func TestCombinedServiceBecomesReadyWithoutExternalPipe(t *testing.T) {
+	binary := filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe")
+	if _, err := os.Stat(binary); err != nil {
+		t.Skip("sing-box test binary is not available")
+	}
+	svc, err := New(Config{
+		SingBoxPath:     binary,
+		ConfigPath:      filepath.Join("..", "..", "configs", "test_direct.json"),
+		ConfigDir:       t.TempDir(),
+		CredentialStore: credential.NewMemoryStore(),
+		DeferCoreStart:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	select {
+	case <-svc.Ready():
+		if svc.pipeListener != nil {
+			t.Fatal("combined service exposed an external pipe")
+		}
+	case err := <-done:
+		t.Fatalf("service exited before ready: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("service readiness timed out")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestEndpointStatusTransitionsFromUntestedToHealthy(t *testing.T) {
 	svc, err := New(Config{
@@ -60,9 +136,6 @@ func TestService_New(t *testing.T) {
 	}
 	if svc.ipDetector == nil {
 		t.Error("IP detector not initialized")
-	}
-	if svc.aiAssistant == nil {
-		t.Error("AI assistant not initialized")
 	}
 }
 
@@ -302,25 +375,6 @@ func TestService_Dispatch_IPCheck(t *testing.T) {
 	// May return ERROR if no network (expected in test environment)
 }
 
-func TestService_Dispatch_AIDiagnose(t *testing.T) {
-	cfg := Config{
-		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
-	}
-	svc, err := New(cfg)
-	if err != nil {
-		t.Skip("sing-box binary not found:", err)
-	}
-
-	msg := map[string]interface{}{
-		"method":     "ai.diagnose",
-		"request_id": "test-7",
-	}
-	resp := svc.dispatch(context.Background(), msg)
-	if resp["type"] != "RESPONSE" {
-		t.Errorf("type = %v, want RESPONSE", resp["type"])
-	}
-}
-
 func TestService_SubAdd_Validation(t *testing.T) {
 	cfg := Config{
 		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
@@ -419,63 +473,6 @@ func TestService_SubRemove_NotFound(t *testing.T) {
 	}
 }
 
-func TestService_AIRuleGen_MissingRequest(t *testing.T) {
-	cfg := Config{
-		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
-	}
-	svc, err := New(cfg)
-	if err != nil {
-		t.Skip("sing-box binary not found:", err)
-	}
-
-	resp := svc.handleAIRuleGenerate("test", map[string]interface{}{})
-	if resp["type"] != "ERROR" {
-		t.Error("expected error for missing request text")
-	}
-}
-
-func TestService_AIDiagnose(t *testing.T) {
-	cfg := Config{
-		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
-	}
-	svc, err := New(cfg)
-	if err != nil {
-		t.Skip("sing-box binary not found:", err)
-	}
-
-	// Record some traffic first
-	svc.collector.RecordTraffic("us-node", 1000, 2000)
-
-	resp := svc.handleAIDiagnose("test")
-	if resp["type"] != "RESPONSE" {
-		t.Errorf("type = %v, want RESPONSE", resp["type"])
-	}
-	payload := resp["payload"].(map[string]interface{})
-	if _, ok := payload["severity"]; !ok {
-		t.Error("expected severity in diagnosis")
-	}
-}
-
-func TestService_AIExplain(t *testing.T) {
-	cfg := Config{
-		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
-	}
-	svc, err := New(cfg)
-	if err != nil {
-		t.Skip("sing-box binary not found:", err)
-	}
-
-	resp := svc.handleAIExplain("test")
-	if resp["type"] != "RESPONSE" {
-		t.Errorf("type = %v, want RESPONSE", resp["type"])
-	}
-	payload := resp["payload"].(map[string]interface{})
-	text, _ := payload["text"].(string)
-	if text == "" {
-		t.Error("expected non-empty explanation text")
-	}
-}
-
 func TestService_Stop(t *testing.T) {
 	cfg := Config{
 		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
@@ -537,8 +534,9 @@ func TestHostFindBinary(t *testing.T) {
 
 func TestRunStandalone_Stop(t *testing.T) {
 	cfg := Config{
-		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
-		PipeName:    "Navo.Test.Service.v1",
+		SingBoxPath:        filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
+		PipeName:           "Navo.Test.Service.v1",
+		EnableExternalPipe: true,
 	}
 	svc, err := New(cfg)
 	if err != nil {

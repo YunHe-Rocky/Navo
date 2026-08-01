@@ -4,23 +4,28 @@ import { api } from "./api";
 import StateGlyph from "./components/StateGlyph.vue";
 import TrafficChart from "./components/TrafficChart.vue";
 import { TrafficRingBuffer, captureModeOf, deriveAppState, riskSummary } from "./state";
+import { generateSyntheticTraffic, parseTrafficPreferences } from "./traffic.js";
 import type {
   CaptureMode,
   CoreUpdateReport,
   Dashboard,
   HostStatus,
   IPDetection,
+	LatencyResult,
+	LogEntry,
+	LogMetadata,
   Page,
   ProxyBenchmark,
   RouteInfo,
   SourceType,
   SubscriptionInfo,
   TrafficPoint,
+  TrafficSeries,
   UpstreamRequest,
 } from "./types";
 
 const emptyDashboard: Dashboard = {
-  core: { core_id: "sing-box", state: "stopped", pid: 0, uptime: 0, config_hash: "", restart_count: 0, last_error: "" },
+  core: { core_id: "sing-box", state: "stopped", pid: 0, uptime_seconds: 0, config_hash: "", restart_count: 0, last_error: "" },
   cores: [],
   proxy: { enabled: false, server: "127.0.0.1", port: 12080 },
   runtime: { mode: "global", active_id: "", tun_enabled: false },
@@ -32,15 +37,22 @@ const emptyDashboard: Dashboard = {
     state: "stopped", phase: "stopped", desired_mode: "off", committed_mode: "off",
     transition_id: "", fault_id: "", last_error: "", can_retry_tun: false,
   },
-  metrics: { reachable: false, available: false, unavailable_reason: "", core_name: "", latency_ms: 0, upload_bytes: 0, download_bytes: 0, connections: 0 },
+  metrics: {
+    reachable: false, available: false, unavailable_reason: "", core_name: "", latency_ms: 0,
+    upload_bytes: 0, download_bytes: 0, connections: 0,
+    local_available: false, local_unavailable_reason: "",
+    local_upload_bps: 0, local_download_bps: 0, proxy_upload_bps: 0, proxy_download_bps: 0,
+    local_upload_total: 0, local_download_total: 0, proxy_upload_total: 0, proxy_download_total: 0,
+    traffic_source_state: "unavailable", traffic_sampled_at: "",
+  },
   ip: { proxy_ip: "", proxy_country: "", direct_ip: "" },
 };
 
 const navigation: Array<{ id: Page; label: string; icon: string }> = [
   { id: "overview", label: "运行概览", icon: "M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z" },
   { id: "connection", label: "连接管理", icon: "M7 12h10M12 7l5 5-5 5M5 5v14" },
-  { id: "sources", label: "线路来源", icon: "M6 7h12M6 12h12M6 17h12M3 7h.01M3 12h.01M3 17h.01" },
-  { id: "cores", label: "内核管理", icon: "M8 8h8v8H8zM4 10h4m8 0h4M4 14h4m8 0h4M10 4v4m4-4v4m-4 8v4m4-4v4" },
+  { id: "sources", label: "一键测速", icon: "M6 7h12M6 12h12M6 17h12M3 7h.01M3 12h.01M3 17h.01" },
+  { id: "cores", label: "升级内核", icon: "M8 8h8v8H8zM4 10h4m8 0h4M4 14h4m8 0h4M10 4v4m4-4v4m-4 8v4m4-4v4" },
   { id: "traffic", label: "流量监控", icon: "M4 18V9m5 9V5m5 13v-7m5 7V7" },
   { id: "ip", label: "网络检测", icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c2.5-2.4 4-5.4 4-9s-1.5-6.6-4-9c-2.5 2.4-4 5.4-4 9s1.5 6.6 4 9ZM3 12h18" },
   { id: "settings", label: "设置", icon: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7-3.5 2-1-2-3-2.2.5L15 6l.4-2.3h-3.5L11 6 8.2 8.5 6 8 4 11l2 1-2 1 2 3 2.2-.5L11 18l.9 2.3h3.5L15 18l1.8-2.5L19 16l2-3-2-1Z" },
@@ -53,10 +65,19 @@ const theme = ref<ThemeMode>("night");
 const dashboard = ref<Dashboard>(emptyDashboard);
 const routes = ref<RouteInfo[]>([]);
 const subscriptions = ref<SubscriptionInfo[]>([]);
-const logs = ref<string[]>([]);
+const logs = ref<LogEntry[]>([]);
+const logMetadata = ref<LogMetadata>({ levels: ["DEBUG", "INFO", "WARN", "ERROR"], services: [] });
+const selectedLogLevels = ref<string[]>(["INFO", "WARN", "ERROR"]);
+const selectedLogServices = ref<string[]>([]);
+const logFrom = ref("");
+const logTo = ref("");
+const logCursor = ref(0);
+const logHasMore = ref(false);
+const logFollow = ref(false);
 const ipDetection = ref<IPDetection>();
 const hostStatus = ref<HostStatus>();
 const benchmark = ref<ProxyBenchmark>();
+const layeredLatency = ref<LatencyResult>();
 const routeBenchmarks = ref<Record<string, ProxyBenchmark>>({});
 const benchmarkRunning = ref(false);
 const latencyBatchRunning = ref(false);
@@ -64,6 +85,11 @@ const routeTestRunning = ref<Record<string, boolean>>({});
 const coreUpdateReport = ref<CoreUpdateReport>();
 const coreUpdateChecking = ref(false);
 const trafficPoints = ref<TrafficPoint[]>([]);
+const simulatedTrafficPoints = ref<TrafficPoint[]>([]);
+const trafficSimulationSize = ref(8);
+const trafficSimulationDirection = ref<"download" | "upload" | "both">("download");
+const trafficTransferRunning = ref(false);
+const trafficPreferences = ref(loadTrafficPreferences());
 const loading = ref(false);
 const metricsAvailable = ref(false);
 const ipChecking = ref(false);
@@ -82,11 +108,14 @@ const showAdvancedCore = ref(false);
 const healthFailures = ref(0);
 const healthSuccesses = ref(0);
 const ring = new TrafficRingBuffer(30);
+
+const trafficDisplayPoints = computed(() => simulatedTrafficPoints.value.length ? simulatedTrafficPoints.value : trafficPoints.value);
 let metricsTimer: ReturnType<typeof setInterval> | undefined;
 let captureTimer: ReturnType<typeof setInterval> | undefined;
 let activityTimer: ReturnType<typeof setInterval> | undefined;
 let activityHideTimer: ReturnType<typeof setTimeout> | undefined;
-let previousSample: { at: number; upload: number; download: number; routeID: string } | undefined;
+let logTimer: ReturnType<typeof setInterval> | undefined;
+let previousRouteID = "";
 
 const upstream = ref<UpstreamRequest>({
   name: "", proto: "socks5", server: "", port: 1080,
@@ -109,6 +138,24 @@ const connected = computed(() => appState.value.connection === "connected");
 const pageTitle = computed(() => navigation.find((item) => item.id === page.value)?.label ?? "Navo");
 const filteredRoutes = computed(() => routes.value.filter((item) => item.source_type === sourceFilter.value));
 const latestTraffic = computed(() => trafficPoints.value.at(-1));
+
+const trafficSeriesOptions: Array<{ id: TrafficSeries; label: string }> = [
+  { id: "localUploadBps", label: "本机出口上传" },
+  { id: "localDownloadBps", label: "本机入口下载" },
+  { id: "proxyUploadBps", label: "代理业务上传" },
+  { id: "proxyDownloadBps", label: "代理业务下载" },
+];
+
+function loadTrafficPreferences() {
+	return parseTrafficPreferences(localStorage.getItem("navo.traffic.preferences.v1"));
+}
+
+function setTrafficSeries(series: TrafficSeries, visible: boolean) {
+  const values = new Set(trafficPreferences.value.visibleSeries);
+  visible ? values.add(series) : values.delete(series);
+  trafficPreferences.value = { ...trafficPreferences.value, visibleSeries: [...values] };
+  localStorage.setItem("navo.traffic.preferences.v1", JSON.stringify(trafficPreferences.value));
+}
 const proxyRisk = computed(() => riskSummary(ipDetection.value?.proxy));
 const coreUpdates = computed(() => Object.fromEntries(
   (coreUpdateReport.value?.items ?? []).map((item) => [item.id, item]),
@@ -185,6 +232,7 @@ function showCardFeedback(event: PointerEvent) {
 function beginActivity(label: string) {
   if (activityTimer) clearInterval(activityTimer);
   if (activityHideTimer) clearTimeout(activityHideTimer);
+	if (logTimer) clearInterval(logTimer);
   activityLabel.value = label;
   activityProgress.value = 8;
   activityVisible.value = true;
@@ -246,11 +294,63 @@ async function loadSubscriptions() {
 }
 
 async function loadLogs() {
-  logs.value = (await api.logs()).lines ?? [];
+	logMetadata.value = await api.logMetadata();
+	const result = await api.queryLogs({
+		levels: selectedLogLevels.value,
+		services: selectedLogServices.value,
+		from: logFrom.value ? new Date(logFrom.value).toISOString() : "",
+		to: logTo.value ? new Date(logTo.value).toISOString() : "",
+		after_id: 0,
+		limit: 200,
+	});
+	logs.value = result.entries ?? [];
+	logCursor.value = result.next_cursor || 0;
+	logHasMore.value = result.has_more;
 }
 
 async function refreshLogs() {
   await execute(loadLogs, "诊断日志已更新", "正在读取诊断日志");
+}
+
+async function loadMoreLogs() {
+	const result = await api.queryLogs({
+		levels: selectedLogLevels.value, services: selectedLogServices.value,
+		from: logFrom.value ? new Date(logFrom.value).toISOString() : "",
+		to: logTo.value ? new Date(logTo.value).toISOString() : "",
+		after_id: logCursor.value, limit: 200,
+	});
+	logs.value.push(...(result.entries ?? []));
+	logCursor.value = result.next_cursor || logCursor.value;
+	logHasMore.value = result.has_more;
+}
+
+function toggleLogSelection(target: "level" | "service", value: string, checked: boolean) {
+	const selected = target === "level" ? selectedLogLevels : selectedLogServices;
+	const values = new Set(selected.value);
+	checked ? values.add(value) : values.delete(value);
+	selected.value = [...values];
+}
+
+function clearVisibleLogs() {
+	logs.value = [];
+	logCursor.value = 0;
+	logHasMore.value = false;
+}
+
+async function clearPersistedLogs() {
+	if (!window.confirm("仅清空 Navo 结构化文本日志；不会删除崩溃转储和诊断导出。继续？")) return;
+	await execute(async () => {
+		await api.clearPersistedLogs();
+		clearVisibleLogs();
+	}, "持久化日志已清空", "正在安全轮转日志");
+}
+
+function setLogFollow(enabled: boolean) {
+	logFollow.value = enabled;
+	if (logTimer) clearInterval(logTimer);
+	logTimer = enabled ? setInterval(() => {
+		if (page.value === "settings" && !loading.value) void loadMoreLogs();
+	}, 3000) : undefined;
 }
 
 async function checkIP(showProgress = true) {
@@ -278,28 +378,13 @@ async function runBenchmark() {
   benchmarkRunning.value = true;
   failure.value = "";
   notice.value = "";
-  let startedForBenchmark = false;
   try {
-    if (dashboard.value.core.state !== "running") {
-      beginActivity("正在启动本地测速核心");
-      await api.setCoreRunning(true);
-      startedForBenchmark = true;
-      await loadDashboard();
-    }
     beginActivity("正在执行代理延迟与速度测试");
     benchmark.value = await api.runProxyBenchmark();
     notice.value = "代理链路测速完成";
   } catch (reason) {
     failure.value = `代理测速失败：${errorMessage(reason)}`;
   } finally {
-    if (startedForBenchmark) {
-      try {
-        await api.setCoreRunning(false);
-        await loadDashboard();
-      } catch (reason) {
-        failure.value ||= `测速核心停止失败：${errorMessage(reason)}`;
-      }
-    }
     benchmarkRunning.value = false;
     finishActivity();
   }
@@ -356,33 +441,26 @@ async function sampleMetrics() {
     dashboard.value.tun = snapshot.tun;
     updateHealthCounters(snapshot.metrics.reachable);
 
-    const now = Date.now();
-    const current = {
-      at: now,
-      upload: snapshot.metrics.upload_bytes,
-      download: snapshot.metrics.download_bytes,
-      routeID: snapshot.runtime.active_id,
-    };
-    if (previousSample && previousSample.routeID !== current.routeID) {
+    if (previousRouteID && previousRouteID !== snapshot.runtime.active_id) {
       ring.clear();
       trafficPoints.value = [];
-      previousSample = undefined;
     }
-    if (previousSample) {
-      const seconds = Math.max(0.1, (now - previousSample.at) / 1000);
-      const point: TrafficPoint = {
-        timestamp: now,
-        uploadBps: Math.max(0, current.upload - previousSample.upload) / seconds,
-        downloadBps: Math.max(0, current.download - previousSample.download) / seconds,
-        uploadBytes: current.upload,
-        downloadBytes: current.download,
-        routeID: current.routeID,
-      };
-      ring.push(point);
-      metricsAvailable.value = snapshot.metrics.available;
-      if (document.visibilityState === "visible") trafficPoints.value = ring.snapshot();
-    }
-    previousSample = current;
+    previousRouteID = snapshot.runtime.active_id;
+    const point: TrafficPoint = {
+      timestamp: Date.parse(snapshot.metrics.traffic_sampled_at) || Date.now(),
+      localUploadBps: snapshot.metrics.local_upload_bps || 0,
+      localDownloadBps: snapshot.metrics.local_download_bps || 0,
+      proxyUploadBps: snapshot.metrics.proxy_upload_bps || 0,
+      proxyDownloadBps: snapshot.metrics.proxy_download_bps || 0,
+      localUploadTotal: snapshot.metrics.local_upload_total || 0,
+      localDownloadTotal: snapshot.metrics.local_download_total || 0,
+      proxyUploadTotal: snapshot.metrics.proxy_upload_total || 0,
+      proxyDownloadTotal: snapshot.metrics.proxy_download_total || 0,
+      routeID: snapshot.runtime.active_id,
+    };
+    ring.push(point);
+    metricsAvailable.value = snapshot.metrics.available || snapshot.metrics.local_available;
+    if (document.visibilityState === "visible") trafficPoints.value = ring.snapshot();
   } catch {
     updateHealthCounters(false);
   }
@@ -422,7 +500,7 @@ async function selectRoute(item: RouteInfo) {
     await api.selectRoute(item.id);
     ring.clear();
     trafficPoints.value = [];
-    previousSample = undefined;
+		previousRouteID = "";
     await Promise.all([loadRoutes(), loadDashboard()]);
   }, `当前线路：${item.name}`);
 }
@@ -475,19 +553,13 @@ async function benchmarkRoute(item: RouteInfo) {
   failure.value = "";
   notice.value = "";
   const wasRunning = dashboard.value.core.state === "running";
-  let startedForBenchmark = false;
   try {
     if (targetChanged) {
       beginActivity(`正在切换到 ${item.name}`);
       await api.selectRoute(item.id);
       await Promise.all([loadRoutes(), loadDashboard()]);
     }
-    if (!wasRunning) {
-      beginActivity("正在启动本地测速核心");
-      await api.setCoreRunning(true);
-      startedForBenchmark = true;
-      await loadDashboard();
-    }
+    if (!wasRunning) throw new Error("代理内核尚未运行，请先连接节点");
     beginActivity(`正在测试 ${item.name} 的延迟与速度`);
     const result = await api.runProxyBenchmark();
     benchmark.value = result;
@@ -498,7 +570,6 @@ async function benchmarkRoute(item: RouteInfo) {
     failure.value = `${item.name} 测速失败：${errorMessage(reason)}`;
   } finally {
     try {
-      if (startedForBenchmark) await api.setCoreRunning(false);
       if (targetChanged && previous) await api.selectRoute(previous.id);
       await Promise.all([loadRoutes(), loadDashboard()]);
     } catch (reason) {
@@ -520,6 +591,54 @@ async function testActiveRoute() {
     latency.value[route.id] = result.reachable ? `${Math.round(result.latency_ms)} ms` : result.error || "不可达";
     if (!result.reachable) throw new Error(result.error || "当前线路不可达");
   }, "延迟测试完成", `正在测试 ${route.name} 的连接延迟`);
+}
+
+async function runLayeredLatency() {
+	const route = activeRoute.value;
+	if (!route || benchmarkRunning.value) {
+		if (!route) failure.value = "没有可测试的当前节点";
+		return;
+	}
+	benchmarkRunning.value = true;
+	failure.value = "";
+	beginActivity(`正在分层验证 ${route.name}`);
+	try {
+		layeredLatency.value = await api.runLatencyTest(route.id);
+		if (layeredLatency.value.state === "failed") {
+			throw new Error(layeredLatency.value.error_message || layeredLatency.value.error_code || "分层测速失败");
+		}
+		notice.value = layeredLatency.value.state === "completed" ? "当前节点分层测速完成" : "链路可用，部分指标不可观测";
+	} catch (reason) {
+		failure.value = `分层测速失败：${errorMessage(reason)}`;
+	} finally {
+		benchmarkRunning.value = false;
+		finishActivity();
+	}
+}
+
+function previewSyntheticTraffic() {
+	const preview = generateSyntheticTraffic(trafficSimulationSize.value, trafficSimulationDirection.value);
+	trafficSimulationSize.value = preview.size;
+	simulatedTrafficPoints.value = preview.points;
+	notice.value = "已生成纯数据预览；未发起网络请求，也未写入真实流量历史";
+}
+
+async function runControlledTraffic() {
+	if (trafficTransferRunning.value) return;
+	trafficTransferRunning.value = true;
+	simulatedTrafficPoints.value = [];
+	failure.value = "";
+	beginActivity("正在执行受控真实传输");
+	try {
+		const result = await api.runTrafficTransfer(trafficSimulationSize.value, trafficSimulationDirection.value);
+		benchmark.value = result;
+		notice.value = `真实传输完成：下载 ${formatBytes(result.download_bytes)}，上传 ${formatBytes(result.upload_bytes)}`;
+	} catch (reason) {
+		failure.value = `真实传输失败：${errorMessage(reason)}`;
+	} finally {
+		trafficTransferRunning.value = false;
+		finishActivity();
+	}
 }
 
 async function createUpstream() {
@@ -688,7 +807,7 @@ onBeforeUnmount(() => {
       </div>
     </aside>
 
-    <main>
+    <main tabindex="0" aria-label="Navo 主内容，可使用方向键和滚轮滚动">
       <header>
         <div><span class="eyebrow">NAVO / {{ pageTitle }}</span><h1>{{ pageTitle }}</h1></div>
         <div class="theme-switch" role="group" aria-label="界面形态">
@@ -780,8 +899,8 @@ onBeforeUnmount(() => {
         <div class="monitor-grid">
           <article class="speed-card">
             <span class="card-label">当前节点实时速度</span>
-            <div class="speed-value download"><small>下载</small><strong>{{ formatRate(latestTraffic?.downloadBps) }}</strong></div>
-            <div class="speed-value upload"><small>上传</small><strong>{{ formatRate(latestTraffic?.uploadBps) }}</strong></div>
+			<div class="speed-value proxy-download"><small>代理业务下载</small><strong>{{ formatRate(latestTraffic?.proxyDownloadBps) }}</strong></div>
+			<div class="speed-value proxy-upload"><small>代理业务上传</small><strong>{{ formatRate(latestTraffic?.proxyUploadBps) }}</strong></div>
             <dl>
               <div><dt>累计下载</dt><dd>{{ formatBytes(dashboard.metrics.download_bytes) }}</dd></div>
               <div><dt>累计上传</dt><dd>{{ formatBytes(dashboard.metrics.upload_bytes) }}</dd></div>
@@ -798,14 +917,14 @@ onBeforeUnmount(() => {
           </article>
           <article class="chart-card">
             <div class="section-heading"><div><span class="card-label">最近 60 秒</span><h3>实时流量</h3></div><button class="text-button" @click="changePage('traffic')">查看详情</button></div>
-            <TrafficChart :points="trafficPoints" :stopped="dashboard.core.state !== 'running'" compact />
+            <TrafficChart :points="trafficPoints" :visible-series="trafficPreferences.visibleSeries" :stopped="dashboard.core.state !== 'running'" compact />
           </article>
         </div>
 
         <article class="runtime-strip">
           <span><b>{{ dashboard.core.core_id }}</b><small>当前内核</small></span>
           <span><b>{{ captureLabel(captureMode) }}</b><small>接管模式</small></span>
-          <span><b>{{ formatUptime(dashboard.core.uptime) }}</b><small>运行时长</small></span>
+          <span><b>{{ formatUptime(dashboard.core.uptime_seconds) }}</b><small>运行时长</small></span>
           <span><b class="mono">{{ dashboard.core.config_hash || "未激活" }}</b><small>配置 Revision</small></span>
           <span><b>{{ dashboard.core.pid || "—" }}</b><small>PID</small></span>
         </article>
@@ -862,6 +981,27 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else-if="page === 'sources'" class="page-content">
+		<article class="latency-card" :aria-busy="benchmarkRunning">
+		  <div class="section-heading">
+			<div><span class="eyebrow">LAYERED LATENCY</span><h2>当前节点一键测速</h2><p>不切换节点、不修改系统代理或 TUN；远端 DNS 位于核心内部，无法独立观测时明确显示。</p></div>
+			<div class="source-toolbar-actions">
+			  <button v-if="benchmarkRunning" class="danger" @click="cancelBenchmark">停止测速</button>
+			  <button v-else class="primary" :disabled="!activeRoute" @click="runLayeredLatency">{{ layeredLatency ? "重新测速" : "开始测速" }}</button>
+			</div>
+		  </div>
+		  <div class="latency-metrics" aria-live="polite">
+			<span><small>当前节点</small><b>{{ activeRoute?.name || "未选择" }}</b></span>
+			<span><small>TCP 连接</small><b>{{ layeredLatency ? `${layeredLatency.tcp_connect_ms} ms` : "—" }}</b></span>
+			<span><small>代理握手</small><b>{{ layeredLatency ? `${layeredLatency.proxy_handshake_ms} ms` : "—" }}</b></span>
+			<span><small>远端 DNS</small><b>{{ layeredLatency?.dns_observable ? `${layeredLatency.dns_ms} ms` : "核心内不可观测" }}</b></span>
+			<span><small>TLS</small><b>{{ layeredLatency ? `${layeredLatency.tls_ms} ms` : "—" }}</b></span>
+			<span><small>首包 TTFB</small><b>{{ layeredLatency ? `${layeredLatency.ttfb_ms} ms` : "—" }}</b></span>
+			<span><small>完整请求</small><b>{{ layeredLatency ? `${layeredLatency.total_ms} ms` : "—" }}</b></span>
+			<span><small>实际出口</small><b class="mono">{{ layeredLatency?.exit_ip || "—" }}</b></span>
+		  </div>
+		  <p v-if="layeredLatency?.error_message" class="inline-error">{{ layeredLatency.error_code }} · {{ layeredLatency.error_message }}</p>
+		  <small v-if="layeredLatency" class="check-stamp">状态：{{ layeredLatency.state }} · {{ formatTime(layeredLatency.checked_at) }}</small>
+		</article>
         <div class="page-toolbar">
           <div class="source-tabs" role="tablist" aria-label="线路来源">
             <button :class="{ active: sourceFilter === 'airport_subscription' }" @click="sourceFilter = 'airport_subscription'">机场订阅</button>
@@ -933,7 +1073,7 @@ onBeforeUnmount(() => {
 
       <section v-else-if="page === 'cores'" class="page-content">
         <div class="section-heading">
-          <div><span class="eyebrow">CORE RUNTIME</span><h2>内核能力与状态</h2><p>版本检查只读取官方 GitHub Release；升级由你明确触发，不会静默替换正在运行的内核。</p></div>
+          <div><span class="eyebrow">CORE UPGRADE</span><h2>升级内核</h2><p>分别检查三个内核版本与当前文件完整性；没有受信 SHA-256 的远程资产不会安装。</p></div>
           <button class="primary" :disabled="coreUpdateChecking" @click="checkCoreUpdates">
             {{ coreUpdateChecking ? "正在检查" : "检查内核升级" }}
           </button>
@@ -961,6 +1101,7 @@ onBeforeUnmount(() => {
               <div><dt>实时指标</dt><dd>{{ item.id === "xray" ? "Stats API 未启用" : "真实流量与连接数" }}</dd></div>
             </dl>
             <p v-if="coreUpdates[item.id]?.error" class="inline-error">{{ coreUpdates[item.id].error }}</p>
+			<p v-if="coreUpdates[item.id]?.update_available && !coreUpdates[item.id]?.install_supported" class="capability-note">{{ coreUpdates[item.id].install_blocked_reason }}</p>
             <div class="core-actions">
               <button class="secondary" :disabled="!item.installed || item.active || loading" @click="setCore(item.id)">{{ item.active ? "当前内核" : "设为当前" }}</button>
               <button class="text-button" @click="openCoreRelease(item.id)">{{ coreUpdates[item.id]?.update_available ? "打开官方升级页" : "官方发布页" }}</button>
@@ -973,18 +1114,45 @@ onBeforeUnmount(() => {
 
       <section v-else-if="page === 'traffic'" class="page-content">
         <div class="metric-hero">
-          <div><span>实时下载</span><strong class="download">{{ formatRate(latestTraffic?.downloadBps) }}</strong></div>
-          <div><span>实时上传</span><strong class="upload">{{ formatRate(latestTraffic?.uploadBps) }}</strong></div>
+          <div><span>本机入口下载</span><strong class="local-download">{{ formatRate(latestTraffic?.localDownloadBps) }}</strong></div>
+          <div><span>本机出口上传</span><strong class="local-upload">{{ formatRate(latestTraffic?.localUploadBps) }}</strong></div>
+          <div><span>代理业务下载</span><strong class="proxy-download">{{ formatRate(latestTraffic?.proxyDownloadBps) }}</strong></div>
+          <div><span>代理业务上传</span><strong class="proxy-upload">{{ formatRate(latestTraffic?.proxyUploadBps) }}</strong></div>
           <div><span>活动连接</span><strong>{{ metricsAvailable ? dashboard.metrics.connections : "—" }}</strong></div>
           <div><span>采样窗口</span><strong>{{ trafficPoints.length }} / 30</strong></div>
         </div>
         <article class="chart-card full">
-          <div class="section-heading"><div><span class="card-label">2 秒采样 · 内存 Ring Buffer</span><h2>最近 60 秒流量</h2></div></div>
-          <TrafficChart :points="trafficPoints" :stopped="dashboard.core.state !== 'running'" />
+          <div class="section-heading">
+            <div><span class="card-label">2 秒采样 · 四种独立口径 · 不求和</span><h2>最近 60 秒流量</h2></div>
+            <div class="traffic-series-picker" aria-label="选择流量曲线">
+              <label v-for="series in trafficSeriesOptions" :key="series.id" :class="`series-${series.id}`">
+                <input
+                  type="checkbox"
+                  :checked="trafficPreferences.visibleSeries.includes(series.id)"
+                  @change="setTrafficSeries(series.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span aria-hidden="true"></span>{{ series.label }}
+              </label>
+            </div>
+          </div>
+		  <div v-if="simulatedTrafficPoints.length" class="simulation-banner"><strong>纯数据模拟预览</strong><span>不计入真实统计，不代表网络性能。</span><button class="text-button" @click="simulatedTrafficPoints = []">返回真实数据</button></div>
+          <TrafficChart :points="trafficDisplayPoints" :visible-series="trafficPreferences.visibleSeries" :stopped="dashboard.core.state !== 'running'" />
         </article>
-        <div v-if="!metricsAvailable" class="capability-note">
-          <strong>当前内核未提供可消费的实时计数器</strong>
-          <p>{{ dashboard.metrics.unavailable_reason || "当前内核没有启用 Metrics Adapter。" }}。Navo 不会使用测试数据冒充流量。</p>
+		<article class="traffic-simulation-card">
+		  <div><span class="card-label">CONTROLLED TRAFFIC</span><h3>虚拟文件流量模拟</h3><p>纯数据模式只预览曲线；真实传输模式经当前 Navo 代理发送受控数据，单方向限制 1–32 MiB。</p></div>
+		  <div class="simulation-controls">
+			<label>文件大小（MiB）<input v-model.number="trafficSimulationSize" type="number" min="1" max="32" /></label>
+			<label>方向<select v-model="trafficSimulationDirection"><option value="download">下载</option><option value="upload">上传</option><option value="both">双向</option></select></label>
+			<button class="secondary" @click="previewSyntheticTraffic">纯数据预览</button>
+			<button class="primary" :disabled="trafficTransferRunning || dashboard.core.state !== 'running'" @click="runControlledTraffic">{{ trafficTransferRunning ? "真实传输中" : "执行真实传输" }}</button>
+			<button v-if="trafficTransferRunning" class="danger" @click="cancelBenchmark">取消</button>
+		  </div>
+		</article>
+        <div v-if="dashboard.metrics.traffic_source_state !== 'ready'" class="capability-note">
+          <strong>部分流量口径暂不可用</strong>
+          <p v-if="!dashboard.metrics.local_available">本机接口：{{ dashboard.metrics.local_unavailable_reason || "无法读取物理网卡计数器" }}</p>
+          <p v-if="!dashboard.metrics.available">代理业务：{{ dashboard.metrics.unavailable_reason || "当前内核没有启用 Metrics Adapter" }}</p>
+          <p>Navo 不会以本机总流量推算代理流量，也不会使用模拟数据冒充真实统计。</p>
         </div>
       </section>
 
@@ -1079,10 +1247,27 @@ onBeforeUnmount(() => {
 
         <article class="settings-log-card">
           <div class="section-heading">
-            <div><span class="eyebrow">DIAGNOSTIC LOG</span><h2>诊断日志</h2><p>日志仅在进入设置或点击读取时加载，不占用独立导航入口。</p></div>
-            <button class="secondary" :disabled="loading" @click="refreshLogs">读取日志</button>
+            <div><span class="eyebrow">STRUCTURED LOG</span><h2>结构化诊断日志</h2><p>后端按级别、服务、时间与游标查询；敏感字段写入前脱敏。</p></div>
+			<div class="log-actions">
+				<button class="secondary" :disabled="loading" @click="refreshLogs">查询</button>
+				<button class="secondary" @click="clearVisibleLogs">清空当前显示</button>
+				<button class="danger" @click="clearPersistedLogs">清空持久化日志</button>
+			</div>
           </div>
-          <div class="log-view"><div v-if="!logs.length" class="empty-state"><strong>暂无日志</strong><p>当前没有可显示的运行记录。</p></div><div v-for="(line, index) in logs" :key="index"><span>{{ String(index + 1).padStart(3, "0") }}</span><code>{{ line }}</code></div></div>
+			<div class="log-filters">
+				<fieldset><legend>级别</legend><label v-for="level in logMetadata.levels" :key="level"><input type="checkbox" :checked="selectedLogLevels.includes(level)" @change="toggleLogSelection('level', level, ($event.target as HTMLInputElement).checked)" />{{ level }}</label></fieldset>
+				<fieldset><legend>服务</legend><label v-for="service in logMetadata.services" :key="service"><input type="checkbox" :checked="selectedLogServices.includes(service)" @change="toggleLogSelection('service', service, ($event.target as HTMLInputElement).checked)" />{{ service }}</label><small v-if="!logMetadata.services.length">尚无结构化事件</small></fieldset>
+				<label>起始时间<input v-model="logFrom" type="datetime-local" /></label>
+				<label>截止时间<input v-model="logTo" type="datetime-local" /></label>
+				<label class="log-follow"><input type="checkbox" :checked="logFollow" @change="setLogFollow(($event.target as HTMLInputElement).checked)" />实时跟随</label>
+			</div>
+			<div class="log-view structured">
+				<div v-if="!logs.length" class="empty-state"><strong>暂无日志</strong><p>当前筛选条件没有结构化事件。</p></div>
+				<div v-for="entry in logs" :key="entry.id" :class="`level-${entry.level.toLowerCase()}`">
+					<span>{{ new Date(entry.timestamp).toLocaleString() }}</span><b>{{ entry.level }}</b><i>{{ entry.service }}<template v-if="entry.component"> / {{ entry.component }}</template></i><code>{{ entry.message }}</code>
+				</div>
+			</div>
+			<button v-if="logHasMore" class="secondary log-more" @click="loadMoreLogs">加载下一页</button>
         </article>
       </section>
     </main>

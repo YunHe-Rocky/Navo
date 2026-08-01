@@ -601,3 +601,95 @@
 - Final elevated three-core matrix could not be rerun because the platform
   rejected further administrator execution after its usage limit was reached.
   Phase 27 remains pending only at that live acceptance gate.
+# 2026-08-01 Four-Guide Remediation
+
+- Read the planning-with-files instructions and restored the existing repository planning context.
+- Confirmed only untracked inputs are `.claude/` and the four newly supplied Guide documents; no tracked diff is present.
+- Indexed all four Guide headings and established the new Phase 28-33 workstream.
+- Confirmed AI and MySQL are still fully present and wired into production startup/dispatch; confirmed several Feature Optimization surfaces already exist but require requirement-level gap analysis.
+- Read the cleanup/privacy and Full Remediation P0/P1 requirements with UTF-8 decoding and captured their transaction/security/release invariants.
+- Baseline Go gate passed: `scripts/test.ps1` completed all packages and `go vet`; host Go reports `go1.26.4 windows/386`.
+- Frontend `npm ci` and `npm run typecheck` passed. Baseline lacks the required `npm test` script, so the combined command stopped before build; this is recorded as an original release-gate gap.
+- Frontend baseline build passed. Created `docs/CODE_REACHABILITY_AND_REMOVAL_PLAN.md` covering production/dynamic entries, Wails, IPC, tray, goroutines, repositories, build tags, removal classifications, and evidence gates.
+- Read the complete Feature Optimization requirements and recorded the delta between current inspection/benchmark/two-series UI and the required transactional updates, layered latency, four-source traffic, structured logs, risk aggregation, interaction, accessibility, and icon acceptance.
+- Read Self-Healing sections covering architecture, event/error/action models, core/TUN/route/DNS/system-proxy/outbound/subscription/monitor/log/init policies, safety gates, budgets, deduplication, correlation, locks, and circuit breaking.
+- Completed Phase 28 and created `docs/NAVO_REMEDIATION_REPORT.md` with conflict rules, phase evidence, baseline defect, and acceptance status.
+- Removed the complete AI production vertical slice: implementation package, settings persistence/tests, Service state/handlers/dispatch, Agent forwarding, IPC constants, and smoke probe. Local non-AI diagnostics remain.
+- AI removal passes the complete repository Go test/vet gate. A narrowed production residual scan reports no AI package/config/IPC symbols.
+- Replaced MySQL repositories with a versioned local selection/revision store using flushed same-directory atomic replacement; deleted MySQL config, driver, connector, migrations and repositories; `go mod tidy` and full Go test/vet pass.
+- Sanitized the project `.env` and `.env.example` to remove all AI/MySQL keys; neither file now contains an environment assignment. Updated smoke/package/deployment text to the local-state model.
+## 2026-08-01 Phase 29 completion
+
+- Removed the complete AI runtime/settings/IPC slice and MySQL bootstrap/repository/driver slice.
+- Added versioned atomic local revision and selection repositories and wired them into the launcher.
+- Added an early Current-User DPAPI device-state gate, precise legacy cleanup, foreign-context privacy reset, tamper blocking, and cleanup-failure blocking.
+- Centralized new persistence writes on `internal/fsatomic`; subscription writes now use the same writer.
+- `scripts/test.ps1` passes after the completed Phase 29 implementation.
+- Advanced to Phase 30 P0/P1 runtime and security remediation.
+
+## 2026-08-01 Phase 30 security boundary batch 1
+
+- Disabled the Service Named Pipe in the combined desktop process; standalone `navo-svc` must explicitly enable it.
+- Replaced Pipe polling with an in-process Service readiness signal and fail-closed startup propagation.
+- Preserved the launcher-verified core path through `Service.New`; removed post-verification binary discovery override.
+- Removed caller-controlled `config_path` from core start/restart handlers.
+- Made Job Object initialization failure fatal.
+- Replaced the PID lock file with `Local\Navo.<CurrentUserSID>` Named Mutex ownership.
+- Removed unconditional image-name `taskkill` startup cleanup.
+- Full Go test/vet gate passed after this batch.
+
+## 2026-08-01 Phase 30 lifecycle/API batch
+
+- Removed raw `core.start`, `core.stop`, and `core.restart` from Agent and Service IPC dispatch.
+- Removed the Wails/TypeScript `SetCoreRunning` bridge; disconnected benchmarking now fails explicitly until the isolated Phase 31 benchmark runner is implemented.
+- Changed `connection.restart` to restart the committed Capture mode through the existing transition transaction.
+- Added deterministic regressions for raw UI lifecycle rejection and untrusted `config_path` rejection.
+- Go tests/vet, Vue typecheck, and Vue production build pass; Vite transformed 18 modules.
+
+## 2026-08-01 Phase 30 lifecycle/network batch
+
+- Removed Host autonomous crash restart; Host now only reports exit and Supervisor exclusively owns reconciliation, budget, backoff, and restart.
+- Bound Supervisor monitoring to its lifecycle context rather than the initiating request context.
+- Added crash-observation and request-context regression tests; full Go test/vet passed.
+- Fixed TUN endpoint route generation to select one physical route, cast scalar interface/next-hop values, exclude the Navo adapter, and reject same-metric conflicts.
+- Added PowerShell UTF-8 output prelude and GBK error-output fallback with tests; full Go test/vet passed.
+
+## 2026-08-01 Phase 30 proxy/subscription security batch
+
+- Rebuilt system-proxy persistence as a complete fail-closed WinINet snapshot with dynamic registry reads, exact missing-value restoration, Current User atomic files, pending/committed ownership, and `InternetSetOptionW` refresh.
+- Enforced HTTPS at subscription-add time.
+- Added DNS-rebinding-resistant subscription dialing: resolve all addresses, reject private/link-local/multicast/CGNAT/metadata/documentation/reserved ranges, and dial a pinned validated IP while preserving TLS hostname verification.
+- Replaced the line-based Clash parser with `yaml.v3`, including nested WS/gRPC/Reality options.
+- Replaced server/port/type deduplication with a canonical connectivity fingerprint containing a credential digest and transport/TLS identity.
+- Added parser-output validation and in-memory rollback on failed subscription persistence.
+- Full Go test/vet passed after fixing the stable-ID fingerprint lookup regression.
+
+## 2026-08-01 Phase 30 recovery hardening
+
+- Updated Service and Agent capture rollback semantics so incomplete rollback remains faulted in the previous committed mode instead of being presented as `off`.
+- Started consolidating recovery around `internal/network.Reconciler`; next gate is fail-closed journal handling plus focused and full Go tests.
+- Recovery implementation and tests are patched and formatted. The first focused test run was blocked by the managed sandbox denying the user Go module/build caches, so the same test gate must be rerun with the repository-local cache configuration already used by this project.
+- `internal/network` and `internal/service` focused suites pass. Agent failures exposed two regressions now corrected: successful rollback no longer performs a redundant `tun.status` call, and dashboard no longer exposes an unowned user WinINet proxy endpoint. Added explicit rollback-failure evidence retention coverage.
+- Recovery/rollback gate complete: `go test ./internal/network ./internal/agent ./internal/service` and `go test ./...` both pass. The duplicate no-op `internal/recovery` package is removed; the active reconciler persists under `ConfigDir` and cannot promote partial recovery to `READY`.
+- IPC/storage hardening implemented: full frame writes, symmetric non-zero/10MB bounds, Windows write-through atomic replacement, old-file preservation injection test, and cancel/reap tracking for pending named-pipe operations. Added Windows timeout recovery and close-cancellation integration coverage.
+- Removed ordinary UI/IPC exposure of `service.shutdown`; per-connection dispatch remains serialized, each request now has a bounded context, and response writes receive a fresh deadline with checked errors. Focused Agent/Service/pipe/fsatomic tests pass.
+- Migrating remaining critical persistence paths to the unified `fsatomic` implementation: credentials, capture/network journals, generic store, and upstream proxy repository are converted; their focused suites pass except a mechanical unused import pending cleanup in `storage`.
+- Critical persistence migration complete: runtime state, compiler revisions, core-generated configs, credentials, capture/network/recovery journals, repositories, proxy ownership, subscription state, and initialization state now share `fsatomic`. Remaining direct writes are only test/temp artifacts and a timestamped diagnostics export. Removed the unreachable fake `SingBoxHost.Reconcile`; network recovery has one production owner.
+- Windows atomic persistence now applies a protected DACL for Current User, SYSTEM, and Administrators to existing state, parent directories, and replacement candidates; dedicated ACL and replacement-failure tests pass.
+- Phase 31 four-series backend is implemented: Windows physical-interface totals and core proxy totals remain separate, backend sampling emits four BPS/totals with source state, and reset/sleep/availability transitions are covered by unit tests. Service/monitor/Wails focused suites pass.
+- Four-series Vue integration complete: backend samples are consumed directly (no frontend business-counter recomputation), defaults are local/proxy download, user series selection persists safely, colors and line styles are stable across themes, unavailable sources are explicit, and the production Vue typecheck/build passes.
+- Structured log foundation and UI are integrated: explicit producer/service fields, stable levels, time/service/level filters, cursor pagination, bounded JSONL persistence, safe clear, redaction, local-time rendering, and optional follow mode without forced scrolling. Store tests, backend focused tests, and Vue production build pass.
+- Structured-log concurrency/error-emission follow-up passes focused Go tests and the Vue production build. The initial npm retry failure was only a wrong working directory and passed from `navo_app`.
+- Added the Phase 32 self-heal foundation: stable `NAVO_*` models, exact-code policy registry, bounded/deduplicating queue, per-resource mutexes, jittered backoff, attempt windows, open/half-open/closed circuits, atomic ACL-protected state, corrupt-state quarantine, observe-only mode, verification, rollback, and shutdown cancellation.
+- Registered explicit ownership/security observer policies and connected Supervisor crash events after Supervisor readiness. SelfHeal stops accepting work before capture/network shutdown; it never restarts a core in parallel with Supervisor.
+- SelfHeal focused tests cover unknown-code rejection, observe-only non-mutation, verification-failure rollback, circuit opening, hashed state, duplicate storms, and cancellation. Focused SelfHeal/Service/Supervisor/Agent/Wails/launcher tests pass.
+- Added current-route layered latency without route/Capture mutation: real endpoint TCP, proxy CONNECT/handshake timing, TLS, TTFB, total request and proxy exit-IP confirmation. Remote DNS inside the core is explicitly marked unobservable.
+- Added two traffic-simulation modes: deterministic labeled chart-only preview isolated from the real 30-sample ring, and user-triggered/cancellable bounded 1-32 MiB real transfer through the active local proxy. Tooltip now defaults to the latest sample and supports pointer, touch and keyboard navigation.
+- Renamed the user-facing pages to `一键测速` and `升级内核`; core status now has explicit state/cache and blocks install when no trusted update-asset SHA-256 exists instead of performing an unverified download.
+- Fixed the Dashboard uptime contract (`uptime_seconds`) and replaced the plaintext Geo lookup with an HTTPS nested-response parser. Focused IP/Wails tests pass.
+- Added real frontend tests using Node's built-in test runner, and changed packaging to run Go tests/vet plus frontend test/typecheck/build before touching release output. Added a Windows GitHub Actions CI gate.
+- Removed `repair.exe` fake recovery that overwrote `DIRTY_SHUTDOWN` with NORMAL or deleted the journal without cleanup. Offline repair now reports the issue and delegates mutation to the sole runtime Reconciler. Launcher bootstrap config and diagnostics export now use `fsatomic`.
+- Removed stale raw lifecycle IPC constants and updated smoke shutdown to exercise the real native-tray Exit callback instead of the forbidden ordinary `service.shutdown` surface. Removed unavailable repair subcommands and misleading automatic-repair help text.
+- Final isolated package gate passed: full Go test/vet, frontend tests/typecheck/build, Wails Windows/amd64 build, package assembly and independent SHA-256 verification. Packaged `repair.exe check` returned zero issues.
+- Browser-visible feature smoke passed for layered latency, four-source traffic and tooltip interaction, core-update trust blocking, and SelfHeal structured logs with zero page/console errors.
+- Replaced public Wails DTO `time.Time` fields with RFC3339Nano strings; regenerated bindings no longer degrade timestamps to `any` or emit `Not found: time.Time`.

@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
+
+	"navo/internal/domain/capture"
 )
 
 func (a *Agent) handleTraySnapshot(requestID string) map[string]interface{} {
@@ -61,6 +64,20 @@ func (a *Agent) handleConnectionDisable(requestID string) map[string]interface{}
 		return resp
 	}
 	return agentResponse(requestID, map[string]interface{}{"status": "disconnected"})
+}
+
+func (a *Agent) handleConnectionRestart(ctx context.Context, requestID string) map[string]interface{} {
+	target := a.captureSnapshot().CommittedMode
+	if target == capture.ModeOff {
+		return agentResponse(requestID, map[string]interface{}{"status": "disconnected"})
+	}
+	if err := a.transitionCaptureMode(ctx, capture.ModeOff); err != nil {
+		return agentError(requestID, "CAPTURE_RESTART_FAILED", err)
+	}
+	if err := a.transitionCaptureMode(ctx, target); err != nil {
+		return agentError(requestID, "CAPTURE_RESTART_FAILED", err)
+	}
+	return agentResponse(requestID, map[string]interface{}{"status": "connected"})
 }
 
 func (a *Agent) handleNetworkRecover(requestID string) map[string]interface{} {

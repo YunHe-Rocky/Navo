@@ -22,10 +22,9 @@ func TestAdd_EmptyName(t *testing.T) {
 
 func TestAdd_InvalidURL(t *testing.T) {
 	manager := NewManager()
-	// HTTP is now allowed - URL validation is deferred to fetch time.
 	_, err := manager.Add("Provider", "http://example.com/sub")
-	if err != nil {
-		t.Fatalf("HTTP URL should be allowed during add: %v", err)
+	if err == nil {
+		t.Fatal("HTTP subscription URL was accepted during add")
 	}
 }
 

@@ -38,7 +38,11 @@ func (a *Agent) handleDashboardSnapshot(requestID string) map[string]interface{}
 	coreList := payloads["core.list"]
 	proxyStatus := a.ProxyStatus()
 	a.refreshCaptureFault(payloads["tun.status"])
-	proxyServer, proxyPort := dashboardProxyEndpoint(proxyStatus.ProxyServer, a.cfg.ProxyPort)
+	proxyAddress := ""
+	if proxyStatus.Enabled {
+		proxyAddress = proxyStatus.ProxyServer
+	}
+	proxyServer, proxyPort := dashboardProxyEndpoint(proxyAddress, a.cfg.ProxyPort)
 
 	probePending := a.scheduleIPProbe()
 	return agentResponse(requestID, map[string]interface{}{

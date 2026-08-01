@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"navo/internal/fsatomic"
 )
 
 // Store is a simple JSON-file-backed key-value store.
@@ -97,37 +98,21 @@ func (s *Store) Flush() error {
 		return nil
 	}
 
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	f, err := os.CreateTemp(dir, "store_*.json")
-	if err != nil {
-		return err
-	}
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-
 	// Wrap data with metadata
 	record := struct {
-		UpdatedAt time.Time                `json:"updated_at"`
+		UpdatedAt time.Time                  `json:"updated_at"`
 		Data      map[string]json.RawMessage `json:"data"`
 	}{
 		UpdatedAt: time.Now(),
 		Data:      s.data,
 	}
 
-	if err := encoder.Encode(record); err != nil {
-		f.Close()
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
-	f.Close()
-
-	// Atomic rename
-	if err := os.Rename(f.Name(), s.path); err != nil {
-		return fmt.Errorf("rename: %w", err)
+	if err := fsatomic.WriteFile(s.path, data, 0600); err != nil {
+		return fmt.Errorf("persist store: %w", err)
 	}
 
 	s.dirty = false

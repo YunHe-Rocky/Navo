@@ -44,10 +44,6 @@ type CoreHost interface {
 
 	// GetLogs returns the last N lines of proxy core output.
 	GetLogs(lines int) ([]string, error)
-
-	// Reconcile performs network state cleanup before starting.
-	// It detects and cleans residual routes, DNS settings, and zombie processes.
-	Reconcile(ctx context.Context) (*ReconcileResult, error)
 }
 
 // HostState enumerates the possible states of the proxy core.

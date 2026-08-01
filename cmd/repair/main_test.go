@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -76,7 +75,7 @@ func TestRunCheck_DirtyShutdown(t *testing.T) {
 	}
 }
 
-func TestRunFix_CleansDirtyShutdown(t *testing.T) {
+func TestRunFix_DoesNotForgeCleanShutdown(t *testing.T) {
 	dir := t.TempDir()
 	os.Setenv("PROGRAMDATA", dir)
 	defer os.Unsetenv("PROGRAMDATA")
@@ -89,20 +88,14 @@ func TestRunFix_CleansDirtyShutdown(t *testing.T) {
 
 	result := runFix(context.Background())
 
-	if result.Fixed == 0 {
-		t.Error("expected at least 1 issue fixed (dirty shutdown)")
+	if result.Fixed != 0 || result.Fixable {
+		t.Fatalf("offline diagnostics must not claim repair: %#v", result)
 	}
-
-	// Verify state file was updated
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
-		t.Fatal("state file should still exist after fix:", err)
+		t.Fatal(err)
 	}
-	if !contains(data, "NORMAL") {
-		t.Error("expected NORMAL state after fix, got:", string(data))
+	if string(data) != dirtyState {
+		t.Fatalf("dirty state was mutated: %s", data)
 	}
-}
-
-func contains(data []byte, s string) bool {
-	return strings.Contains(string(data), s)
 }

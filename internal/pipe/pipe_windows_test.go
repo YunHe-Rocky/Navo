@@ -66,3 +66,92 @@ func TestPipeSecuritySDDLGrantsCurrentTokenUser(t *testing.T) {
 		t.Fatalf("pipe DACL grants broad local access: %q", sddl)
 	}
 }
+
+func TestNamedPipeReadTimeoutCancelsAndConnectionRecovers(t *testing.T) {
+	listener, client, server := connectedPipePair(t)
+	defer listener.Close()
+	defer client.Close()
+	defer server.Close()
+
+	if err := client.SetDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	var first map[string]string
+	if err := client.Receive(&first); err == nil {
+		t.Fatal("expected read timeout")
+	}
+	if err := client.SetDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Send(map[string]string{"state": "recovered"}); err != nil {
+		t.Fatal(err)
+	}
+	var second map[string]string
+	if err := client.Receive(&second); err != nil {
+		t.Fatalf("connection did not recover after cancelled read: %v", err)
+	}
+	if second["state"] != "recovered" {
+		t.Fatalf("message = %#v", second)
+	}
+}
+
+func TestNamedPipeCloseCancelsPendingRead(t *testing.T) {
+	listener, client, server := connectedPipePair(t)
+	defer listener.Close()
+	defer server.Close()
+
+	readDone := make(chan error, 1)
+	go func() {
+		var value map[string]string
+		readDone <- client.Receive(&value)
+	}()
+	time.Sleep(25 * time.Millisecond)
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readDone:
+		if err == nil {
+			t.Fatal("pending read succeeded after close")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending read was not cancelled by close")
+	}
+}
+
+func connectedPipePair(t *testing.T) (*NamedPipeListener, *Channel, *Channel) {
+	t.Helper()
+	name := fmt.Sprintf("Navo.IOTest.%d.%d", os.Getpid(), time.Now().UnixNano())
+	listener, err := NewListener(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan *Channel, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		server, err := listener.Accept()
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- server
+	}()
+	client, err := Dial(name)
+	if err != nil {
+		listener.Close()
+		t.Fatal(err)
+	}
+	select {
+	case server := <-accepted:
+		return listener, client, server
+	case err := <-acceptErr:
+		client.Close()
+		listener.Close()
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		client.Close()
+		listener.Close()
+		t.Fatal("accept timed out")
+	}
+	return nil, nil, nil
+}

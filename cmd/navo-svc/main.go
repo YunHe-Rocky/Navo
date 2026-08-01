@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	"navo/internal/host"
+	"navo/internal/logstore"
 	"navo/internal/service"
 )
 
@@ -56,15 +57,21 @@ func main() {
 	if !filepath.IsAbs(cfgPath) {
 		cfgPath, _ = filepath.Abs(cfgPath)
 	}
+	if *dataDir != "" {
+		if err := logstore.Configure(filepath.Join(*dataDir, "structured.log.jsonl")); err != nil {
+			log.Fatalf("initialize structured logging: %v", err)
+		}
+	}
 
 	svc, err := service.New(service.Config{
-		SingBoxPath: binaryPath,
-		MihomoPath:  *mihomoPath,
-		XrayPath:    *xrayPath,
-		ConfigPath:  cfgPath,
-		ConfigDir:   *dataDir,
-		PipeName:    *pipeName,
-		ProxyPort:   *proxyPort,
+		SingBoxPath:        binaryPath,
+		MihomoPath:         *mihomoPath,
+		XrayPath:           *xrayPath,
+		ConfigPath:         cfgPath,
+		ConfigDir:          *dataDir,
+		PipeName:           *pipeName,
+		ProxyPort:          *proxyPort,
+		EnableExternalPipe: true,
 	})
 	if err != nil {
 		log.Fatalf("create service: %v", err)

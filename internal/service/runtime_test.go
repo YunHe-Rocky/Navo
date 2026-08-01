@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"navo/internal/compiler"
+	"navo/internal/credential"
 )
 
 func TestApplyRuntimeConfigPersistsSelectionAndMode(t *testing.T) {
@@ -262,10 +263,11 @@ func TestHandleOutboundCreateUpstreamAppliesAndPersists(t *testing.T) {
 		t.Skip("sing-box test binary is not available")
 	}
 	svc, err := New(Config{
-		SingBoxPath: binary,
-		ConfigPath:  filepath.Join("..", "..", "configs", "test_direct.json"),
-		ConfigDir:   t.TempDir(),
-		ProxyPort:   12080,
+		SingBoxPath:     binary,
+		ConfigPath:      filepath.Join("..", "..", "configs", "test_direct.json"),
+		ConfigDir:       t.TempDir(),
+		ProxyPort:       12080,
+		CredentialStore: credential.NewMemoryStore(),
 	})
 	if err != nil {
 		t.Fatal(err)

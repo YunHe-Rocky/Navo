@@ -10,13 +10,13 @@ func TestNewRequest(t *testing.T) {
 		ConfigPath: "/test/config.json",
 	}
 
-	env, err := NewRequest(MethodCoreStart, payload)
+	env, err := NewRequest(MethodCoreStatus, payload)
 	if err != nil {
 		t.Fatalf("NewRequest() error: %v", err)
 	}
 
-	if env.Method != MethodCoreStart {
-		t.Errorf("Method = %s, want %s", env.Method, MethodCoreStart)
+	if env.Method != MethodCoreStatus {
+		t.Errorf("Method = %s, want %s", env.Method, MethodCoreStatus)
 	}
 	if env.Type != TypeRequest {
 		t.Errorf("Type = %s, want %s", env.Type, TypeRequest)
@@ -159,7 +159,6 @@ func TestUnmarshalPayload_EmptyPayload(t *testing.T) {
 func TestMethodConstants(t *testing.T) {
 	// Verify no collisions in method names
 	methods := []string{
-		MethodCoreStart, MethodCoreStop, MethodCoreRestart,
 		MethodCoreStatus, MethodCoreHealth, MethodCoreSwapConfig,
 		MethodOutboundList, MethodOutboundCreate, MethodOutboundUpdate,
 		MethodOutboundDelete, MethodOutboundTest,

@@ -163,7 +163,7 @@ func TestIsPrivateIP(t *testing.T) {
 		{"169.254.1.1", true},
 		{"8.8.8.8", false},
 		{"1.1.1.1", false},
-		{"100.64.0.1", false}, // CGNAT but not in our blocklist
+		{"100.64.0.1", false}, // isPrivateIP is narrower than SSRF policy
 	}
 	for _, tt := range tests {
 		ip := parseIP(tt.ip)
@@ -173,6 +173,22 @@ func TestIsPrivateIP(t *testing.T) {
 		got := isPrivateIP(ip)
 		if got != tt.private {
 			t.Errorf("isPrivateIP(%s) = %v, want %v", tt.ip, got, tt.private)
+		}
+	}
+}
+
+func TestForbiddenIPIncludesRebindingAndReservedRanges(t *testing.T) {
+	for _, value := range []string{
+		"127.0.0.1", "169.254.169.254", "100.64.0.1", "192.0.2.10",
+		"198.51.100.10", "203.0.113.10", "2001:db8::1", "fc00::1",
+	} {
+		if !isForbiddenIP(net.ParseIP(value)) {
+			t.Fatalf("%s was not blocked", value)
+		}
+	}
+	for _, value := range []string{"1.1.1.1", "8.8.8.8", "2606:4700:4700::1111"} {
+		if isForbiddenIP(net.ParseIP(value)) {
+			t.Fatalf("%s was unexpectedly blocked", value)
 		}
 	}
 }

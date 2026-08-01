@@ -1,10 +1,11 @@
 package parser
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"navo/internal/compiler"
 )
@@ -20,61 +21,27 @@ func (p *ClashParser) Supports(raw []byte) bool {
 }
 
 func (p *ClashParser) Parse(raw []byte) (*Result, error) {
-	result := &Result{}
-
-	// Simple line-based parsing for common Clash YAML format
-	// Looks for lines like: - {name: "Node1", type: ss, server: x.x.x.x, port: 8388, ...}
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	var currentProxy map[string]string
-	inProxies := false
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Detect proxies section
-		if strings.HasPrefix(line, "proxies:") || strings.HasPrefix(line, "Proxy:") {
-			inProxies = true
-			continue
-		}
-
-		if !inProxies {
-			continue
-		}
-
-		// End of proxies section
-		if len(line) > 0 && !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "#") && currentProxy == nil {
-			inProxies = false
-			continue
-		}
-
-		// Parse proxy entry
-		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "-{") {
-			// Flush previous proxy
-			if currentProxy != nil {
-				if out := buildClashOutbound(currentProxy); out != nil {
-					result.Outbounds = append(result.Outbounds, *out)
-				}
-			}
-			currentProxy = make(map[string]string)
-			line = strings.TrimPrefix(line, "- ")
-			line = strings.TrimPrefix(line, "{")
-			line = strings.TrimSuffix(line, "}")
-			if strings.Contains(line, ",") {
-				parseInlineClashMap(line, currentProxy)
-				continue
-			}
-		}
-
-		if currentProxy != nil {
-			parseClashKeyValue(line, currentProxy)
-		}
+	var document struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+		Legacy  []map[string]interface{} `yaml:"Proxy"`
 	}
-
-	// Flush last proxy
-	if currentProxy != nil {
-		if out := buildClashOutbound(currentProxy); out != nil {
-			result.Outbounds = append(result.Outbounds, *out)
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return nil, fmt.Errorf("parse Clash YAML: %w", err)
+	}
+	proxies := append(document.Proxies, document.Legacy...)
+	result := &Result{Outbounds: make([]compiler.Outbound, 0, len(proxies))}
+	for index, proxy := range proxies {
+		values := flattenClashProxy(proxy)
+		out := buildClashOutbound(values)
+		if out == nil {
+			name := values["name"]
+			if name == "" {
+				name = fmt.Sprintf("index %d", index)
+			}
+			result.Errors = append(result.Errors, fmt.Sprintf("proxy %q has unsupported type or invalid server/port", name))
+			continue
 		}
+		result.Outbounds = append(result.Outbounds, *out)
 	}
 
 	if len(result.Outbounds) == 0 {
@@ -84,46 +51,44 @@ func (p *ClashParser) Parse(raw []byte) (*Result, error) {
 	return result, nil
 }
 
-func parseInlineClashMap(line string, values map[string]string) {
-	start := 0
-	var quote rune
-	depth := 0
-	runes := []rune(line)
-	for i, r := range runes {
-		switch {
-		case quote != 0 && r == quote:
-			quote = 0
-		case quote != 0:
-			continue
-		case r == '"' || r == '\'':
-			quote = r
-		case r == '[' || r == '{':
-			depth++
-		case r == ']' || r == '}':
-			if depth > 0 {
-				depth--
-			}
-		case r == ',' && depth == 0:
-			parseClashKeyValue(string(runes[start:i]), values)
-			start = i + 1
+func flattenClashProxy(proxy map[string]interface{}) map[string]string {
+	result := make(map[string]string, len(proxy)+8)
+	for key, value := range proxy {
+		switch scalar := value.(type) {
+		case string:
+			result[key] = scalar
+		case int:
+			result[key] = strconv.Itoa(scalar)
+		case uint64:
+			result[key] = strconv.FormatUint(scalar, 10)
+		case bool:
+			result[key] = strconv.FormatBool(scalar)
 		}
 	}
-	if start < len(runes) {
-		parseClashKeyValue(string(runes[start:]), values)
+	copyNested := func(section, target, source string) {
+		if nested, ok := proxy[section].(map[string]interface{}); ok {
+			if value, exists := nested[source]; exists {
+				result[target] = fmt.Sprint(value)
+			}
+		}
 	}
-}
-
-func parseClashKeyValue(line string, m map[string]string) {
-	// Parse "key: value" or "key:value" pairs, handling quoted values
-	parts := strings.SplitN(line, ":", 2)
-	if len(parts) != 2 {
-		return
+	copyNested("ws-opts", "path", "path")
+	if ws, ok := proxy["ws-opts"].(map[string]interface{}); ok {
+		if headers, ok := ws["headers"].(map[string]interface{}); ok {
+			if host, exists := headers["Host"]; exists {
+				result["host"] = fmt.Sprint(host)
+			} else if host, exists := headers["host"]; exists {
+				result["host"] = fmt.Sprint(host)
+			}
+		}
 	}
-	key := strings.TrimSpace(parts[0])
-	value := strings.TrimSpace(parts[1])
-	value = strings.Trim(value, `"`)
-	value = strings.Trim(value, `'`)
-	m[key] = value
+	copyNested("grpc-opts", "grpc-service-name", "grpc-service-name")
+	if result["grpc-service-name"] == "" {
+		copyNested("grpc-opts", "grpc-service-name", "service-name")
+	}
+	copyNested("reality-opts", "public-key", "public-key")
+	copyNested("reality-opts", "short-id", "short-id")
+	return result
 }
 
 func buildClashOutbound(m map[string]string) *compiler.Outbound {

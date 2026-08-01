@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
 	"navo/internal/compiler"
+	"navo/internal/fsatomic"
 	"navo/internal/network"
 )
 
@@ -147,14 +147,11 @@ func (s *Service) handleDiagnosticsExport(
 		return errorResponse(requestID, "DIAGNOSTICS_EXPORT_FAILED", err)
 	}
 	exportDir := filepath.Join(s.cfg.ConfigDir, "diagnostics")
-	if err := os.MkdirAll(exportDir, 0700); err != nil {
-		return errorResponse(requestID, "DIAGNOSTICS_EXPORT_FAILED", err)
-	}
 	path := filepath.Join(
 		exportDir,
 		fmt.Sprintf("navo-diagnostics-%s.json", time.Now().Format("20060102-150405")),
 	)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := fsatomic.WriteFile(path, data, 0600); err != nil {
 		return errorResponse(requestID, "DIAGNOSTICS_EXPORT_FAILED", err)
 	}
 	return response(requestID, map[string]interface{}{

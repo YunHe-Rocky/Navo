@@ -8,11 +8,16 @@ import (
 	"testing"
 
 	"navo/internal/compiler"
+	"navo/internal/credential"
 )
 
 func TestManagerPersistsOutbounds(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "subscriptions.json")
-	manager := NewManagerWithPath(storePath)
+	credentials := credential.NewMemoryStore()
+	manager, err := newManagerWithProtector(storePath, credentials, identityProtector, identityProtector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sub, err := manager.Add("Provider", "https://example.com/sub")
 	if err != nil {
 		t.Fatalf("Add() error: %v", err)
@@ -30,7 +35,10 @@ func TestManagerPersistsOutbounds(t *testing.T) {
 		t.Fatalf("saveLocked() error: %v", err)
 	}
 
-	reloaded := NewManagerWithPath(storePath)
+	reloaded, err := newManagerWithProtector(storePath, credentials, identityProtector, identityProtector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	outbounds := reloaded.Outbounds()
 	if len(outbounds) != 1 || outbounds[0].ProviderID != sub.ID {
 		t.Fatalf("persisted outbounds = %#v", outbounds)
@@ -66,7 +74,13 @@ func TestManagerLoadsLegacySubscriptionArray(t *testing.T) {
 }
 
 func TestRemoveDeletesProviderOutbounds(t *testing.T) {
-	manager := NewManagerWithPath(filepath.Join(t.TempDir(), "subscriptions.json"))
+	manager, err := newManagerWithProtector(
+		filepath.Join(t.TempDir(), "subscriptions.json"), credential.NewMemoryStore(),
+		identityProtector, identityProtector,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sub, err := manager.Add("Provider", "https://example.com/sub")
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +100,10 @@ func TestRemoveDeletesProviderOutbounds(t *testing.T) {
 	if len(outbounds) != 1 || outbounds[0].ID != "other" {
 		t.Fatalf("remaining outbounds = %#v", outbounds)
 	}
+}
+
+func identityProtector(data []byte) ([]byte, error) {
+	return append([]byte(nil), data...), nil
 }
 
 func TestNormalizerCreatesUniqueStableIDs(t *testing.T) {
@@ -115,6 +133,17 @@ func TestNormalizerCreatesUniqueStableIDs(t *testing.T) {
 				ids[outbound.Server],
 			)
 		}
+	}
+}
+
+func TestNormalizerKeepsCredentialDistinctEndpoints(t *testing.T) {
+	normalizer := NewNormalizer()
+	result := normalizer.Normalize([]compiler.Outbound{
+		{Name: "A", Server: "edge.example", Port: 443, Type: compiler.OutboundTrojan, Password: "first"},
+		{Name: "B", Server: "edge.example", Port: 443, Type: compiler.OutboundTrojan, Password: "second"},
+	})
+	if len(result) != 2 {
+		t.Fatalf("credential-distinct nodes were collapsed: %#v", result)
 	}
 }
 

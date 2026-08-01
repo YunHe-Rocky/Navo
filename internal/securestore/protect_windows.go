@@ -8,8 +8,6 @@ import (
 	"unsafe"
 )
 
-const cryptProtectLocalMachine = 0x4
-
 type dataBlob struct {
 	size uint32
 	data *byte
@@ -30,14 +28,16 @@ func blob(data []byte) dataBlob {
 	return dataBlob{size: uint32(len(data)), data: &data[0]}
 }
 
-// Protect encrypts data with Windows DPAPI machine scope so the service can read it.
+// Protect encrypts data with Windows DPAPI Current User scope. Navo's packaged
+// desktop runtime is single-user; copied state must not decrypt for another
+// Windows account or machine.
 func Protect(plain []byte) ([]byte, error) {
 	input := blob(plain)
 	var output dataBlob
 	ok, _, callErr := cryptProtectData.Call(
 		uintptr(unsafe.Pointer(&input)),
 		0, 0, 0, 0,
-		cryptProtectLocalMachine,
+		0,
 		uintptr(unsafe.Pointer(&output)),
 	)
 	if ok == 0 {

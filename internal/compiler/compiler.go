@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"navo/internal/fsatomic"
 	"navo/internal/winprocess"
 )
 
@@ -130,7 +131,7 @@ func (c *DefaultCompiler) Apply(ctx context.Context, result *CompileResult) (*Re
 	configFilename := fmt.Sprintf("config_v%d.json", version)
 	configPath := filepath.Join(c.configDir, configFilename)
 
-	if err := os.WriteFile(configPath, result.JSON, 0644); err != nil {
+	if err := fsatomic.WriteFile(configPath, result.JSON, 0600); err != nil {
 		return nil, fmt.Errorf("cannot write config: %w", err)
 	}
 

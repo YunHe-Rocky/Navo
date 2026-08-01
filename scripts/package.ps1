@@ -49,6 +49,45 @@ foreach ($RequiredFile in $RequiredThirdPartyFiles) {
     }
 }
 
+# Release output is untouched until every source gate passes.
+Push-Location $ProjectRoot
+try {
+    & $Go test ./...
+    if ($LASTEXITCODE -ne 0) {
+        throw "Go test gate failed with exit code $LASTEXITCODE"
+    }
+    & $Go vet ./...
+    if ($LASTEXITCODE -ne 0) {
+        throw "Go vet gate failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
+
+Push-Location $UIRoot
+try {
+    & $Npm --cache $UICache ci
+    if ($LASTEXITCODE -ne 0) {
+        throw "UI dependency installation failed with exit code $LASTEXITCODE"
+    }
+    & $Npm --cache $UICache test
+    if ($LASTEXITCODE -ne 0) {
+        throw "UI test gate failed with exit code $LASTEXITCODE"
+    }
+    & $Npm --cache $UICache run typecheck
+    if ($LASTEXITCODE -ne 0) {
+        throw "UI typecheck gate failed with exit code $LASTEXITCODE"
+    }
+    & $Npm --cache $UICache run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "UI production build failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
+
 if (Test-Path -LiteralPath $ReleaseRoot) {
     Remove-Item -LiteralPath $ReleaseRoot -Recurse -Force
 }
@@ -96,16 +135,6 @@ finally {
 
 Push-Location $UIRoot
 try {
-    & $Npm --cache $UICache ci
-    if ($LASTEXITCODE -ne 0) {
-        throw "UI dependency installation failed with exit code $LASTEXITCODE"
-    }
-
-    & $Npm --cache $UICache run build
-    if ($LASTEXITCODE -ne 0) {
-        throw "UI production build failed with exit code $LASTEXITCODE"
-    }
-
     & $Wails build -clean -platform "windows/$Architecture" -o navo_app.exe
     if ($LASTEXITCODE -ne 0) {
         throw "Wails desktop build failed with exit code $LASTEXITCODE"
@@ -140,7 +169,7 @@ $Readme = @(
     "Start: double-click navo.exe and approve the Windows UAC prompt.",
     "Administrator access is required because this package runs the TUN/core host in-process.",
     "Requirement: Microsoft Edge WebView2 Runtime.",
-    "Configuration: copy .env.example to %LOCALAPPDATA%\Navo\.env; MySQL is disabled by default.",
+    "Configuration and runtime state are stored locally under %LOCALAPPDATA%\Navo.",
     "Logs: %LOCALAPPDATA%\Navo\log\navo.log",
     "Data: %LOCALAPPDATA%\Navo\",
     "Repair: run repair.exe check before applying any repair action."

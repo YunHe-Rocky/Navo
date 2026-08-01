@@ -34,13 +34,13 @@ func GenerateForCore(coreID string, cfg *Config) ([]byte, error) {
 func Compatible(coreID string, outbound Outbound) bool {
 	switch coreID {
 	case CoreSingBox:
-		return true
+		return outbound.Type != OutboundWireGuard
 	case CoreMihomo:
-		return true
+		return outbound.Type != OutboundWireGuard
 	case CoreXray:
 		switch outbound.Type {
 		case OutboundDirect, OutboundSOCKS, OutboundHTTP, OutboundShadowsocks,
-			OutboundVMess, OutboundVLESS, OutboundTrojan, OutboundWireGuard:
+			OutboundVMess, OutboundVLESS, OutboundTrojan:
 			return true
 		default:
 			return false
@@ -116,7 +116,11 @@ func GenerateMihomo(cfg *Config) ([]byte, error) {
 		if !rule.Enabled {
 			continue
 		}
-		target := mihomoName(rule.OutboundTag)
+		targetID := rule.OutboundTag
+		if targetID == "" {
+			targetID = rule.OutboundID
+		}
+		target := mihomoName(targetID)
 		for _, value := range rule.Values {
 			switch rule.RuleType {
 			case RuleDomain:
@@ -125,10 +129,22 @@ func GenerateMihomo(cfg *Config) ([]byte, error) {
 				rules = append(rules, "DOMAIN-SUFFIX,"+value+","+target)
 			case RuleDomainKeyword:
 				rules = append(rules, "DOMAIN-KEYWORD,"+value+","+target)
+			case RuleDomainRegex:
+				rules = append(rules, "DOMAIN-REGEX,"+value+","+target)
 			case RuleIP:
 				rules = append(rules, "IP-CIDR,"+value+","+target+",no-resolve")
 			case RuleProcess:
 				rules = append(rules, "PROCESS-NAME,"+value+","+target)
+			case RulePort:
+				rules = append(rules, "DST-PORT,"+value+","+target)
+			case RuleProtocol:
+				rules = append(rules, "NETWORK,"+value+","+target)
+			case RuleGeosite:
+				rules = append(rules, "GEOSITE,"+value+","+target)
+			case RuleGeoip:
+				rules = append(rules, "GEOIP,"+value+","+target+",no-resolve")
+			default:
+				return nil, fmt.Errorf("mihomo does not support routing rule type %q", rule.RuleType)
 			}
 		}
 	}
@@ -164,18 +180,25 @@ func mihomoProxy(o Outbound) (map[string]any, error) {
 	case OutboundTUIC:
 		p["type"], p["uuid"], p["password"] = "tuic", o.UUID, o.Password
 	case OutboundWireGuard:
-		p["type"] = "wireguard"
+		return nil, fmt.Errorf("mihomo WireGuard is unsupported until all key, peer, address and route fields are preserved")
 	default:
 		return nil, fmt.Errorf("mihomo does not support outbound %q", o.Type)
 	}
 	if o.TLS || o.SNI != "" {
 		p["tls"], p["servername"], p["skip-cert-verify"] = true, o.SNI, o.SkipCertVerify
 	}
-	if o.Network != "" && o.Network != "tcp" {
-		p["network"] = o.Network
+	switch o.Network {
+	case "", "tcp":
+	case "ws":
+		p["network"] = "ws"
 		p["ws-opts"] = map[string]any{
 			"path": o.TransportPath, "headers": map[string]string{"Host": o.TransportHost},
 		}
+	case "grpc":
+		p["network"] = "grpc"
+		p["grpc-opts"] = map[string]any{"grpc-service-name": o.ServiceName}
+	default:
+		return nil, fmt.Errorf("mihomo does not support transport %q", o.Network)
 	}
 	if o.RealityPublicKey != "" {
 		p["reality-opts"] = map[string]any{
@@ -230,12 +253,21 @@ func GenerateXray(cfg *Config) ([]byte, error) {
 	if final == "" {
 		final = "direct"
 	}
-	root["routing"] = map[string]any{
-		"domainStrategy": "AsIs",
-		"rules": []map[string]any{{
-			"type": "field", "network": "tcp,udp", "outboundTag": final,
-		}},
+	rules := make([]map[string]any, 0, len(cfg.RoutingRules)+1)
+	for _, rule := range cfg.RoutingRules {
+		if !rule.Enabled {
+			continue
+		}
+		compiled, err := xrayRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, compiled)
 	}
+	rules = append(rules, map[string]any{
+		"type": "field", "network": "tcp,udp", "outboundTag": final,
+	})
+	root["routing"] = map[string]any{"domainStrategy": "AsIs", "rules": rules}
 	root["policy"] = map[string]any{
 		"system": map[string]any{
 			"statsOutboundUplink": true, "statsOutboundDownlink": true,
@@ -264,7 +296,6 @@ func xrayOutbound(o Outbound) (map[string]any, error) {
 			server["method"], server["password"] = o.Method, o.Password
 		}
 		result["settings"] = map[string]any{"servers": []map[string]any{server}}
-		return result, nil
 	case OutboundVMess, OutboundVLESS:
 		user := map[string]any{"id": o.UUID}
 		if o.Type == OutboundVMess {
@@ -308,6 +339,61 @@ func xrayOutbound(o Outbound) (map[string]any, error) {
 		stream["grpcSettings"] = map[string]any{"serviceName": o.ServiceName}
 	}
 	result["streamSettings"] = stream
+	return result, nil
+}
+
+func xrayRule(rule RoutingRule) (map[string]any, error) {
+	target := rule.OutboundTag
+	if target == "" {
+		target = rule.OutboundID
+	}
+	result := map[string]any{"type": "field", "outboundTag": target}
+	switch rule.RuleType {
+	case RuleDomain:
+		values := make([]string, len(rule.Values))
+		for i, value := range rule.Values {
+			values[i] = "full:" + value
+		}
+		result["domain"] = values
+	case RuleDomainSuffix:
+		values := make([]string, len(rule.Values))
+		for i, value := range rule.Values {
+			values[i] = "domain:" + value
+		}
+		result["domain"] = values
+	case RuleDomainKeyword:
+		values := make([]string, len(rule.Values))
+		for i, value := range rule.Values {
+			values[i] = "keyword:" + value
+		}
+		result["domain"] = values
+	case RuleDomainRegex:
+		values := make([]string, len(rule.Values))
+		for i, value := range rule.Values {
+			values[i] = "regexp:" + value
+		}
+		result["domain"] = values
+	case RuleIP:
+		result["ip"] = rule.Values
+	case RulePort:
+		result["port"] = strings.Join(rule.Values, ",")
+	case RuleProtocol:
+		result["protocol"] = rule.Values
+	case RuleGeosite:
+		values := make([]string, len(rule.Values))
+		for i, value := range rule.Values {
+			values[i] = "geosite:" + value
+		}
+		result["domain"] = values
+	case RuleGeoip:
+		values := make([]string, len(rule.Values))
+		for i, value := range rule.Values {
+			values[i] = "geoip:" + value
+		}
+		result["ip"] = values
+	default:
+		return nil, fmt.Errorf("xray does not support routing rule type %q", rule.RuleType)
+	}
 	return result, nil
 }
 

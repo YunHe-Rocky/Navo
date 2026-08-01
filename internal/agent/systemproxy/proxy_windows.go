@@ -14,6 +14,7 @@ var (
 	procRegOpenKeyExW    = advapi32.NewProc("RegOpenKeyExW")
 	procRegQueryValueExW = advapi32.NewProc("RegQueryValueExW")
 	procRegSetValueExW   = advapi32.NewProc("RegSetValueExW")
+	procRegDeleteValueW  = advapi32.NewProc("RegDeleteValueW")
 	procRegCloseKey      = advapi32.NewProc("RegCloseKey")
 )
 
@@ -23,14 +24,17 @@ const (
 	KEY_READ  = 0x20019
 	KEY_WRITE = 0x20006
 
-	REG_DWORD = 4
-	REG_SZ    = 1
+	REG_DWORD         = 4
+	REG_SZ            = 1
+	REG_EXPAND_SZ     = 2
+	errorFileNotFound = 2
 
 	internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 	proxyEnable         = "ProxyEnable"
 	proxyServer         = "ProxyServer"
 	proxyOverride       = "ProxyOverride"
 	autoConfigURL       = "AutoConfigURL"
+	autoDetect          = "AutoDetect"
 )
 
 func openRegKey(key uintptr, subKey string, access uint32) (uintptr, error) {
@@ -57,10 +61,10 @@ func closeRegKey(hKey uintptr) {
 	procRegCloseKey.Call(hKey)
 }
 
-func queryDWORDValue(hKey uintptr, name string) (uint32, error) {
+func queryDWORDValue(hKey uintptr, name string) (uint32, bool, error) {
 	namePtr, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	var valType uint32
@@ -75,23 +79,48 @@ func queryDWORDValue(hKey uintptr, name string) (uint32, error) {
 		uintptr(unsafe.Pointer(&data)),
 		uintptr(unsafe.Pointer(&dataSize)),
 	)
-	if ret != 0 {
-		return 0, fmt.Errorf("RegQueryValueEx(DWORD): %d", ret)
+	if ret == errorFileNotFound {
+		return 0, false, nil
 	}
-	return data, nil
+	if ret != 0 {
+		return 0, false, fmt.Errorf("RegQueryValueEx(DWORD %s): %d", name, ret)
+	}
+	if valType != REG_DWORD || dataSize != 4 {
+		return 0, false, fmt.Errorf("registry value %s is not a DWORD", name)
+	}
+	return data, true, nil
 }
 
-func queryStringValue(hKey uintptr, name string) (string, error) {
+func queryStringValue(hKey uintptr, name string) (string, bool, error) {
 	namePtr, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	var valType uint32
-	var dataSize uint32 = 4096
-	buf := make([]uint16, dataSize/2)
-
+	var dataSize uint32
 	ret, _, _ := procRegQueryValueExW.Call(
+		hKey,
+		uintptr(unsafe.Pointer(namePtr)),
+		uintptr(0),
+		uintptr(unsafe.Pointer(&valType)),
+		uintptr(0),
+		uintptr(unsafe.Pointer(&dataSize)),
+	)
+	if ret == errorFileNotFound {
+		return "", false, nil
+	}
+	if ret != 0 {
+		return "", false, fmt.Errorf("RegQueryValueEx(size %s): %d", name, ret)
+	}
+	if valType != REG_SZ && valType != REG_EXPAND_SZ {
+		return "", false, fmt.Errorf("registry value %s is not a string", name)
+	}
+	if dataSize == 0 {
+		return "", true, nil
+	}
+	buf := make([]uint16, (dataSize+1)/2)
+	ret, _, _ = procRegQueryValueExW.Call(
 		hKey,
 		uintptr(unsafe.Pointer(namePtr)),
 		uintptr(0),
@@ -100,9 +129,21 @@ func queryStringValue(hKey uintptr, name string) (string, error) {
 		uintptr(unsafe.Pointer(&dataSize)),
 	)
 	if ret != 0 {
-		return "", fmt.Errorf("RegQueryValueEx(SZ): %d", ret)
+		return "", false, fmt.Errorf("RegQueryValueEx(data %s): %d", name, ret)
 	}
-	return syscall.UTF16ToString(buf[:dataSize/2-1]), nil
+	return syscall.UTF16ToString(buf), true, nil
+}
+
+func deleteValue(hKey uintptr, name string) error {
+	namePtr, err := syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return err
+	}
+	ret, _, _ := procRegDeleteValueW.Call(hKey, uintptr(unsafe.Pointer(namePtr)))
+	if ret != 0 && ret != errorFileNotFound {
+		return fmt.Errorf("RegDeleteValue(%s): %d", name, ret)
+	}
+	return nil
 }
 
 func setDWORDValue(hKey uintptr, name string, val uint32) error {
@@ -149,20 +190,35 @@ func getSystemProxy() (*ProxyConfig, error) {
 
 	cfg := &ProxyConfig{}
 
-	if v, err := queryDWORDValue(hKey, proxyEnable); err == nil {
+	if v, present, err := queryDWORDValue(hKey, proxyEnable); err != nil {
+		return nil, err
+	} else if !present {
+		return nil, fmt.Errorf("required registry value %s is missing", proxyEnable)
+	} else {
 		cfg.Enabled = v != 0
 	}
 
-	if v, err := queryStringValue(hKey, proxyServer); err == nil {
-		cfg.ProxyServer = v
+	if v, present, err := queryStringValue(hKey, proxyServer); err != nil {
+		return nil, err
+	} else {
+		cfg.ProxyServer, cfg.ProxyServerPresent = v, present
 	}
 
-	if v, err := queryStringValue(hKey, proxyOverride); err == nil {
-		cfg.BypassList = v
+	if v, present, err := queryStringValue(hKey, proxyOverride); err != nil {
+		return nil, err
+	} else {
+		cfg.BypassList, cfg.BypassListPresent = v, present
 	}
 
-	if v, err := queryStringValue(hKey, autoConfigURL); err == nil {
-		cfg.AutoConfigURL = v
+	if v, present, err := queryStringValue(hKey, autoConfigURL); err != nil {
+		return nil, err
+	} else {
+		cfg.AutoConfigURL, cfg.AutoConfigURLPresent = v, present
+	}
+	if v, present, err := queryDWORDValue(hKey, autoDetect); err != nil {
+		return nil, err
+	} else {
+		cfg.AutoDetect, cfg.AutoDetectPresent = v != 0, present
 	}
 
 	return cfg, nil
@@ -208,43 +264,48 @@ func applySystemProxyConfig(cfg ProxyConfig) error {
 	if err := setDWORDValue(hKey, proxyEnable, enabled); err != nil {
 		return fmt.Errorf("restore ProxyEnable: %w", err)
 	}
-	if cfg.ProxyServer != "" {
+	if cfg.ProxyServerPresent || cfg.ProxyServer != "" {
 		if err := setStringValue(hKey, proxyServer, cfg.ProxyServer); err != nil {
 			return fmt.Errorf("restore ProxyServer: %w", err)
 		}
+	} else if err := deleteValue(hKey, proxyServer); err != nil {
+		return err
 	}
-	if cfg.BypassList != "" {
+	if cfg.BypassListPresent || cfg.BypassList != "" {
 		if err := setStringValue(hKey, proxyOverride, cfg.BypassList); err != nil {
 			return fmt.Errorf("restore ProxyOverride: %w", err)
 		}
+	} else if err := deleteValue(hKey, proxyOverride); err != nil {
+		return err
 	}
-	if cfg.AutoConfigURL != "" {
+	if cfg.AutoConfigURLPresent || cfg.AutoConfigURL != "" {
 		if err := setStringValue(hKey, autoConfigURL, cfg.AutoConfigURL); err != nil {
 			return fmt.Errorf("restore AutoConfigURL: %w", err)
 		}
+	} else if err := deleteValue(hKey, autoConfigURL); err != nil {
+		return err
+	}
+	if cfg.AutoDetectPresent {
+		value := uint32(0)
+		if cfg.AutoDetect {
+			value = 1
+		}
+		if err := setDWORDValue(hKey, autoDetect, value); err != nil {
+			return fmt.Errorf("restore AutoDetect: %w", err)
+		}
+	} else if err := deleteValue(hKey, autoDetect); err != nil {
+		return err
 	}
 	return nil
 }
 
 func notifyProxyChange() error {
-	user32 := syscall.NewLazyDLL("user32.dll")
-	procSendMessageTimeout := user32.NewProc("SendMessageTimeoutW")
-
-	const HWND_BROADCAST = 0xFFFF
-	const WM_SETTINGCHANGE = 0x001A
-	const SMTO_ABORTIFHUNG = 0x0002
-
-	envPtr, _ := syscall.UTF16PtrFromString("Environment")
-
-	procSendMessageTimeout.Call(
-		uintptr(HWND_BROADCAST),
-		uintptr(WM_SETTINGCHANGE),
-		uintptr(0),
-		uintptr(unsafe.Pointer(envPtr)),
-		uintptr(SMTO_ABORTIFHUNG),
-		uintptr(5000),
-		uintptr(0),
-	)
-
+	proc := syscall.NewLazyDLL("wininet.dll").NewProc("InternetSetOptionW")
+	for _, option := range []uintptr{39, 37} { // SETTINGS_CHANGED, REFRESH
+		ok, _, callErr := proc.Call(0, option, 0, 0)
+		if ok == 0 {
+			return fmt.Errorf("InternetSetOptionW(%d): %w", option, callErr)
+		}
+	}
 	return nil
 }

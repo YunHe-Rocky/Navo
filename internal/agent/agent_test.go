@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"navo/internal/agent/systemproxy"
 	"navo/internal/domain/capture"
@@ -63,6 +64,31 @@ func TestTrayConnectRequiresActiveSelectionBeforeCoreStart(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0] != "runtime.status" {
 		t.Fatalf("core must not start without active selection: %v", calls)
+	}
+}
+
+func TestRawCoreLifecycleIsNotExposedToUI(t *testing.T) {
+	serviceCalled := false
+	instance, err := New(Config{
+		SendToServiceFn: func(map[string]interface{}) (map[string]interface{}, error) {
+			serviceCalled = true
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"core.start", "core.stop", "core.restart", "service.shutdown"} {
+		resp := instance.Dispatch(context.Background(), map[string]interface{}{
+			"request_id": method,
+			"method":     method,
+		})
+		if !isErrorResponse(resp) {
+			t.Fatalf("%s unexpectedly exposed: %#v", method, resp)
+		}
+	}
+	if serviceCalled {
+		t.Fatal("raw lifecycle request crossed the Agent boundary")
 	}
 }
 
@@ -137,6 +163,56 @@ func TestCaptureTUNFailureKeepsTransactionUncommitted(t *testing.T) {
 	status := instance.captureSnapshot()
 	if status.State != capture.StateFaulted || status.CommittedMode != capture.ModeOff {
 		t.Fatalf("capture did not fail safe: %#v", status)
+	}
+}
+
+func TestCaptureRollbackFailureRetainsPreviousCommittedMode(t *testing.T) {
+	journalPath := filepath.Join(t.TempDir(), "capture.json")
+	instance, err := New(Config{
+		CaptureJournalPath: journalPath,
+		ProxyManager:       systemproxy.NewManagerWithDirectory(t.TempDir()),
+		SendToServiceFn: func(msg map[string]interface{}) (map[string]interface{}, error) {
+			switch msg["method"] {
+			case "capture.prepare":
+				return map[string]interface{}{
+					"type": "ERROR",
+					"payload": map[string]interface{}{
+						"code": "NET_ROLLBACK_FAILED", "message": "adapter still active",
+					},
+				}, nil
+			case "tun.status":
+				return map[string]interface{}{
+					"type": "RESPONSE",
+					"payload": map[string]interface{}{
+						"name": "Navo", "state": "degraded", "interface_index": 42,
+					},
+				}, nil
+			default:
+				t.Fatalf("unexpected service call %q", msg["method"])
+				return nil, nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	journal := capture.TransitionJournal{
+		ID: "rollback-failure", From: capture.ModeSystemProxy, To: capture.ModeTUN,
+		CurrentStep: capture.PhaseStartingCore, StartedAt: time.Now().UTC(),
+	}
+	if err := instance.captureFailure(capture.ModeTUN, journal, errors.New("startup failed")); err == nil {
+		t.Fatal("expected transition and rollback failure")
+	}
+	status := instance.captureSnapshot()
+	if status.State != capture.StateFaulted || status.CommittedMode != capture.ModeSystemProxy {
+		t.Fatalf("rollback failure hid previous committed mode: %#v", status)
+	}
+	if status.Adapter.InterfaceIndex != 42 {
+		t.Fatalf("residual adapter status missing: %#v", status.Adapter)
+	}
+	if _, err := os.Stat(journalPath); err != nil {
+		t.Fatalf("rollback evidence journal must remain: %v", err)
 	}
 }
 

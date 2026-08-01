@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"navo/internal/domain/endpoint"
+	"navo/internal/fsatomic"
 )
 
 type Manager struct {
@@ -132,17 +133,8 @@ func (m *Manager) saveLocked() error {
 	if err != nil {
 		return fmt.Errorf("encode upstream proxies: %w", err)
 	}
-	tempPath := m.path + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0600); err != nil {
+	if err := fsatomic.WriteFile(m.path, data, 0600); err != nil {
 		return fmt.Errorf("write upstream proxies: %w", err)
-	}
-	if err := os.Remove(m.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		os.Remove(tempPath)
-		return err
-	}
-	if err := os.Rename(tempPath, m.path); err != nil {
-		os.Remove(tempPath)
-		return fmt.Errorf("activate upstream proxies: %w", err)
 	}
 	return nil
 }

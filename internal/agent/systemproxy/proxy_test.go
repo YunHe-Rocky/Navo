@@ -2,10 +2,51 @@ package systemproxy
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestEnableFailsClosedWhenWinINetSnapshotCannotBeRead(t *testing.T) {
+	manager := NewManagerWithDirectory(t.TempDir())
+	manager.getProxy = func() (*ProxyConfig, error) {
+		return nil, errors.New("registry unavailable")
+	}
+	setCalled := false
+	manager.setProxy = func(string) error {
+		setCalled = true
+		return nil
+	}
+	if err := manager.Enable("127.0.0.1:12080"); err == nil {
+		t.Fatal("enable succeeded without a complete WinINet snapshot")
+	}
+	if setCalled {
+		t.Fatal("WinINet was mutated after snapshot failure")
+	}
+}
+
+func TestEnableCommitsOwnershipAfterMutationAndNotification(t *testing.T) {
+	manager := NewManagerWithDirectory(t.TempDir())
+	manager.getProxy = func() (*ProxyConfig, error) { return &ProxyConfig{Enabled: false}, nil }
+	manager.setProxy = func(string) error { return nil }
+	manager.applyProxy = func(ProxyConfig) error { return nil }
+	manager.notify = func() error { return nil }
+	if err := manager.Enable("127.0.0.1:12080"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(manager.ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var owner ownershipRecord
+	if err := json.Unmarshal(data, &owner); err != nil {
+		t.Fatal(err)
+	}
+	if owner.Phase != ownershipCommitted {
+		t.Fatalf("ownership phase = %q", owner.Phase)
+	}
+}
 
 func TestOwnershipRequiresMatchingRecord(t *testing.T) {
 	dir := t.TempDir()

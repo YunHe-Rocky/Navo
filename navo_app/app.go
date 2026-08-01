@@ -21,6 +21,8 @@ type App struct {
 	benchmarkMu      sync.Mutex
 	benchmarkRunning bool
 	benchmarkCancel  context.CancelFunc
+	coreUpdateMu     sync.RWMutex
+	coreUpdateCache  CoreUpdateReport
 }
 
 type Dashboard struct {
@@ -35,13 +37,13 @@ type Dashboard struct {
 }
 
 type CoreStatus struct {
-	CoreID       string `json:"core_id"`
-	State        string `json:"state"`
-	PID          int    `json:"pid"`
-	Uptime       int64  `json:"uptime"`
-	ConfigHash   string `json:"config_hash"`
-	RestartCount int    `json:"restart_count"`
-	LastError    string `json:"last_error"`
+	CoreID        string `json:"core_id"`
+	State         string `json:"state"`
+	PID           int    `json:"pid"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
+	ConfigHash    string `json:"config_hash"`
+	RestartCount  int    `json:"restart_count"`
+	LastError     string `json:"last_error"`
 }
 
 type CoreOption struct {
@@ -95,14 +97,26 @@ type CaptureStatus struct {
 }
 
 type MetricsStatus struct {
-	Reachable         bool   `json:"reachable"`
-	Available         bool   `json:"available"`
-	UnavailableReason string `json:"unavailable_reason"`
-	CoreName          string `json:"core_name"`
-	LatencyMS         int64  `json:"latency_ms"`
-	UploadBytes       int64  `json:"upload_bytes"`
-	DownloadBytes     int64  `json:"download_bytes"`
-	Connections       int    `json:"connections"`
+	Reachable              bool   `json:"reachable"`
+	Available              bool   `json:"available"`
+	UnavailableReason      string `json:"unavailable_reason"`
+	CoreName               string `json:"core_name"`
+	LatencyMS              int64  `json:"latency_ms"`
+	UploadBytes            int64  `json:"upload_bytes"`
+	DownloadBytes          int64  `json:"download_bytes"`
+	Connections            int    `json:"connections"`
+	LocalAvailable         bool   `json:"local_available"`
+	LocalUnavailableReason string `json:"local_unavailable_reason"`
+	LocalUploadBPS         uint64 `json:"local_upload_bps"`
+	LocalDownloadBPS       uint64 `json:"local_download_bps"`
+	ProxyUploadBPS         uint64 `json:"proxy_upload_bps"`
+	ProxyDownloadBPS       uint64 `json:"proxy_download_bps"`
+	LocalUploadTotal       uint64 `json:"local_upload_total"`
+	LocalDownloadTotal     uint64 `json:"local_download_total"`
+	ProxyUploadTotal       uint64 `json:"proxy_upload_total"`
+	ProxyDownloadTotal     uint64 `json:"proxy_download_total"`
+	TrafficSourceState     string `json:"traffic_source_state"`
+	TrafficSampledAt       string `json:"traffic_sampled_at"`
 }
 
 type IPStatus struct {
@@ -120,18 +134,18 @@ type IPDetection struct {
 }
 
 type IPDetectionResult struct {
-	IP        string    `json:"ip"`
-	Country   string    `json:"country"`
-	City      string    `json:"city"`
-	ASN       string    `json:"asn"`
-	ISP       string    `json:"isp"`
-	Network   string    `json:"network"`
-	Provider  string    `json:"provider"`
-	Mobile    bool      `json:"mobile"`
-	Proxy     bool      `json:"proxy"`
-	Hosting   bool      `json:"hosting"`
-	CheckedAt time.Time `json:"checked_at"`
-	Error     string    `json:"error"`
+	IP        string `json:"ip"`
+	Country   string `json:"country"`
+	City      string `json:"city"`
+	ASN       string `json:"asn"`
+	ISP       string `json:"isp"`
+	Network   string `json:"network"`
+	Provider  string `json:"provider"`
+	Mobile    bool   `json:"mobile"`
+	Proxy     bool   `json:"proxy"`
+	Hosting   bool   `json:"hosting"`
+	CheckedAt string `json:"checked_at"`
+	Error     string `json:"error"`
 }
 
 type RouteInfo struct {
@@ -189,8 +203,34 @@ type TestResult struct {
 	Error     string `json:"error"`
 }
 
-type Logs struct {
-	Lines []string `json:"lines"`
+type LogEntry struct {
+	ID        uint64         `json:"id"`
+	Timestamp string         `json:"timestamp"`
+	Level     string         `json:"level"`
+	Service   string         `json:"service"`
+	Component string         `json:"component"`
+	Message   string         `json:"message"`
+	Fields    map[string]any `json:"fields"`
+}
+
+type LogQuery struct {
+	Levels   []string `json:"levels"`
+	Services []string `json:"services"`
+	From     string   `json:"from"`
+	To       string   `json:"to"`
+	AfterID  uint64   `json:"after_id"`
+	Limit    int      `json:"limit"`
+}
+
+type LogQueryResult struct {
+	Entries    []LogEntry `json:"entries"`
+	NextCursor uint64     `json:"next_cursor"`
+	HasMore    bool       `json:"has_more"`
+}
+
+type LogMetadata struct {
+	Levels   []string `json:"levels"`
+	Services []string `json:"services"`
 }
 
 type wireResponse struct {
@@ -229,15 +269,6 @@ func (a *App) ListSubscriptions() (Subscriptions, error) {
 
 func (a *App) SetCore(coreID string) error {
 	_, err := call[struct{}](a, "core.select", map[string]any{"core_id": coreID})
-	return err
-}
-
-func (a *App) SetCoreRunning(running bool) error {
-	method := "core.stop"
-	if running {
-		method = "core.start"
-	}
-	_, err := call[struct{}](a, method, nil)
 	return err
 }
 
@@ -307,8 +338,29 @@ func (a *App) RemoveSubscription(id string) error {
 	return err
 }
 
-func (a *App) TailLogs() (Logs, error) {
-	return call[Logs](a, "log.tail", nil)
+func (a *App) QueryLogs(query LogQuery) (LogQueryResult, error) {
+	return call[LogQueryResult](a, "logs.query", query)
+}
+
+func (a *App) GetLogMetadata() (LogMetadata, error) {
+	levels, err := call[struct {
+		Levels []string `json:"levels"`
+	}](a, "logs.levels", nil)
+	if err != nil {
+		return LogMetadata{}, err
+	}
+	services, err := call[struct {
+		Services []string `json:"services"`
+	}](a, "logs.services", nil)
+	if err != nil {
+		return LogMetadata{}, err
+	}
+	return LogMetadata{Levels: levels.Levels, Services: services.Services}, nil
+}
+
+func (a *App) ClearPersistedLogs() error {
+	_, err := call[struct{}](a, "logs.clear.persisted", nil)
+	return err
 }
 
 func call[T any](app *App, method string, payload any) (T, error) {

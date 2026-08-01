@@ -52,8 +52,11 @@ func TestRunProxyBenchmarkUsesConfiguredLocalProxy(t *testing.T) {
 	if result.DownloadMbps <= 0 || result.UploadMbps <= 0 {
 		t.Fatalf("throughput was not measured: %#v", result)
 	}
-	if result.ProxyEndpoint == "" || result.CheckedAt.IsZero() {
+	if result.ProxyEndpoint == "" {
 		t.Fatalf("missing benchmark metadata: %#v", result)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, result.CheckedAt); err != nil {
+		t.Fatalf("invalid benchmark timestamp %q: %v", result.CheckedAt, err)
 	}
 }
 
@@ -127,6 +130,9 @@ func TestVersionGreater(t *testing.T) {
 		{latest: "1.19.28", current: "1.19.29", want: false},
 		{latest: "26.7.1", current: "26.3.27", want: true},
 		{latest: "1.13.14", current: "1.13.14", want: false},
+		{latest: "1.3.0", current: "1.3.0-rc.1", want: true},
+		{latest: "1.3.0-beta.2", current: "1.3.0-beta.11", want: false},
+		{latest: "release-1.4.0", current: "1.3.0", want: false},
 	}
 	for _, test := range tests {
 		if got := versionGreater(test.latest, test.current); got != test.want {

@@ -13,7 +13,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"flag"
 	"fmt"
 	"io"
@@ -23,7 +22,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,10 +32,11 @@ import (
 	"navo/internal/coreadapter"
 	"navo/internal/coremanifest"
 	"navo/internal/domain/core"
-	"navo/internal/domain/revision"
-	"navo/internal/domain/selection"
+	"navo/internal/fsatomic"
 	runtimeconfig "navo/internal/infrastructure/config"
-	"navo/internal/infrastructure/mysqlstore"
+	"navo/internal/infrastructure/localstate"
+	"navo/internal/initialization"
+	"navo/internal/logstore"
 	"navo/internal/pipe"
 	"navo/internal/service"
 	"navo/internal/winprocess"
@@ -67,6 +66,20 @@ func main() {
 
 	executableDir := exeDir()
 	dataDir := localDataDir(executableDir)
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		fatal("create data directory: %v", err)
+	}
+	initializationResult, err := initialization.Run(dataDir)
+	if err != nil || !initializationResult.Ready {
+		fatal("privacy initialization failed (%s): %v", initializationResult.ErrorCode, err)
+	}
+	if err := logstore.Configure(filepath.Join(dataDir, "structured.log.jsonl")); err != nil {
+		fatal("initialize structured logging: %v", err)
+	}
+	_ = logstore.Emit(logstore.LevelInfo, "Launcher", "Initialization", "privacy initialization completed", map[string]any{
+		"first_run": initializationResult.FirstRun, "migrated": initializationResult.Migrated,
+		"foreign_context": initializationResult.ForeignContext, "privacy_reset": initializationResult.PrivacyReset,
+	})
 	if envPath, err := runtimeconfig.LoadDotEnv(dataDir); err != nil {
 		fatal("load environment: %v", err)
 	} else if envPath != "" {
@@ -78,18 +91,25 @@ func main() {
 	}
 	defer logFile.Close()
 	log.Printf("[navo] log: %s", logPath)
+	log.Printf(
+		"[initialization] ready first_run=%t migrated=%t foreign_context=%t privacy_reset=%t",
+		initializationResult.FirstRun,
+		initializationResult.Migrated,
+		initializationResult.ForeignContext,
+		initializationResult.PrivacyReset,
+	)
 
 	// A valid kill-on-close Job Object is mandatory: without it a launcher
 	// crash can leave the desktop UI or a proxy core running in the background.
 	if err := initJobObject(); err != nil {
-		log.Printf("[navo] WARNING: init job object skipped (%v) — child processes will not be auto-killed on crash", err)
+		fatal("initialize mandatory process Job Object: %v", err)
 	}
 
-	// Kill leftover zombie processes from previous runs.
-	cleanupZombies()
-
-	lockFile := filepath.Join(os.TempDir(), "navo.lock")
-	if isAlreadyRunning(lockFile) {
+	instanceLock, alreadyRunning, err := acquireSingleInstance()
+	if err != nil {
+		fatal("acquire single-instance mutex: %v", err)
+	}
+	if alreadyRunning {
 		log.Printf("[navo] existing instance detected, requesting desktop UI")
 		if err := requestExistingUI(3 * time.Second); err != nil {
 			log.Printf("[navo] existing instance UI request failed: %v", err)
@@ -97,27 +117,13 @@ func main() {
 		}
 		return
 	}
-	if err := os.WriteFile(lockFile, []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
-		fatal("create instance lock: %v", err)
-	}
-	defer os.Remove(lockFile)
+	defer instanceLock.Close()
 
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		fatal("create data directory: %v", err)
-	}
-	mysqlConfig, err := runtimeconfig.LoadMySQL()
+	selectionRepository, revisionRepository, err := localstate.Open(
+		filepath.Join(dataDir, "state", "repositories.json"),
+	)
 	if err != nil {
-		fatal("load MySQL configuration: %v", err)
-	}
-	mysqlDB, selectionRepository, revisionRepository, err := initializeMySQL(context.Background(), mysqlConfig)
-	if err != nil {
-		if mysqlConfig.Required {
-			fatal("initialize required MySQL repository: %v", err)
-		}
-		log.Printf("[service] WARNING: MySQL unavailable, continuing with local LastKnownGood state: %v", err)
-	} else if mysqlDB != nil {
-		defer mysqlDB.Close()
-		log.Printf("[service] MySQL repository ready (TLS=%s)", mysqlConfig.TLSMode)
+		fatal("initialize local runtime repositories: %v", err)
 	}
 	singboxPort := findFreePort(*proxyPort, 100)
 	configPath := filepath.Join(dataDir, "runtime.json")
@@ -162,11 +168,13 @@ func main() {
 		serviceExit <- service.RunStandalone(svc)
 	}()
 
-	// Wait for the service to be ready
-	if err := waitForPipe("Navo.Agent.Service.v1", 10*time.Second); err != nil {
-		log.Printf("[navo] WARNING: service not ready: %v", err)
-	} else {
+	select {
+	case <-svc.Ready():
 		log.Printf("[navo] service ready")
+	case err := <-serviceExit:
+		fatal("service startup failed: %v", err)
+	case <-time.After(10 * time.Second):
+		fatal("service startup timed out")
 	}
 
 	// Agent owns the user-scoped UI pipe and system proxy integration.
@@ -287,34 +295,8 @@ func main() {
 	} else {
 		log.Printf("[navo] graceful shutdown complete")
 	}
-	os.Remove(lockFile)
 	cleanRuntimeCache(dataDir)
 	log.Printf("[navo] shutdown complete")
-}
-
-func initializeMySQL(
-	ctx context.Context,
-	cfg runtimeconfig.MySQL,
-) (*sql.DB, selection.Repository, revision.Repository, error) {
-	db, err := mysqlstore.Open(ctx, cfg)
-	if err != nil || db == nil {
-		return nil, nil, nil, err
-	}
-	if err := mysqlstore.Migrate(ctx, db, cfg.QueryTimeout); err != nil {
-		db.Close()
-		return nil, nil, nil, fmt.Errorf("migrate MySQL schema: %w", err)
-	}
-	selectionRepository, err := mysqlstore.NewSelectionRepository(db, cfg.QueryTimeout)
-	if err != nil {
-		db.Close()
-		return nil, nil, nil, err
-	}
-	revisionRepository, err := mysqlstore.NewRevisionRepository(db, cfg.QueryTimeout)
-	if err != nil {
-		db.Close()
-		return nil, nil, nil, err
-	}
-	return db, selectionRepository, revisionRepository, nil
 }
 
 func verifyCoreInstallations(ctx context.Context, root string) error {
@@ -495,7 +477,7 @@ func writeConfig(path string, port int) error {
   "outbounds": [{"type": "direct", "tag": "direct"}],
   "log": {"level": "info", "output": "%s", "timestamp": true}
 }`, port, logPath)
-	return os.WriteFile(path, []byte(cfg), 0600)
+	return fsatomic.WriteFile(path, []byte(cfg), 0600)
 }
 
 var jobObject syscall.Handle
@@ -588,33 +570,12 @@ func cleanRuntimeCache(dataDir string) {
 	}
 }
 
-func cleanupZombies() {
-	for _, name := range []string{"navo-svc-test.exe", "navo-svc.exe", "navo-agent.exe"} {
-		cmd := exec.Command("taskkill", "/f", "/im", name)
-		winprocess.ConfigureHidden(cmd)
-		_ = cmd.Run()
-	}
-}
-
 func exeDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		fatal("resolve executable path: %v", err)
 	}
 	return filepath.Dir(exe)
-}
-
-func isAlreadyRunning(lockFile string) bool {
-	data, err := os.ReadFile(lockFile)
-	if err != nil {
-		return false
-	}
-	s := strings.TrimSpace(string(data))
-	pid, err := strconv.Atoi(s)
-	if err != nil || pid <= 0 || pid == os.Getpid() {
-		return pid == os.Getpid()
-	}
-	return isPidAlive(pid)
 }
 
 func fatal(format string, args ...interface{}) {
@@ -635,17 +596,6 @@ func showFatalError(msg string) {
 }
 
 var logPath string // set by configureLogging
-
-func isPidAlive(pid int) bool {
-	k32 := syscall.NewLazyDLL("kernel32.dll")
-	const queryLimitedInfo = 0x1000
-	h, _, _ := k32.NewProc("OpenProcess").Call(queryLimitedInfo, 0, uintptr(pid))
-	if h == 0 {
-		return false
-	}
-	k32.NewProc("CloseHandle").Call(h)
-	return true
-}
 
 func focusExistingWindow() bool {
 	u32 := syscall.NewLazyDLL("user32.dll")

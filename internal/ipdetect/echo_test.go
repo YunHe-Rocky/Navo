@@ -51,6 +51,24 @@ func TestDetectorUsesDedicatedHTTP1Transport(t *testing.T) {
 	}
 }
 
+func TestDetectorGeoUsesHTTPSAndParsesNestedResponse(t *testing.T) {
+	detector := newDetector(nil)
+	if detector.geoEndpoint[:8] != "https://" {
+		t.Fatalf("geo endpoint is not HTTPS: %s", detector.geoEndpoint)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{"success":true,"country":"CN","city":"Shanghai","connection":{"asn":4134,"isp":"Example ISP","org":"Example Org","type":"Mobile"},"security":{"proxy":true,"hosting":false}}`))
+	}))
+	defer server.Close()
+	detector.client = server.Client()
+	detector.geoEndpoint = server.URL + "/%s"
+	result := &IPResult{IP: "203.0.113.8"}
+	detector.fillGeo(context.Background(), result)
+	if result.Country != "CN" || result.ASN != "AS4134" || !result.Mobile || !result.Proxy {
+		t.Fatalf("geo result = %#v", result)
+	}
+}
+
 func TestDetector_CheckReturnsProviderSafeError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(
 		func(writer http.ResponseWriter, _ *http.Request) {

@@ -92,7 +92,7 @@ func singBoxSpec() adapterSpec {
 			Protocols: allCapabilities(
 				endpoint.ProtocolVLESS, endpoint.ProtocolVMess, endpoint.ProtocolTrojan,
 				endpoint.ProtocolShadowsocks, endpoint.ProtocolHysteria2, endpoint.ProtocolTUIC,
-				endpoint.ProtocolWireGuard, endpoint.ProtocolHTTP, endpoint.ProtocolHTTPS,
+				endpoint.ProtocolHTTP, endpoint.ProtocolHTTPS,
 				endpoint.ProtocolSOCKS5,
 			),
 			CaptureModes: captureCapabilities(true), Controller: true, Metrics: true,
@@ -111,7 +111,7 @@ func mihomoSpec() adapterSpec {
 			Protocols: allCapabilities(
 				endpoint.ProtocolVLESS, endpoint.ProtocolVMess, endpoint.ProtocolTrojan,
 				endpoint.ProtocolShadowsocks, endpoint.ProtocolHysteria2, endpoint.ProtocolTUIC,
-				endpoint.ProtocolWireGuard, endpoint.ProtocolHTTP, endpoint.ProtocolHTTPS,
+				endpoint.ProtocolHTTP, endpoint.ProtocolHTTPS,
 				endpoint.ProtocolSOCKS5,
 			),
 			CaptureModes: captureCapabilities(true), Controller: true, Metrics: true, HotReload: true,

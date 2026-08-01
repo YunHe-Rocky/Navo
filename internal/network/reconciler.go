@@ -4,6 +4,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"navo/internal/fsatomic"
 	"navo/internal/host"
 	"navo/internal/network/tun"
 )
@@ -94,9 +96,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, cfg *ReconcileConfig) (*host
 
 	state, err := r.readState()
 	if err != nil {
-		result.RecoveryState = host.RecoveryNormal
-		log.Printf("[reconciler] no previous state file, assuming normal")
-		return result, nil
+		if errors.Is(err, os.ErrNotExist) {
+			result.RecoveryState = host.RecoveryNormal
+			log.Printf("[reconciler] no previous state file, assuming normal")
+			return result, nil
+		}
+		result.RecoveryState = host.RecoveryDirty
+		return result, fmt.Errorf("read recovery state: %w", err)
 	}
 
 	if state.State == host.RecoveryNormal {
@@ -173,12 +179,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, cfg *ReconcileConfig) (*host
 		}
 	}
 
-	// Step 5: Clean stale files
-	if err := r.cleanupStaleFiles(); err != nil {
-		result.IssuesUnfixed = append(result.IssuesUnfixed,
-			fmt.Sprintf("stale file cleanup failed: %v", err))
-	} else {
-		result.IssuesFixed = append(result.IssuesFixed, "stale files cleaned")
+	if len(result.IssuesUnfixed) > 0 {
+		result.RecoveryState = host.RecoveryDirty
+		return result, fmt.Errorf("network reconciliation incomplete: %s", result.IssuesUnfixed[0])
 	}
 
 	// Mark reconciliation complete
@@ -224,22 +227,7 @@ func (r *Reconciler) writeState(state RecoveryStateFile) error {
 	if err != nil {
 		return fmt.Errorf("cannot marshal recovery state: %w", err)
 	}
-	return os.WriteFile(r.stateFilePath, data, 0644)
-}
-
-// cleanupStaleFiles removes temporary files from a previous session.
-func (r *Reconciler) cleanupStaleFiles() error {
-	dir := filepath.Dir(r.stateFilePath)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() && entry.Name() != filepath.Base(r.stateFilePath) {
-			log.Printf("[reconciler] would clean stale file: %s", entry.Name())
-		}
-	}
-	return nil
+	return fsatomic.WriteFile(r.stateFilePath, data, 0600)
 }
 
 // isPortInUse returns true if a TCP port is currently in use.

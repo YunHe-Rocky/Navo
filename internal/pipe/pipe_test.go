@@ -1,6 +1,8 @@
 package pipe
 
 import (
+	"bytes"
+	"io"
 	"testing"
 	"time"
 )
@@ -29,6 +31,52 @@ func TestFrameRoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch: got %s, want %s", string(data), string(payload))
 	}
 }
+
+func TestWriteFrameCompletesShortWrites(t *testing.T) {
+	w := &shortWriter{limit: 3}
+	payload := []byte(`{"method":"short-write"}`)
+	if err := WriteFrame(w, payload); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := ReadFrame(bytes.NewReader(w.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded, payload) {
+		t.Fatalf("payload = %q", decoded)
+	}
+}
+
+func TestWriteFullRejectsNoProgress(t *testing.T) {
+	if err := writeFull(zeroWriter{}, []byte("data")); err != io.ErrShortWrite {
+		t.Fatalf("error = %v, want io.ErrShortWrite", err)
+	}
+}
+
+func TestFramePayloadBoundary(t *testing.T) {
+	if err := WriteFrame(io.Discard, make([]byte, maxFramePayload)); err != nil {
+		t.Fatalf("10MB boundary rejected: %v", err)
+	}
+	if err := WriteFrame(io.Discard, make([]byte, maxFramePayload+1)); err == nil {
+		t.Fatal("payload above 10MB accepted")
+	}
+}
+
+type shortWriter struct {
+	bytes.Buffer
+	limit int
+}
+
+func (w *shortWriter) Write(data []byte) (int, error) {
+	if len(data) > w.limit {
+		data = data[:w.limit]
+	}
+	return w.Buffer.Write(data)
+}
+
+type zeroWriter struct{}
+
+func (zeroWriter) Write([]byte) (int, error) { return 0, nil }
 
 func TestWriteFrame_TooLarge(t *testing.T) {
 	_, pw := newPipePair()
@@ -231,7 +279,7 @@ func newPipePair() (*pipeReader, *pipeWriter) {
 }
 
 type pipeReader struct {
-	ch    chan byte
+	ch     chan byte
 	closed bool
 }
 

@@ -166,22 +166,14 @@ try {
     $StartInfo.WorkingDirectory = $PackageRoot
     $StartInfo.UseShellExecute = $false
     $PreviousLocalAppData = $env:LOCALAPPDATA
-    $PreviousMySQLEnabled = $env:NAVO_MYSQL_ENABLED
     $PreviousEnvFile = $env:NAVO_ENV_FILE
     $env:LOCALAPPDATA = $LocalAppData
-    $env:NAVO_MYSQL_ENABLED = "false"
     Remove-Item Env:NAVO_ENV_FILE -ErrorAction SilentlyContinue
     try {
         $Launcher = [System.Diagnostics.Process]::Start($StartInfo)
     }
     finally {
         $env:LOCALAPPDATA = $PreviousLocalAppData
-        if ($null -eq $PreviousMySQLEnabled) {
-            Remove-Item Env:NAVO_MYSQL_ENABLED -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:NAVO_MYSQL_ENABLED = $PreviousMySQLEnabled
-        }
         if ($null -eq $PreviousEnvFile) {
             Remove-Item Env:NAVO_ENV_FILE -ErrorAction SilentlyContinue
         }
@@ -250,7 +242,7 @@ try {
         if ($null -eq $StableProcess -or $StableProcess.MainWindowHandle -eq 0) {
             throw "UI window disappeared during the stability window"
         }
-        Invoke-NavoIPC -Method "service.shutdown" | Out-Null
+        & (Join-Path $PSScriptRoot "exit_via_tray.ps1") -ProcessId $Launcher.Id
     }
     else {
         Stop-Process -Id $FirstUI.Id -Force
@@ -268,7 +260,7 @@ try {
         if ($SecondUI.Id -eq $FirstUI.Id) {
             throw "UI process was not recreated"
         }
-        Invoke-NavoIPC -Method "service.shutdown" | Out-Null
+        & (Join-Path $PSScriptRoot "exit_via_tray.ps1") -ProcessId $Launcher.Id
     }
     if (-not $Launcher.WaitForExit(10000)) {
         throw "Launcher did not exit cleanly"

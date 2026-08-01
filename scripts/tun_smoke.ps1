@@ -262,7 +262,11 @@ catch {
     throw
 }
 finally {
-    try { $null = Invoke-NavoIPC -Method "service.shutdown" } catch {}
+    if ($null -ne $Launcher -and -not $Launcher.HasExited) {
+        try {
+            & (Join-Path $PSScriptRoot "exit_via_tray.ps1") -ProcessId $Launcher.Id
+        } catch {}
+    }
     if ($null -ne $Launcher -and -not $Launcher.HasExited) {
         $Launcher.WaitForExit(15000) | Out-Null
     }

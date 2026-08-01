@@ -236,13 +236,13 @@ func (m *Manager) operations(sessionID string) []operation {
 		if strings.Contains(endpoint, ":") {
 			prefix := psQuote(endpoint + "/128")
 			result = append(result, operation{name: name,
-				apply: powershell("$r=Find-NetRoute -RemoteIPAddress " + psQuote(endpoint) + "; if(!$r){throw 'no IPv6 route to proxy endpoint'}; New-NetRoute -DestinationPrefix " + prefix + " -InterfaceIndex $r.InterfaceIndex -NextHop $r.NextHop -RouteMetric " + strconv.Itoa(endpointMetric) + " -PolicyStore ActiveStore -ErrorAction Stop"),
+				apply: endpointBypassApply(endpoint, prefix, "IPv6", adapter, endpointMetric),
 				undo:  powershell("Get-NetRoute -AddressFamily IPv6 -DestinationPrefix " + prefix + " -ErrorAction SilentlyContinue | Where-Object RouteMetric -eq " + strconv.Itoa(endpointMetric) + " | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; exit 0"),
 			})
 		} else {
 			prefix := psQuote(endpoint + "/32")
 			result = append(result, operation{name: name,
-				apply: powershell("$r=Find-NetRoute -RemoteIPAddress " + psQuote(endpoint) + "; if(!$r){throw 'no IPv4 route to proxy endpoint'}; New-NetRoute -DestinationPrefix " + prefix + " -InterfaceIndex $r.InterfaceIndex -NextHop $r.NextHop -RouteMetric " + strconv.Itoa(endpointMetric) + " -PolicyStore ActiveStore -ErrorAction Stop"),
+				apply: endpointBypassApply(endpoint, prefix, "IPv4", adapter, endpointMetric),
 				undo:  powershell("Get-NetRoute -AddressFamily IPv4 -DestinationPrefix " + prefix + " -ErrorAction SilentlyContinue | Where-Object RouteMetric -eq " + strconv.Itoa(endpointMetric) + " | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; exit 0"),
 			})
 		}
@@ -288,6 +288,24 @@ func (m *Manager) operations(sessionID string) []operation {
 	return result
 }
 
+func endpointBypassApply(endpoint, quotedPrefix, family, quotedAdapter string, metric int) Command {
+	metricText := strconv.Itoa(metric)
+	script := "$r=Find-NetRoute -RemoteIPAddress " + psQuote(endpoint) + " -ErrorAction Stop" +
+		" | Where-Object { $_.PSObject.Properties.Name -contains 'NextHop' -and $_.InterfaceAlias -ne " + quotedAdapter + " }" +
+		" | Sort-Object RouteMetric,InterfaceMetric | Select-Object -First 1;" +
+		" if($null -eq $r){throw 'no route to proxy endpoint'};" +
+		" $interfaceIndex=[uint32]$r.InterfaceIndex; $nextHop=[string]$r.NextHop;" +
+		" if($interfaceIndex -le 0){throw 'invalid proxy endpoint route interface index'};" +
+		" $owned=@(Get-NetRoute -AddressFamily " + family + " -DestinationPrefix " + quotedPrefix +
+		" -ErrorAction SilentlyContinue | Where-Object RouteMetric -eq " + metricText + ");" +
+		" $exact=$owned | Where-Object { [uint32]$_.InterfaceIndex -eq $interfaceIndex -and [string]$_.NextHop -eq $nextHop } | Select-Object -First 1;" +
+		" if(!$exact -and $owned.Count -gt 0){throw 'conflicting proxy endpoint route'};" +
+		" if(!$exact){New-NetRoute -DestinationPrefix " + quotedPrefix +
+		" -InterfaceIndex $interfaceIndex -NextHop $nextHop -RouteMetric " + metricText +
+		" -PolicyStore ActiveStore -ErrorAction Stop | Out-Null}"
+	return powershell(script)
+}
+
 func ipv6BlockUndo(sessionID string) Command {
 	ruleName := psQuote("Navo TUN IPv6 Block " + sessionID)
 	return powershell("$rule=Get-NetFirewallRule -DisplayName " + ruleName + " -ErrorAction SilentlyContinue; if($rule){$rule | Remove-NetFirewallRule -ErrorAction SilentlyContinue}; exit 0")
@@ -300,7 +318,8 @@ func sessionMetric(sessionID string) int {
 }
 
 func powershell(script string) Command {
-	return Command{Name: "powershell.exe", Args: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script}}
+	encoding := "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$OutputEncoding=[System.Text.UTF8Encoding]::new();"
+	return Command{Name: "powershell.exe", Args: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", encoding + script}}
 }
 
 func psQuote(value string) string {

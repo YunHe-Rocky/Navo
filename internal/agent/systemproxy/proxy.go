@@ -6,20 +6,27 @@ package systemproxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"navo/internal/fsatomic"
 )
 
 // ProxyConfig holds a snapshot of system proxy state.
 type ProxyConfig struct {
-	Enabled       bool   `json:"enabled"`
-	ProxyServer   string `json:"proxy_server"`
-	BypassList    string `json:"bypass_list,omitempty"`
-	AutoConfigURL string `json:"auto_config_url,omitempty"`
-	AutoDetect    bool   `json:"auto_detect"`
+	Enabled              bool   `json:"enabled"`
+	ProxyServer          string `json:"proxy_server"`
+	BypassList           string `json:"bypass_list,omitempty"`
+	AutoConfigURL        string `json:"auto_config_url,omitempty"`
+	AutoDetect           bool   `json:"auto_detect"`
+	ProxyServerPresent   bool   `json:"proxy_server_present,omitempty"`
+	BypassListPresent    bool   `json:"bypass_list_present,omitempty"`
+	AutoConfigURLPresent bool   `json:"auto_config_url_present,omitempty"`
+	AutoDetectPresent    bool   `json:"auto_detect_present,omitempty"`
 }
 
 // Manager manages Windows system proxy settings.
@@ -37,7 +44,13 @@ type Manager struct {
 
 type ownershipRecord struct {
 	ProxyServer string `json:"proxy_server"`
+	Phase       string `json:"phase,omitempty"`
 }
+
+const (
+	ownershipPending   = "pending"
+	ownershipCommitted = "committed"
+)
 
 // NewManager creates a new system proxy manager.
 func NewManager() *Manager {
@@ -84,26 +97,21 @@ func (m *Manager) Enable(proxyServer string) error {
 		return fmt.Errorf("read proxy ownership: %w", err)
 	}
 
-	// Set proxy via registry
+	if err := m.writeOwnership(proxyServer, ownershipPending); err != nil {
+		return fmt.Errorf("persist pending proxy ownership: %w", err)
+	}
+
 	if err := m.setProxy(proxyServer); err != nil {
-		return fmt.Errorf("set proxy failed: %w", err)
+		return errors.Join(fmt.Errorf("set proxy failed: %w", err), m.restore())
 	}
-
-	// Notify Windows of the change
 	if err := m.notify(); err != nil {
-		// Non-fatal: proxy is set but notification failed
+		return errors.Join(fmt.Errorf("notify proxy change: %w", err), m.restore())
 	}
-
+	if err := m.writeOwnership(proxyServer, ownershipCommitted); err != nil {
+		return errors.Join(fmt.Errorf("commit proxy ownership: %w", err), m.restore())
+	}
 	m.active = true
 	m.currentProxy = proxyServer
-	owner, _ := json.Marshal(map[string]interface{}{
-		"proxy_server": proxyServer,
-		"owned_at":     time.Now().UTC(),
-	})
-	if err := os.WriteFile(m.ownerPath, owner, 0600); err != nil {
-		_ = m.restore()
-		return fmt.Errorf("persist proxy ownership: %w", err)
-	}
 
 	return nil
 }
@@ -127,10 +135,6 @@ func (m *Manager) Disable() error {
 		return nil
 	}
 
-	if err := m.notify(); err != nil {
-		// Non-fatal
-	}
-
 	m.active = false
 	m.currentProxy = ""
 
@@ -147,15 +151,26 @@ func (m *Manager) Backup() error {
 func (m *Manager) backup() error {
 	cfg, err := m.getProxy()
 	if err != nil {
-		// Can't read current state - save what we know
-		cfg = &ProxyConfig{}
+		return fmt.Errorf("read current system proxy: %w", err)
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.backupPath, data, 0644)
+	return fsatomic.WriteFile(m.backupPath, data, 0o600)
+}
+
+func (m *Manager) writeOwnership(proxyServer, phase string) error {
+	owner, err := json.Marshal(struct {
+		ProxyServer string    `json:"proxy_server"`
+		Phase       string    `json:"phase"`
+		UpdatedAt   time.Time `json:"updated_at"`
+	}{ProxyServer: proxyServer, Phase: phase, UpdatedAt: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	return fsatomic.WriteFile(m.ownerPath, owner, 0o600)
 }
 
 // Restore restores the system proxy from the last backup.
@@ -251,6 +266,9 @@ func (m *Manager) owns(cfg ProxyConfig) bool {
 	}
 	var owner ownershipRecord
 	if json.Unmarshal(data, &owner) != nil {
+		return false
+	}
+	if owner.Phase != "" && owner.Phase != ownershipCommitted {
 		return false
 	}
 	return ownershipMatchesCurrent(owner, cfg)

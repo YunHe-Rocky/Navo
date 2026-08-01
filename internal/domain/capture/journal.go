@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"navo/internal/fsatomic"
 )
 
 // TransitionJournal is written before mutation and cleared only after commit or
@@ -67,28 +69,7 @@ func (s *JournalStore) Save(value TransitionJournal) error {
 	if err != nil {
 		return fmt.Errorf("encode capture transition journal: %w", err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(s.path), ".capture-transition-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create capture journal temp file: %w", err)
-	}
-	tempName := temp.Name()
-	defer os.Remove(tempName)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tempName, s.path); err != nil {
+	if err := fsatomic.WriteFile(s.path, data, 0o600); err != nil {
 		return fmt.Errorf("replace capture transition journal: %w", err)
 	}
 	return nil

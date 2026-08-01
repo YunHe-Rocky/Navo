@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,9 +13,11 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,32 +47,51 @@ type HostStatus struct {
 }
 
 type ProxyBenchmark struct {
-	ProxyEndpoint string    `json:"proxy_endpoint"`
-	TestServer    string    `json:"test_server"`
-	LatencyMS     float64   `json:"latency_ms"`
-	JitterMS      float64   `json:"jitter_ms"`
-	DownloadMbps  float64   `json:"download_mbps"`
-	UploadMbps    float64   `json:"upload_mbps"`
-	DownloadBytes int64     `json:"download_bytes"`
-	UploadBytes   int64     `json:"upload_bytes"`
-	DurationMS    int64     `json:"duration_ms"`
-	CheckedAt     time.Time `json:"checked_at"`
+	ProxyEndpoint string  `json:"proxy_endpoint"`
+	TestServer    string  `json:"test_server"`
+	LatencyMS     float64 `json:"latency_ms"`
+	JitterMS      float64 `json:"jitter_ms"`
+	DownloadMbps  float64 `json:"download_mbps"`
+	UploadMbps    float64 `json:"upload_mbps"`
+	DownloadBytes int64   `json:"download_bytes"`
+	UploadBytes   int64   `json:"upload_bytes"`
+	DurationMS    int64   `json:"duration_ms"`
+	CheckedAt     string  `json:"checked_at"`
+}
+
+type LatencyResult struct {
+	OutboundID       string `json:"outbound_id"`
+	State            string `json:"state"`
+	TCPConnectMS     int64  `json:"tcp_connect_ms"`
+	ProxyHandshakeMS int64  `json:"proxy_handshake_ms"`
+	DNSMS            int64  `json:"dns_ms"`
+	TLSMS            int64  `json:"tls_ms"`
+	TTFBMS           int64  `json:"ttfb_ms"`
+	TotalMS          int64  `json:"total_ms"`
+	ExitIP           string `json:"exit_ip,omitempty"`
+	CheckedAt        string `json:"checked_at"`
+	ErrorCode        string `json:"error_code,omitempty"`
+	ErrorMessage     string `json:"error_message,omitempty"`
+	DNSObservable    bool   `json:"dns_observable"`
 }
 
 type CoreUpdateStatus struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	CurrentVersion  string `json:"current_version"`
-	LatestVersion   string `json:"latest_version"`
-	UpdateAvailable bool   `json:"update_available"`
-	IntegrityOK     bool   `json:"integrity_ok"`
-	ReleaseURL      string `json:"release_url"`
-	Error           string `json:"error"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	CurrentVersion       string `json:"current_version"`
+	LatestVersion        string `json:"latest_version"`
+	UpdateAvailable      bool   `json:"update_available"`
+	IntegrityOK          bool   `json:"integrity_ok"`
+	ReleaseURL           string `json:"release_url"`
+	Error                string `json:"error"`
+	State                string `json:"state"`
+	InstallSupported     bool   `json:"install_supported"`
+	InstallBlockedReason string `json:"install_blocked_reason,omitempty"`
 }
 
 type CoreUpdateReport struct {
 	Items     []CoreUpdateStatus `json:"items"`
-	CheckedAt time.Time          `json:"checked_at"`
+	CheckedAt string             `json:"checked_at"`
 }
 
 type benchmarkEndpoints struct {
@@ -152,6 +174,58 @@ func (a *App) RunProxyBenchmark() (ProxyBenchmark, error) {
 	return runProxyBenchmark(ctx, "http://"+proxyAddress, defaultBenchmarkEndpoints, downloadSampleBytes, uploadSampleBytes)
 }
 
+// RunTrafficTransfer performs an explicitly user-triggered, bounded transfer
+// through the current local proxy. It is separate from synthetic chart preview.
+func (a *App) RunTrafficTransfer(sizeMiB int64, direction string) (ProxyBenchmark, error) {
+	if sizeMiB < 1 || sizeMiB > 32 {
+		return ProxyBenchmark{}, errors.New("真实传输大小必须在 1 到 32 MiB 之间")
+	}
+	if direction != "download" && direction != "upload" && direction != "both" {
+		return ProxyBenchmark{}, errors.New("真实传输方向无效")
+	}
+	a.benchmarkMu.Lock()
+	if a.benchmarkRunning {
+		a.benchmarkMu.Unlock()
+		return ProxyBenchmark{}, errors.New("已有测速任务正在运行")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	a.benchmarkRunning = true
+	a.benchmarkCancel = cancel
+	a.benchmarkMu.Unlock()
+	defer func() {
+		cancel()
+		a.benchmarkMu.Lock()
+		a.benchmarkRunning = false
+		a.benchmarkCancel = nil
+		a.benchmarkMu.Unlock()
+	}()
+
+	snapshot, err := a.GetDashboard()
+	if err != nil {
+		return ProxyBenchmark{}, err
+	}
+	if snapshot.Core.State != "running" {
+		return ProxyBenchmark{}, errors.New("当前核心未运行，不能执行真实传输")
+	}
+	host := strings.TrimSpace(snapshot.Proxy.Server)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if snapshot.Proxy.Port < 1 || snapshot.Proxy.Port > 65535 {
+		return ProxyBenchmark{}, errors.New("本地代理端点无效")
+	}
+	bytes := sizeMiB * 1024 * 1024
+	downloadBytes, uploadBytes := int64(0), int64(0)
+	if direction == "download" || direction == "both" {
+		downloadBytes = bytes
+	}
+	if direction == "upload" || direction == "both" {
+		uploadBytes = bytes
+	}
+	return runProxyBenchmark(ctx, "http://"+net.JoinHostPort(host, strconv.Itoa(snapshot.Proxy.Port)),
+		defaultBenchmarkEndpoints, downloadBytes, uploadBytes)
+}
+
 func (a *App) CancelProxyBenchmark() {
 	a.benchmarkMu.Lock()
 	cancel := a.benchmarkCancel
@@ -161,6 +235,148 @@ func (a *App) CancelProxyBenchmark() {
 	}
 }
 
+// RunLatencyTest measures the active route without changing route or Capture
+// state. Remote DNS is resolved inside the proxy core and is deliberately
+// reported as unobservable instead of being replaced with a fabricated value.
+func (a *App) RunLatencyTest(outboundID string) (LatencyResult, error) {
+	a.benchmarkMu.Lock()
+	if a.benchmarkRunning {
+		a.benchmarkMu.Unlock()
+		return LatencyResult{}, errors.New("已有测速任务正在运行")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	a.benchmarkRunning = true
+	a.benchmarkCancel = cancel
+	a.benchmarkMu.Unlock()
+	defer func() {
+		cancel()
+		a.benchmarkMu.Lock()
+		a.benchmarkRunning = false
+		a.benchmarkCancel = nil
+		a.benchmarkMu.Unlock()
+	}()
+
+	routes, err := a.ListRoutes()
+	if err != nil {
+		return LatencyResult{}, err
+	}
+	requested := strings.TrimSpace(outboundID)
+	if requested == "" {
+		requested = routes.ActiveID
+	}
+	result := LatencyResult{
+		OutboundID: requested,
+		State:      "testing",
+		CheckedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if requested == "" || requested != routes.ActiveID {
+		result.State = "failed"
+		result.ErrorCode = "OUTBOUND_NOT_ACTIVE"
+		result.ErrorMessage = "分层测速仅允许当前节点，测试不会临时切换线路"
+		return result, nil
+	}
+	tcp, err := a.TestRoute(requested)
+	if err != nil {
+		return LatencyResult{}, err
+	}
+	result.TCPConnectMS = tcp.LatencyMS
+	if !tcp.Reachable {
+		result.State = "failed"
+		result.ErrorCode = "TCP_UNREACHABLE"
+		result.ErrorMessage = tcp.Error
+		return result, nil
+	}
+
+	snapshot, err := a.GetDashboard()
+	if err != nil {
+		return LatencyResult{}, err
+	}
+	if snapshot.Core.State != "running" {
+		result.State = "failed"
+		result.ErrorCode = "CORE_NOT_RUNNING"
+		result.ErrorMessage = "当前核心未运行，无法验证代理握手与出口"
+		return result, nil
+	}
+	proxyHost := strings.TrimSpace(snapshot.Proxy.Server)
+	if proxyHost == "" {
+		proxyHost = "127.0.0.1"
+	}
+	proxyURL, err := url.Parse("http://" + net.JoinHostPort(proxyHost, strconv.Itoa(snapshot.Proxy.Port)))
+	if err != nil || snapshot.Proxy.Port < 1 || snapshot.Proxy.Port > 65535 {
+		return LatencyResult{}, errors.New("本地代理端点无效")
+	}
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL), DisableKeepAlives: true, ForceAttemptHTTP2: true,
+		DialContext:         (&net.Dialer{Timeout: 4 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 6 * time.Second, ResponseHeaderTimeout: 10 * time.Second,
+	}
+	defer transport.CloseIdleConnections()
+	var gotConnAt, tlsStart, tlsDone, firstByte time.Time
+	trace := &httptrace.ClientTrace{
+		GotConn:              func(httptrace.GotConnInfo) { gotConnAt = time.Now() },
+		TLSHandshakeStart:    func() { tlsStart = time.Now() },
+		TLSHandshakeDone:     func(tls.ConnectionState, error) { tlsDone = time.Now() },
+		GotFirstResponseByte: func() { firstByte = time.Now() },
+	}
+	started := time.Now()
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet,
+		addQuery(defaultBenchmarkEndpoints.latency, "r", strconv.FormatInt(time.Now().UnixNano(), 10)), nil)
+	if err != nil {
+		return LatencyResult{}, err
+	}
+	req.Header.Set("Cache-Control", "no-store")
+	response, err := (&http.Client{Transport: transport}).Do(req)
+	if err != nil {
+		result.State = "failed"
+		result.ErrorCode = latencyErrorCode(ctx, err)
+		result.ErrorMessage = err.Error()
+		return result, nil
+	}
+	_, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, 1024))
+	closeErr := response.Body.Close()
+	result.TotalMS = time.Since(started).Milliseconds()
+	if !gotConnAt.IsZero() && !tlsStart.IsZero() {
+		result.ProxyHandshakeMS = tlsStart.Sub(gotConnAt).Milliseconds()
+	}
+	if !tlsStart.IsZero() && !tlsDone.IsZero() {
+		result.TLSMS = tlsDone.Sub(tlsStart).Milliseconds()
+	}
+	if !firstByte.IsZero() {
+		result.TTFBMS = firstByte.Sub(started).Milliseconds()
+	}
+	if readErr != nil || closeErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
+		result.State = "failed"
+		result.ErrorCode = "HTTP_RESPONSE_FAILED"
+		result.ErrorMessage = fmt.Sprintf("受控请求返回 HTTP %d", response.StatusCode)
+		return result, nil
+	}
+	ipResult, ipErr := a.CheckIP()
+	if ipErr != nil || ipResult.Proxy.Error != "" || strings.TrimSpace(ipResult.Proxy.IP) == "" {
+		result.State = "partial"
+		result.ErrorCode = "EXIT_IP_UNAVAILABLE"
+		result.ErrorMessage = "协议链路可用，但出口 IP 暂时无法确认"
+		return result, nil
+	}
+	result.ExitIP = ipResult.Proxy.IP
+	result.State = "completed"
+	return result, nil
+}
+
+func latencyErrorCode(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return "LATENCY_TIMEOUT"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "LATENCY_TIMEOUT"
+	}
+	var tlsErr tls.RecordHeaderError
+	if errors.As(err, &tlsErr) {
+		return "TLS_FAILED"
+	}
+	return "PROXY_HANDSHAKE_FAILED"
+}
+
 func (a *App) CheckCoreUpdates() (CoreUpdateReport, error) {
 	snapshot, err := call[Dashboard](a, "dashboard.snapshot", nil)
 	if err != nil {
@@ -168,7 +384,17 @@ func (a *App) CheckCoreUpdates() (CoreUpdateReport, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	return checkCoreUpdates(ctx, runtimeRoot(), snapshot.Cores, coreReleaseSources, &http.Client{Timeout: 8 * time.Second}), nil
+	report := checkCoreUpdates(ctx, runtimeRoot(), snapshot.Cores, coreReleaseSources, &http.Client{Timeout: 8 * time.Second})
+	a.coreUpdateMu.Lock()
+	a.coreUpdateCache = report
+	a.coreUpdateMu.Unlock()
+	return report, nil
+}
+
+func (a *App) GetCoreUpdateStatus() CoreUpdateReport {
+	a.coreUpdateMu.RLock()
+	defer a.coreUpdateMu.RUnlock()
+	return a.coreUpdateCache
 }
 
 func (a *App) OpenCoreRelease(coreID string) error {
@@ -238,14 +464,28 @@ func runProxyBenchmark(
 		latencies = append(latencies, float64(time.Since(sampleStarted).Microseconds())/1000)
 	}
 
-	downloadURL := addQuery(endpoints.download, "bytes", strconv.FormatInt(downloadBytes, 10))
-	downloaded, downloadDuration, err := transferDownload(ctx, client, downloadURL, downloadBytes)
-	if err != nil {
-		return ProxyBenchmark{}, err
+	var downloaded, uploaded int64
+	var downloadDuration, uploadDuration time.Duration
+	if downloadBytes > 0 {
+		downloadURL := addQuery(endpoints.download, "bytes", strconv.FormatInt(downloadBytes, 10))
+		downloaded, downloadDuration, err = transferDownload(ctx, client, downloadURL, downloadBytes)
+		if err != nil {
+			return ProxyBenchmark{}, err
+		}
 	}
-	uploaded, uploadDuration, err := transferUpload(ctx, client, endpoints.upload, uploadBytes)
-	if err != nil {
-		return ProxyBenchmark{}, err
+	if uploadBytes > 0 {
+		uploaded, uploadDuration, err = transferUpload(ctx, client, endpoints.upload, uploadBytes)
+		if err != nil {
+			return ProxyBenchmark{}, err
+		}
+	}
+	downloadMbps := 0.0
+	uploadMbps := 0.0
+	if downloadDuration > 0 {
+		downloadMbps = round(float64(downloaded)*8/downloadDuration.Seconds()/1_000_000, 2)
+	}
+	if uploadDuration > 0 {
+		uploadMbps = round(float64(uploaded)*8/uploadDuration.Seconds()/1_000_000, 2)
 	}
 
 	return ProxyBenchmark{
@@ -253,12 +493,12 @@ func runProxyBenchmark(
 		TestServer:    hostOf(endpoints.download),
 		LatencyMS:     round(mean(latencies), 1),
 		JitterMS:      round(standardDeviation(latencies), 1),
-		DownloadMbps:  round(float64(downloaded)*8/downloadDuration.Seconds()/1_000_000, 2),
-		UploadMbps:    round(float64(uploaded)*8/uploadDuration.Seconds()/1_000_000, 2),
+		DownloadMbps:  downloadMbps,
+		UploadMbps:    uploadMbps,
 		DownloadBytes: downloaded,
 		UploadBytes:   uploaded,
 		DurationMS:    time.Since(started).Milliseconds(),
-		CheckedAt:     time.Now().UTC(),
+		CheckedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 	}, nil
 }
 
@@ -279,6 +519,10 @@ func transferDownload(ctx context.Context, client *http.Client, target string, e
 	}
 	count, err := io.Copy(io.Discard, io.LimitReader(resp.Body, expected+1))
 	duration := time.Since(started)
+	if duration <= 0 {
+		// Very small loopback fixtures can complete inside one Windows clock tick.
+		duration = time.Nanosecond
+	}
 	if err != nil {
 		return 0, 0, benchmarkError(ctx, "读取测速数据失败", err)
 	}
@@ -307,7 +551,11 @@ func transferUpload(ctx context.Context, client *http.Client, target string, siz
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return 0, 0, fmt.Errorf("上传测速返回 HTTP %d", resp.StatusCode)
 	}
-	return size, time.Since(started), nil
+	duration := time.Since(started)
+	if duration <= 0 {
+		duration = time.Nanosecond
+	}
+	return size, duration, nil
 }
 
 func checkCoreUpdates(
@@ -330,7 +578,11 @@ func checkCoreUpdates(
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			status := CoreUpdateStatus{ID: source.id, Name: source.name, ReleaseURL: source.releaseURL}
+			status := CoreUpdateStatus{
+				ID: source.id, Name: source.name, ReleaseURL: source.releaseURL, State: "checking",
+				InstallSupported:     false,
+				InstallBlockedReason: "当前发布未包含受信更新资产 SHA-256；仅允许查看官方版本，不执行不受信安装",
+			}
 			entry, ok := manifest[source.id]
 			if ok {
 				status.CurrentVersion = entry.Version
@@ -360,12 +612,22 @@ func checkCoreUpdates(
 				}
 				status.UpdateAvailable = status.IntegrityOK && versionGreater(latest, status.CurrentVersion)
 			}
+			switch {
+			case status.Error != "":
+				status.State = "failed"
+			case status.UpdateAvailable:
+				status.State = "update_available"
+			default:
+				status.State = "up_to_date"
+			}
 			items[index] = status
 		}()
 	}
 	wait.Wait()
 	sort.SliceStable(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-	return CoreUpdateReport{Items: items, CheckedAt: time.Now().UTC()}
+	return CoreUpdateReport{
+		Items: items, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
 }
 
 type manifestCore struct {
@@ -455,8 +717,11 @@ func verifyFileSHA256(path string, expected string) bool {
 }
 
 func versionGreater(latest string, current string) bool {
-	left := numericVersion(latest)
-	right := numericVersion(current)
+	left, leftOK := parseSemanticVersion(latest)
+	right, rightOK := parseSemanticVersion(current)
+	if !leftOK || !rightOK {
+		return false
+	}
 	length := len(left)
 	if len(right) > length {
 		length = len(right)
@@ -473,20 +738,81 @@ func versionGreater(latest string, current string) bool {
 			return l > r
 		}
 	}
-	return false
+	leftPre := semanticPrerelease(latest)
+	rightPre := semanticPrerelease(current)
+	if leftPre == rightPre {
+		return false
+	}
+	if leftPre == "" {
+		return true
+	}
+	if rightPre == "" {
+		return false
+	}
+	return comparePrerelease(leftPre, rightPre) > 0
 }
 
-func numericVersion(value string) []int {
-	value = strings.TrimSpace(strings.TrimPrefix(value, "v"))
-	parts := strings.FieldsFunc(value, func(r rune) bool { return r < '0' || r > '9' })
+var semanticVersionPattern = regexp.MustCompile(`^[vV]?[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+
+func parseSemanticVersion(value string) ([]int, bool) {
+	value = strings.TrimSpace(value)
+	if !semanticVersionPattern.MatchString(value) {
+		return nil, false
+	}
+	value = strings.TrimPrefix(strings.TrimPrefix(value, "v"), "V")
+	core, _, _ := strings.Cut(value, "+")
+	core, _, _ = strings.Cut(core, "-")
+	parts := strings.Split(core, ".")
 	result := make([]int, 0, len(parts))
 	for _, part := range parts {
 		number, err := strconv.Atoi(part)
-		if err == nil {
-			result = append(result, number)
+		if err != nil {
+			return nil, false
+		}
+		result = append(result, number)
+	}
+	return result, true
+}
+
+func semanticPrerelease(value string) string {
+	value = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(value, "v"), "V"))
+	value, _, _ = strings.Cut(value, "+")
+	_, prerelease, found := strings.Cut(value, "-")
+	if !found {
+		return ""
+	}
+	return prerelease
+}
+
+func comparePrerelease(left, right string) int {
+	lParts, rParts := strings.Split(left, "."), strings.Split(right, ".")
+	for index := 0; index < max(len(lParts), len(rParts)); index++ {
+		if index >= len(lParts) {
+			return -1
+		}
+		if index >= len(rParts) {
+			return 1
+		}
+		lNumber, lErr := strconv.Atoi(lParts[index])
+		rNumber, rErr := strconv.Atoi(rParts[index])
+		switch {
+		case lErr == nil && rErr == nil && lNumber != rNumber:
+			if lNumber > rNumber {
+				return 1
+			}
+			return -1
+		case lErr == nil && rErr != nil:
+			return -1
+		case lErr != nil && rErr == nil:
+			return 1
+		case lParts[index] != rParts[index]:
+			if lParts[index] > rParts[index] {
+				return 1
+			}
+			return -1
 		}
 	}
-	return result
+	return 0
 }
 
 func addQuery(rawURL string, key string, value string) string {

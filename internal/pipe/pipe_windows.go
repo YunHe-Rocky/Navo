@@ -47,6 +47,7 @@ const (
 	errorPipeBusy      = 231
 
 	waitTimeout   = 0x00000102 // WAIT_TIMEOUT
+	waitFailed    = 0xFFFFFFFF
 	sddlRevision1 = 1
 )
 
@@ -158,6 +159,7 @@ func (l *NamedPipeListener) listenLoop() {
 					if waitRet == waitTimeout {
 						select {
 						case <-l.done:
+							cancelAndReap(h, overlapped, hEvent)
 							procCloseHandle.Call(uintptr(hEvent))
 							procCloseHandle.Call(uintptr(h))
 							return
@@ -167,7 +169,8 @@ func (l *NamedPipeListener) listenLoop() {
 					}
 					// WAIT_OBJECT_0 (0) or error — stop polling
 					if waitRet == 0 {
-						connected = true
+						_, connectedErr := getOverlappedResult(h, overlapped)
+						connected = connectedErr == nil
 					}
 					break
 				}
@@ -256,10 +259,24 @@ type pipeConn struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 	mu            sync.Mutex
+	pending       map[*pendingIO]struct{}
+	closed        bool
+	closeOnce     sync.Once
+	closeDone     chan struct{}
+	closeErr      error
+}
+
+type pendingIO struct {
+	overlapped *syscall.Overlapped
+	event      syscall.Handle
+	done       chan struct{}
 }
 
 func newPipeConn(h syscall.Handle, name string) *pipeConn {
-	return &pipeConn{handle: h, name: name}
+	return &pipeConn{
+		handle: h, name: name,
+		pending: make(map[*pendingIO]struct{}), closeDone: make(chan struct{}),
+	}
 }
 
 func (c *pipeConn) deadlineTimeout(deadline time.Time) uint32 {
@@ -286,28 +303,19 @@ func (c *pipeConn) Read(b []byte) (int, error) {
 		return 0, errPipeTimeout
 	}
 
-	overlapped := &syscall.Overlapped{}
-	hEvent, err := createEvent()
+	op, err := c.beginIO()
 	if err != nil {
 		return 0, err
 	}
-	overlapped.HEvent = hEvent
-	defer procCloseHandle.Call(uintptr(hEvent))
+	defer c.endIO(op)
 
 	var done uint32
-	readErr := syscall.ReadFile(c.handle, b, &done, overlapped)
+	readErr := syscall.ReadFile(c.handle, b, &done, op.overlapped)
 	if readErr != nil && readErr != syscall.ERROR_IO_PENDING {
 		return int(done), readErr
 	}
 	if readErr == syscall.ERROR_IO_PENDING {
-		waitRet, _, _ := procWaitForSingleObject.Call(
-			uintptr(hEvent), uintptr(timeout))
-		if waitRet == waitTimeout {
-			procCancelIoEx.Call(uintptr(c.handle), uintptr(unsafe.Pointer(overlapped)))
-			procWaitForSingleObject.Call(uintptr(hEvent), uintptr(1000))
-			return 0, errPipeTimeout
-		}
-		transferred, getErr := getOverlappedResult(c.handle, overlapped)
+		transferred, getErr := awaitOverlapped(c.handle, op.overlapped, op.event, timeout)
 		if getErr != nil {
 			return int(transferred), getErr
 		}
@@ -325,28 +333,19 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 		return 0, errPipeTimeout
 	}
 
-	overlapped := &syscall.Overlapped{}
-	hEvent, err := createEvent()
+	op, err := c.beginIO()
 	if err != nil {
 		return 0, err
 	}
-	overlapped.HEvent = hEvent
-	defer procCloseHandle.Call(uintptr(hEvent))
+	defer c.endIO(op)
 
 	var done uint32
-	writeErr := syscall.WriteFile(c.handle, b, &done, overlapped)
+	writeErr := syscall.WriteFile(c.handle, b, &done, op.overlapped)
 	if writeErr != nil && writeErr != syscall.ERROR_IO_PENDING {
 		return int(done), writeErr
 	}
 	if writeErr == syscall.ERROR_IO_PENDING {
-		waitRet, _, _ := procWaitForSingleObject.Call(
-			uintptr(hEvent), uintptr(timeout))
-		if waitRet == waitTimeout {
-			procCancelIoEx.Call(uintptr(c.handle), uintptr(unsafe.Pointer(overlapped)))
-			procWaitForSingleObject.Call(uintptr(hEvent), uintptr(1000))
-			return 0, errPipeTimeout
-		}
-		transferred, getErr := getOverlappedResult(c.handle, overlapped)
+		transferred, getErr := awaitOverlapped(c.handle, op.overlapped, op.event, timeout)
 		if getErr != nil {
 			return int(transferred), getErr
 		}
@@ -356,7 +355,56 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 }
 
 func (c *pipeConn) Close() error {
-	return syscall.CloseHandle(c.handle)
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
+		pending := make([]*pendingIO, 0, len(c.pending))
+		for op := range c.pending {
+			pending = append(pending, op)
+		}
+		c.mu.Unlock()
+
+		for _, op := range pending {
+			procCancelIoEx.Call(
+				uintptr(c.handle), uintptr(unsafe.Pointer(op.overlapped)),
+			)
+		}
+		for _, op := range pending {
+			<-op.done
+		}
+		c.closeErr = syscall.CloseHandle(c.handle)
+		close(c.closeDone)
+	})
+	<-c.closeDone
+	return c.closeErr
+}
+
+func (c *pipeConn) beginIO() (*pendingIO, error) {
+	event, err := createEvent()
+	if err != nil {
+		return nil, err
+	}
+	op := &pendingIO{
+		overlapped: &syscall.Overlapped{HEvent: event},
+		event:      event,
+		done:       make(chan struct{}),
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		procCloseHandle.Call(uintptr(event))
+		return nil, windows.ERROR_INVALID_HANDLE
+	}
+	c.pending[op] = struct{}{}
+	return op, nil
+}
+
+func (c *pipeConn) endIO(op *pendingIO) {
+	c.mu.Lock()
+	delete(c.pending, op)
+	c.mu.Unlock()
+	procCloseHandle.Call(uintptr(op.event))
+	close(op.done)
 }
 
 func (c *pipeConn) LocalAddr() pipeAddr  { return pipeAddr(c.name) }
@@ -537,6 +585,42 @@ func createEvent() (syscall.Handle, error) {
 		return 0, fmt.Errorf("CreateEvent failed: %v", e)
 	}
 	return syscall.Handle(h), nil
+}
+
+func awaitOverlapped(
+	h syscall.Handle,
+	overlapped *syscall.Overlapped,
+	event syscall.Handle,
+	timeout uint32,
+) (uint32, error) {
+	waitResult, _, waitErr := procWaitForSingleObject.Call(
+		uintptr(event), uintptr(timeout),
+	)
+	switch waitResult {
+	case 0:
+		return getOverlappedResult(h, overlapped)
+	case waitTimeout:
+		cancelAndReap(h, overlapped, event)
+		return 0, errPipeTimeout
+	case waitFailed:
+		cancelAndReap(h, overlapped, event)
+		return 0, fmt.Errorf("WaitForSingleObject failed: %w", waitErr)
+	default:
+		cancelAndReap(h, overlapped, event)
+		return 0, fmt.Errorf("unexpected overlapped wait result: %d", waitResult)
+	}
+}
+
+// cancelAndReap keeps the OVERLAPPED and event alive until the kernel has
+// completed cancellation. Callers may release those resources only afterward.
+func cancelAndReap(
+	h syscall.Handle,
+	overlapped *syscall.Overlapped,
+	event syscall.Handle,
+) {
+	procCancelIoEx.Call(uintptr(h), uintptr(unsafe.Pointer(overlapped)))
+	procWaitForSingleObject.Call(uintptr(event), uintptr(syscall.INFINITE))
+	_, _ = getOverlappedResult(h, overlapped)
 }
 
 func getOverlappedResult(h syscall.Handle, overlapped *syscall.Overlapped) (uint32, error) {

@@ -206,6 +206,34 @@ func TestClashParserInlineModernProtocols(t *testing.T) {
 	}
 }
 
+func TestClashParserReadsNestedTransportOptions(t *testing.T) {
+	input := `proxies:
+  - name: Nested
+    type: vless
+    server: edge.example.com
+    port: 443
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+    tls: true
+    network: ws
+    ws-opts:
+      path: /tunnel
+      headers:
+        Host: cdn.example.com
+    reality-opts:
+      public-key: public-key
+      short-id: abcd
+`
+	result, err := NewClashParser().Parse([]byte(input))
+	if err != nil || len(result.Outbounds) != 1 {
+		t.Fatalf("parse result=%#v err=%v", result, err)
+	}
+	outbound := result.Outbounds[0]
+	if outbound.TransportPath != "/tunnel" || outbound.TransportHost != "cdn.example.com" ||
+		outbound.RealityPublicKey != "public-key" || outbound.RealityShortID != "abcd" {
+		t.Fatalf("nested options lost: %#v", outbound)
+	}
+}
+
 func TestParser_EmptyInput(t *testing.T) {
 	parsers := []Parser{
 		NewSSParser(), NewVMessParser(), NewVLESSParser(),

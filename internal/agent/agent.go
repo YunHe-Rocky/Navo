@@ -21,6 +21,7 @@ import (
 
 	"navo/internal/agent/systemproxy"
 	"navo/internal/domain/capture"
+	"navo/internal/logstore"
 	"navo/internal/pipe"
 )
 
@@ -404,7 +405,10 @@ func (a *Agent) handleUIConnection(ctx context.Context, ch *pipe.Channel) {
 		default:
 		}
 
-		ch.SetDeadline(time.Now().Add(30 * time.Second))
+		if err := ch.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			log.Printf("[agent] set UI read deadline: %v", err)
+			return
+		}
 
 		var msg map[string]interface{}
 		if err := ch.Receive(&msg); err != nil {
@@ -413,9 +417,18 @@ func (a *Agent) handleUIConnection(ctx context.Context, ch *pipe.Channel) {
 
 		log.Printf("[agent] UI request: method=%v", msg["method"])
 
-		response := a.dispatchUI(ctx, msg)
+		requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		response := a.dispatchUI(requestCtx, msg)
+		cancel()
 		if response != nil {
-			ch.Send(response)
+			if err := ch.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				log.Printf("[agent] set UI write deadline: %v", err)
+				return
+			}
+			if err := ch.Send(response); err != nil {
+				log.Printf("[agent] UI send error: %v", err)
+				return
+			}
 		}
 	}
 }
@@ -423,6 +436,9 @@ func (a *Agent) handleUIConnection(ctx context.Context, ch *pipe.Channel) {
 func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[string]interface{} {
 	method, _ := msg["method"].(string)
 	requestID, _ := msg["request_id"].(string)
+	_ = logstore.Emit(logstore.LevelDebug, "Agent", "UIIPC", "request received", map[string]any{
+		"method": method, "request_id": requestID,
+	})
 
 	switch method {
 	case "dashboard.snapshot":
@@ -442,7 +458,7 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 	case "connection.disable":
 		return a.handleConnectionDisable(requestID)
 	case "connection.restart":
-		return a.callService(requestID, "core.restart")
+		return a.handleConnectionRestart(ctx, requestID)
 	case "network.recover":
 		return a.handleNetworkRecover(requestID)
 	case "capture.set":
@@ -468,15 +484,14 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 			"type":       "RESPONSE",
 			"payload":    status,
 		}
-	case "core.start", "core.stop", "core.status", "core.restart", "core.list", "core.select", "service.shutdown",
+	case "core.status", "core.list", "core.select",
 		"tun.status", "tun.config",
 		"subscription.add", "subscription.update", "subscription.remove", "subscription.list", "subscription.refresh",
 		"outbound.list", "outbound.select", "outbound.create", "outbound.delete", "outbound.update", "outbound.test", "outbound.testAll",
 		"runtime.status", "runtime.mode.set",
 		"metrics.current", "ip.check", "ip.check_all",
 		"diagnostics.export", "log.tail", "core.log.tail",
-		"ai.rule.generate", "ai.diagnose", "ai.explain",
-		"ai.config.get", "ai.config.set", "ai.config.test":
+		"logs.query", "logs.services", "logs.levels", "logs.clear.persisted":
 		// Forward to service
 		resp, err := a.SendToService(msg)
 		if err != nil {
@@ -591,6 +606,9 @@ func responseMessage(resp map[string]interface{}) string {
 }
 
 func agentError(requestID, code string, err error) map[string]interface{} {
+	_ = logstore.Emit(logstore.LevelError, "Agent", "UIIPC", "request failed", map[string]any{
+		"request_id": requestID, "error_code": code,
+	})
 	return map[string]interface{}{
 		"request_id": requestID,
 		"type":       "ERROR",

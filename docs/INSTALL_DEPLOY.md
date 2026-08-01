@@ -135,30 +135,12 @@ Set-Location ..
 
 CI 和正式构建必须使用 `npm ci`，不要使用会修改锁文件的 `npm install`。
 
-### 5.1 接入现有云端 MySQL
+### 5.1 本地状态
 
-Navo 不安装 MySQL。开发环境可使用项目根目录 `.env`；安装版请将
-`.env.example` 复制到 `%LOCALAPPDATA%\Navo\.env` 后填写现有云端实例。
-发布包和安装程序不会携带开发者的真实 `.env`。程序启动时自动执行带版本
-和校验和的 Schema migration：
-
-```dotenv
-NAVO_MYSQL_ENABLED=true
-NAVO_MYSQL_REQUIRED=true
-NAVO_MYSQL_HOST=mysql.example.com
-NAVO_MYSQL_PORT=3306
-NAVO_MYSQL_DATABASE=navo
-NAVO_MYSQL_USER=navo_app
-NAVO_MYSQL_PASSWORD=replace-with-a-real-secret
-NAVO_MYSQL_TLS_MODE=verify_identity
-NAVO_MYSQL_CA_FILE=C:\ProgramData\Navo\certs\mysql-ca.pem
-```
-
-- `.env` 已加入 `.gitignore`，不得提交真实密码。
-- `verify_identity` 会同时校验证书链和主机名，生产环境保持此值。
-- 云服务使用私有 CA 时填写 `NAVO_MYSQL_CA_FILE`；系统信任的 CA 可留空。
-- `NAVO_MYSQL_REQUIRED=true` 时连接或迁移失败会阻止启动，避免错误地回退到不一致状态。
-- 不启用云端仓库时保持 `NAVO_MYSQL_ENABLED=false`，本地功能仍可运行。
+Navo 不连接数据库。当前节点选择、配置 revision 和 committed runtime
+保存在 `%LOCALAPPDATA%\Navo\state` 的版本化本地文件中，写入使用同目录临时
+文件、flush 和原子替换。敏感订阅与代理凭据继续使用 DPAPI Current User
+保护，不得写入普通日志或环境变量。
 
 ## 6. 构建前检查
 

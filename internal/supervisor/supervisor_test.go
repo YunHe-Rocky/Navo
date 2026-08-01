@@ -183,6 +183,27 @@ func TestCoreLifecycleOutlivesStartupRequestContext(t *testing.T) {
 	}
 }
 
+func TestCrashMonitorOutlivesStartupRequestContext(t *testing.T) {
+	mock := &mockCoreHost{}
+	s := NewSupervisor(mock, nil)
+	s.backoff = []time.Duration{time.Millisecond}
+	startupCtx, cancelStartup := context.WithCancel(context.Background())
+	if err := s.Start(startupCtx, "config.json"); err != nil {
+		t.Fatal(err)
+	}
+	cancelStartup()
+	mock.status.State = host.HostStateFailed
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Status().TotalRestarts > 0 {
+			_ = s.Stop(context.Background())
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("supervisor stopped monitoring when startup request context ended")
+}
+
 func TestSupervisor_DoubleStart(t *testing.T) {
 	mock := &mockCoreHost{}
 	s := NewSupervisor(mock, nil)

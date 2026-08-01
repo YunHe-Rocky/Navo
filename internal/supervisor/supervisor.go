@@ -33,8 +33,7 @@ type Supervisor struct {
 	// Config management
 	activeConfigPath string
 
-	// Event channel
-	eventCh   chan StateEvent
+	// Event subscribers
 	eventSubs []chan StateEvent
 	subMu     sync.RWMutex
 
@@ -51,7 +50,6 @@ func NewSupervisor(h host.CoreHost, rec *network.Reconciler) *Supervisor {
 		stateSince:  time.Now(),
 		backoff:     []time.Duration{3 * time.Second, 10 * time.Second, 30 * time.Second},
 		maxRestarts: 3,
-		eventCh:     make(chan StateEvent, 100),
 	}
 }
 
@@ -194,7 +192,7 @@ func (s *Supervisor) Status() SupervisorStatus {
 		status.PID = hostStatus.PID
 		status.Uptime = hostStatus.Uptime
 		status.ConfigHash = hostStatus.ConfigHash
-		status.RestartCount = hostStatus.RestartCount
+		status.RestartCount = s.restartCount
 	}
 
 	return status
@@ -278,7 +276,7 @@ func (s *Supervisor) startCore(ctx context.Context, configPath string) error {
 	log.Printf("[supervisor] core started (PID=%d, config=%s)", pid, configPath)
 
 	// Start crash monitor
-	go s.monitor(ctx, configPath)
+	go s.monitor(lifecycleCtx, configPath)
 
 	return nil
 }
@@ -318,6 +316,12 @@ func (s *Supervisor) monitor(ctx context.Context, configPath string) {
 }
 
 func (s *Supervisor) handleCrash(ctx context.Context, configPath string) {
+	s.mu.Lock()
+	previousLifecycleCancel := s.cancel
+	s.mu.Unlock()
+	if previousLifecycleCancel != nil {
+		previousLifecycleCancel()
+	}
 	if s.restartIsSuppressed() {
 		s.setState(StateFailed)
 		log.Printf("[supervisor] core restart suppressed by capture coordinator")
@@ -412,12 +416,6 @@ func (s *Supervisor) setState(state State) {
 
 // emit sends a state event to all subscribers.
 func (s *Supervisor) emit(event StateEvent) {
-	// Non-blocking send to main channel for logging
-	select {
-	case s.eventCh <- event:
-	default:
-	}
-
 	s.subMu.RLock()
 	defer s.subMu.RUnlock()
 	for _, ch := range s.eventSubs {

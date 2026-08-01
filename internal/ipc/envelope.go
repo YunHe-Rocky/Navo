@@ -150,9 +150,6 @@ func newRequestID() string {
 
 // Core control methods.
 const (
-	MethodCoreStart      = "core.start"
-	MethodCoreStop       = "core.stop"
-	MethodCoreRestart    = "core.restart"
 	MethodCoreStatus     = "core.status"
 	MethodCoreHealth     = "core.health"
 	MethodCoreSwapConfig = "core.swap_config"
@@ -222,11 +219,4 @@ const (
 const (
 	MethodIPCheck    = "ip.check"
 	MethodIPCheckAll = "ip.check_all"
-)
-
-// AI methods.
-const (
-	MethodAIRuleGenerate = "ai.rule.generate"
-	MethodAIDiagnose     = "ai.diagnose"
-	MethodAIExplain      = "ai.explain"
 )

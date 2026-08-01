@@ -5,7 +5,10 @@ import type {
   CoreUpdateReport,
   HostStatus,
   IPDetection,
-  Logs,
+	LogMetadata,
+	LogQuery,
+  LogQueryResult,
+	LatencyResult,
   ProxyBenchmark,
   Routes,
   SubscriptionRequest,
@@ -29,12 +32,14 @@ declare global {
           GetHostStatus(): Promise<HostStatus>;
           RunProxyBenchmark(): Promise<ProxyBenchmark>;
           CancelProxyBenchmark(): Promise<void>;
+		  RunLatencyTest(outboundId: string): Promise<LatencyResult>;
+		  RunTrafficTransfer(sizeMiB: number, direction: string): Promise<ProxyBenchmark>;
           CheckCoreUpdates(): Promise<CoreUpdateReport>;
+		  GetCoreUpdateStatus(): Promise<CoreUpdateReport>;
           OpenCoreRelease(coreId: string): Promise<void>;
           ListRoutes(): Promise<Routes>;
           ListSubscriptions(): Promise<Subscriptions>;
           SetCore(coreId: string): Promise<void>;
-          SetCoreRunning(running: boolean): Promise<void>;
           SetSystemProxy(enabled: boolean): Promise<void>;
           SetTUN(enabled: boolean): Promise<void>;
           SetCaptureMode(mode: string): Promise<void>;
@@ -46,7 +51,9 @@ declare global {
           AddSubscription(request: SubscriptionRequest): Promise<void>;
           RefreshSubscriptions(): Promise<void>;
           RemoveSubscription(id: string): Promise<void>;
-          TailLogs(): Promise<Logs>;
+			QueryLogs(query: LogQuery): Promise<LogQueryResult>;
+			GetLogMetadata(): Promise<LogMetadata>;
+			ClearPersistedLogs(): Promise<void>;
         };
       };
     };

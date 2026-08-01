@@ -61,15 +61,21 @@ type cachedResult struct {
 
 // geoResponse is the response from ip-api.com (free tier).
 type geoResponse struct {
-	Country string `json:"country"`
-	City    string `json:"city"`
-	ASN     string `json:"as"`
-	ISP     string `json:"isp"`
-	Org     string `json:"org"`
-	Query   string `json:"query"`
-	Mobile  bool   `json:"mobile"`
-	Proxy   bool   `json:"proxy"`
-	Hosting bool   `json:"hosting"`
+	Success    bool   `json:"success"`
+	Country    string `json:"country"`
+	City       string `json:"city"`
+	Type       string `json:"type"`
+	Connection struct {
+		ASN  int    `json:"asn"`
+		ISP  string `json:"isp"`
+		Org  string `json:"org"`
+		Type string `json:"type"`
+	} `json:"connection"`
+	Security struct {
+		Proxy   bool `json:"proxy"`
+		VPN     bool `json:"vpn"`
+		Hosting bool `json:"hosting"`
+	} `json:"security"`
 }
 
 // NewDetector creates a new IP Detector that connects directly (no proxy).
@@ -101,7 +107,7 @@ func newDetector(transport http.RoundTripper) *Detector {
 			{name: "icanhazip", url: "https://icanhazip.com"},
 			{name: "ifconfig.me", url: "https://ifconfig.me/ip"},
 		},
-		geoEndpoint: "http://ip-api.com/json/%s?fields=country,city,as,isp,org,mobile,proxy,hosting,query",
+		geoEndpoint: "https://ipwho.is/%s",
 		cache:       make(map[string]*cachedResult),
 	}
 }
@@ -195,14 +201,20 @@ func (d *Detector) fillGeo(ctx context.Context, result *IPResult) {
 	if err := json.Unmarshal(body, &geo); err != nil {
 		return
 	}
+	if !geo.Success {
+		return
+	}
 	result.Country = geo.Country
 	result.City = geo.City
-	result.ASN = geo.ASN
-	result.ISP = geo.ISP
-	result.Network = geo.Org
-	result.Mobile = geo.Mobile
-	result.Proxy = geo.Proxy
-	result.Hosting = geo.Hosting
+	if geo.Connection.ASN > 0 {
+		result.ASN = fmt.Sprintf("AS%d", geo.Connection.ASN)
+	}
+	result.ISP = geo.Connection.ISP
+	result.Network = geo.Connection.Org
+	connectionType := strings.ToLower(geo.Connection.Type)
+	result.Mobile = strings.Contains(connectionType, "mobile")
+	result.Proxy = geo.Security.Proxy || geo.Security.VPN || strings.Contains(connectionType, "vpn")
+	result.Hosting = geo.Security.Hosting || strings.Contains(connectionType, "hosting")
 }
 
 func (d *Detector) checkEndpoint(

@@ -39,11 +39,6 @@ type SingBoxHost struct {
 	restartCount int
 	lastError    string
 
-	// Crash recovery
-	restartBackoff []time.Duration
-	maxRestarts    int
-	crashCh        chan struct{}
-
 	// Log ring buffer
 	logBuf *ringBuffer
 
@@ -160,17 +155,14 @@ func newExternalHost(
 		workDir = filepath.Dir(binaryPath)
 	}
 	return &SingBoxHost{
-		coreID:         coreID,
-		binaryPath:     binaryPath,
-		workDir:        workDir,
-		runArgs:        runArgs,
-		checkArgs:      checkArgs,
-		extractPort:    extractPort,
-		restartBackoff: []time.Duration{3 * time.Second, 10 * time.Second, 30 * time.Second},
-		maxRestarts:    3,
-		crashCh:        make(chan struct{}, 1),
-		logBuf:         newRingBuffer(1000),
-		status:         HostStatus{State: HostStateStopped},
+		coreID:      coreID,
+		binaryPath:  binaryPath,
+		workDir:     workDir,
+		runArgs:     runArgs,
+		checkArgs:   checkArgs,
+		extractPort: extractPort,
+		logBuf:      newRingBuffer(1000),
+		status:      HostStatus{State: HostStateStopped},
 	}
 }
 
@@ -517,56 +509,10 @@ func (h *SingBoxHost) GetLogs(lines int) ([]string, error) {
 
 // Reconcile performs network state cleanup.
 // Phase 0: simplified version that only checks ports and zombie processes.
-func (h *SingBoxHost) Reconcile(ctx context.Context) (*ReconcileResult, error) {
-	result := &ReconcileResult{}
-
-	// Check recovery state file
-	stateFile := filepath.Join(os.TempDir(), "navo-recovery.json")
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		// No state file means normal shutdown
-		result.RecoveryState = RecoveryNormal
-		return result, nil
-	}
-
-	stateStr := strings.TrimSpace(string(data))
-	if stateStr == string(RecoveryNormal) {
-		result.RecoveryState = RecoveryNormal
-		return result, nil
-	}
-
-	// DIRTY_SHUTDOWN detected - perform cleanup
-	result.RecoveryState = RecoveryDirty
-	result.IssuesFound = append(result.IssuesFound, "dirty shutdown detected")
-
-	// Check for zombie sing-box processes
-	// On Windows, list processes with "tasklist"
-	zombies := findZombieProcesses()
-	for _, z := range zombies {
-		result.IssuesFound = append(result.IssuesFound, fmt.Sprintf("zombie sing-box process PID=%d", z))
-	}
-
-	// Check if the configured port is still in use
-	if h.listenPort > 0 {
-		if !isPortFree(h.listenPort) {
-			result.IssuesFound = append(result.IssuesFound, fmt.Sprintf("port %d still in use", h.listenPort))
-		}
-	}
-
-	// Mark recovery complete
-	result.RecoveryState = RecoveryReady
-	if err := os.WriteFile(stateFile, []byte(RecoveryReady), 0644); err != nil {
-		result.IssuesUnfixed = append(result.IssuesUnfixed, fmt.Sprintf("cannot write recovery state: %v", err))
-	} else {
-		result.IssuesFixed = append(result.IssuesFixed, "recovery state updated to READY")
-	}
-
-	return result, nil
-}
-
 // ── Internal Helpers ──
 
-// monitor watches the sing-box process and handles crash recovery.
+// monitor observes process exit only. Supervisor exclusively owns restart
+// policy, reconciliation, budgets, and backoff.
 func (h *SingBoxHost) monitor() {
 	h.mu.RLock()
 	exitCh := h.exitCh
@@ -589,37 +535,11 @@ func (h *SingBoxHost) monitor() {
 		h.lastError = "process exited with code 0 unexpectedly"
 	}
 
-	if h.restartCount >= h.maxRestarts {
-		h.status.State = HostStateFailed
-		h.status.LastError = h.lastError
-		h.mu.Unlock()
-		return
-	}
-
-	h.restartCount++
-	h.status.RestartCount = h.restartCount
-	backoff := h.restartBackoff[min(h.restartCount-1, len(h.restartBackoff)-1)]
-
-	cfgPath := h.configPath
+	h.status.State = HostStateFailed
+	h.status.PID = 0
+	h.status.LastError = h.lastError
 	h.cmd = nil
 	h.cancel = nil
-	h.mu.Unlock()
-
-	time.Sleep(backoff)
-
-	if cfgPath != "" {
-		if _, startErr := h.Start(context.Background(), cfgPath); startErr != nil {
-			h.mu.Lock()
-			h.lastError = startErr.Error()
-			h.status.State = HostStateFailed
-			h.mu.Unlock()
-		}
-		return
-	}
-
-	h.mu.Lock()
-	h.status.State = HostStateFailed
-	h.status.LastError = h.lastError
 	h.mu.Unlock()
 }
 
@@ -777,7 +697,3 @@ func extractXrayPort(configPath string) (int, error) {
 
 // findZombieProcesses checks for lingering sing-box processes.
 // Phase 0: returns empty; full implementation requires Windows API.
-func findZombieProcesses() []int {
-	// Phase 0 simplified: rely on port check instead
-	return nil
-}

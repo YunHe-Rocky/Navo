@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"navo/internal/fsatomic"
 	"navo/internal/securestore"
 )
 
@@ -118,31 +119,7 @@ func (s *FileStore) saveLocked() error {
 	}
 	defer clear(encrypted)
 
-	temp, err := os.CreateTemp(filepath.Dir(s.path), ".credentials-*")
-	if err != nil {
-		return fmt.Errorf("create credential temp file: %w", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(0600); err != nil {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(encrypted); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := os.Rename(tempPath, s.path); err != nil {
+	if err := fsatomic.WriteFile(s.path, encrypted, 0600); err != nil {
 		return fmt.Errorf("activate credential store: %w", err)
 	}
 	return nil

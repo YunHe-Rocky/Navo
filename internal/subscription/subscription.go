@@ -17,6 +17,7 @@ import (
 
 	"navo/internal/compiler"
 	"navo/internal/credential"
+	"navo/internal/fsatomic"
 	"navo/internal/securestore"
 	"navo/internal/subscription/parser"
 )
@@ -45,6 +46,8 @@ type Manager struct {
 	outbounds       []compiler.Outbound
 	storePath       string
 	credentialStore credential.Store
+	protectData     func([]byte) ([]byte, error)
+	unprotectData   func([]byte) ([]byte, error)
 	loadErr         error
 }
 
@@ -73,6 +76,7 @@ func NewManagerWithPath(storePath string) *Manager {
 		fetcher: NewFetcher(), normalizer: NewNormalizer(),
 		subs: make([]Subscription, 0), outbounds: make([]compiler.Outbound, 0),
 		storePath: storePath, credentialStore: credential.NewMemoryStore(),
+		protectData: securestore.Protect, unprotectData: securestore.Unprotect,
 	}
 }
 
@@ -80,8 +84,22 @@ func NewManagerWithCredentialStore(
 	storePath string,
 	credentialStore credential.Store,
 ) (*Manager, error) {
+	return newManagerWithProtector(
+		storePath, credentialStore, securestore.Protect, securestore.Unprotect,
+	)
+}
+
+func newManagerWithProtector(
+	storePath string,
+	credentialStore credential.Store,
+	protectData func([]byte) ([]byte, error),
+	unprotectData func([]byte) ([]byte, error),
+) (*Manager, error) {
 	if credentialStore == nil {
 		return nil, fmt.Errorf("credential store is required")
+	}
+	if protectData == nil || unprotectData == nil {
+		return nil, fmt.Errorf("endpoint-cache protector is required")
 	}
 	manager := &Manager{
 		fetcher:         NewFetcher(),
@@ -90,6 +108,8 @@ func NewManagerWithCredentialStore(
 		outbounds:       make([]compiler.Outbound, 0),
 		storePath:       storePath,
 		credentialStore: credentialStore,
+		protectData:     protectData,
+		unprotectData:   unprotectData,
 	}
 	manager.load()
 	if manager.loadErr != nil {
@@ -118,8 +138,8 @@ func (m *Manager) AddWithOptions(
 	if rawURL == "" {
 		return nil, fmt.Errorf("subscription URL is required")
 	}
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		return nil, fmt.Errorf("URL must start with http:// or https://")
+	if err := validateURL(rawURL); err != nil {
+		return nil, fmt.Errorf("invalid subscription URL: %w", err)
 	}
 	urlHash := hashURL(rawURL)
 	urlRef, err := m.credentialStore.Put(context.Background(), []byte(rawURL))
@@ -201,7 +221,12 @@ func (m *Manager) Remove(id string) (bool, error) {
 				return false, err
 			}
 			if s.URLCredentialRef != "" {
-				_ = m.credentialStore.Delete(context.Background(), s.URLCredentialRef)
+				if err := m.credentialStore.Delete(context.Background(), s.URLCredentialRef); err != nil {
+					m.subs = previousSubs
+					m.outbounds = previousOutbounds
+					rollbackErr := m.saveLocked()
+					return false, errors.Join(fmt.Errorf("delete subscription credential: %w", err), rollbackErr)
+				}
 			}
 			return true, nil
 		}
@@ -262,6 +287,15 @@ func (m *Manager) Refresh(ctx context.Context) ([]compiler.Outbound, error) {
 
 		parsed := m.parseContent(data)
 		normalized := m.normalizer.Normalize(parsed)
+		validated := normalized[:0]
+		for i := range normalized {
+			if result := compiler.ValidateOutbound(&normalized[i]); result.Valid {
+				validated = append(validated, normalized[i])
+			} else {
+				log.Printf("[subscription] rejected invalid node %q: %s", normalized[i].Name, result.Errors[0].Field)
+			}
+		}
+		normalized = validated
 		if len(normalized) == 0 {
 			sub.LastError = "subscription contains no supported nodes"
 			failures = append(failures, sub.LastError)
@@ -287,6 +321,8 @@ func (m *Manager) Refresh(ctx context.Context) ([]compiler.Outbound, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	previousSubs := append([]Subscription(nil), m.subs...)
+	previousOutbounds := append([]compiler.Outbound(nil), m.outbounds...)
 	for i := range m.subs {
 		if updated, ok := updates[m.subs[i].ID]; ok {
 			m.subs[i] = updated
@@ -294,6 +330,8 @@ func (m *Manager) Refresh(ctx context.Context) ([]compiler.Outbound, error) {
 	}
 	m.outbounds = m.normalizer.Merge(m.outbounds, allOutbounds)
 	if err := m.saveLocked(); err != nil {
+		m.subs = previousSubs
+		m.outbounds = previousOutbounds
 		return nil, err
 	}
 	if successes == 0 && len(updates) > 0 {
@@ -505,7 +543,7 @@ func (m *Manager) load() {
 	migrated := len(state.Outbounds) > 0
 	cachePath := m.endpointCachePath()
 	if encrypted, err := os.ReadFile(cachePath); err == nil {
-		plain, decryptErr := securestore.Unprotect(encrypted)
+		plain, decryptErr := m.unprotectData(encrypted)
 		if decryptErr != nil {
 			m.loadErr = fmt.Errorf("decrypt subscription endpoint cache: %w", decryptErr)
 			return
@@ -573,7 +611,7 @@ func (m *Manager) saveEndpointCacheLocked() error {
 		return fmt.Errorf("encode subscription endpoint cache: %w", err)
 	}
 	defer clear(plain)
-	encrypted, err := securestore.Protect(plain)
+	encrypted, err := m.protectData(plain)
 	if err != nil {
 		return fmt.Errorf("encrypt subscription endpoint cache: %w", err)
 	}
@@ -589,31 +627,7 @@ func (m *Manager) endpointCachePath() string {
 }
 
 func writeAtomic(path string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), ".navo-state-*")
-	if err != nil {
-		return err
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(0600); err != nil {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return os.Rename(tempPath, path)
+	return fsatomic.WriteFile(path, data, 0600)
 }
 
 func hashURL(value string) string {

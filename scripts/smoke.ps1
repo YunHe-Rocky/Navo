@@ -162,8 +162,7 @@ try {
         "outbound.list",
         "runtime.status",
         "metrics.current",
-        "tray.snapshot",
-        "ai.config.get"
+        "tray.snapshot"
     )) {
         $Results[$Method] = (Invoke-NavoIPC -Method $Method).payload
     }
@@ -236,22 +235,7 @@ try {
         $HTTPHandler.Dispose()
     }
 
-    Invoke-NavoIPC -Method "core.stop" | Out-Null
-    if ((Invoke-NavoIPC -Method "core.status").payload.state -ne "stopped") {
-        throw "Core did not stop"
-    }
-    Invoke-NavoIPC -Method "core.start" | Out-Null
-    if ((Invoke-NavoIPC -Method "core.status").payload.state -ne "running") {
-        throw "Core did not restart"
-    }
-
-    Invoke-NavoIPC -Method "service.shutdown" | Out-Null
-    if (-not $Launcher.WaitForExit(10000)) {
-        throw "Launcher did not exit after service.shutdown"
-    }
-    if ($Launcher.ExitCode -ne 0) {
-        throw "Launcher exited with code $($Launcher.ExitCode)"
-    }
+    & (Join-Path $PSScriptRoot "exit_via_tray.ps1") -ProcessId $Launcher.Id
 
     $Results | ConvertTo-Json -Depth 8
 }
