@@ -37,7 +37,6 @@ type Manager struct {
 	backupPath   string
 	ownerPath    string
 	getProxy     func() (*ProxyConfig, error)
-	setProxy     func(string) error
 	applyProxy   func(ProxyConfig) error
 	notify       func() error
 }
@@ -45,6 +44,16 @@ type Manager struct {
 type ownershipRecord struct {
 	ProxyServer string `json:"proxy_server"`
 	Phase       string `json:"phase,omitempty"`
+}
+
+// CurrentConfig reads the current-user WinINet proxy without taking ownership
+// or changing any registry value.
+func CurrentConfig() (ProxyConfig, error) {
+	config, err := getSystemProxy()
+	if err != nil {
+		return ProxyConfig{}, err
+	}
+	return *config, nil
 }
 
 const (
@@ -64,7 +73,6 @@ func NewManagerWithDirectory(backupDir string) *Manager {
 		backupPath: filepath.Join(backupDir, "proxy_backup.json"),
 		ownerPath:  filepath.Join(backupDir, "proxy_owner.json"),
 		getProxy:   getSystemProxy,
-		setProxy:   setSystemProxy,
 		applyProxy: applySystemProxyConfig,
 		notify:     notifyProxyChange,
 	}
@@ -101,7 +109,7 @@ func (m *Manager) Enable(proxyServer string) error {
 		return fmt.Errorf("persist pending proxy ownership: %w", err)
 	}
 
-	if err := m.setProxy(proxyServer); err != nil {
+	if err := m.applyProxy(ownedProxyConfig(proxyServer)); err != nil {
 		return errors.Join(fmt.Errorf("set proxy failed: %w", err), m.restore())
 	}
 	if err := m.notify(); err != nil {
@@ -277,7 +285,24 @@ func (m *Manager) owns(cfg ProxyConfig) bool {
 func ownershipMatchesCurrent(owner ownershipRecord, current ProxyConfig) bool {
 	return current.Enabled &&
 		owner.ProxyServer != "" &&
-		owner.ProxyServer == current.ProxyServer
+		owner.ProxyServer == current.ProxyServer &&
+		current.AutoConfigURL == "" &&
+		!current.AutoDetect
+}
+
+// ownedProxyConfig removes PAC/WPAD and stale bypass rules only while Navo
+// owns WinINet. Disable restores the exact pre-existing snapshot.
+func ownedProxyConfig(proxyServer string) ProxyConfig {
+	return ProxyConfig{
+		Enabled:              true,
+		ProxyServer:          proxyServer,
+		ProxyServerPresent:   true,
+		BypassList:           "<local>",
+		BypassListPresent:    true,
+		AutoConfigURLPresent: false,
+		AutoDetect:           false,
+		AutoDetectPresent:    true,
+	}
 }
 
 // IsActive returns whether the proxy is currently enabled.

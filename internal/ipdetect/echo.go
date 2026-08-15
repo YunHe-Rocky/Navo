@@ -3,7 +3,6 @@ package ipdetect
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -103,6 +102,7 @@ func newDetector(transport http.RoundTripper) *Detector {
 		},
 		cacheTTL: 5 * time.Minute,
 		endpoints: []echoEndpoint{
+			{name: "amazon", url: "https://checkip.amazonaws.com"},
 			{name: "ipify", url: "https://api.ipify.org?format=json", json: true},
 			{name: "icanhazip", url: "https://icanhazip.com"},
 			{name: "ifconfig.me", url: "https://ifconfig.me/ip"},
@@ -119,11 +119,9 @@ func detectorTransport(proxyURL *url.URL) *http.Transport {
 	} else {
 		transport.Proxy = nil
 	}
-	// Keep every detector on its own transport and HTTP/1.1 connection pool.
-	// This avoids sharing DefaultTransport's HTTP/2 state across direct/proxy
-	// probes while Windows routes are being atomically replaced.
-	transport.ForceAttemptHTTP2 = false
-	transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+	// Each detector owns an independent pool. Keep HTTP/2 enabled because several
+	// IP providers negotiate h2 and return binary frames that HTTP/1.x cannot parse.
+	transport.ForceAttemptHTTP2 = true
 	return transport
 }
 
@@ -171,6 +169,17 @@ func (d *Detector) Check(ctx context.Context, outboundID string) (*IPResult, err
 		return result, nil
 	}
 	return nil, fmt.Errorf("IP check unavailable: %d providers failed", attempts)
+}
+
+// CheckFresh bypasses the bounded cache for user-triggered and mode-sensitive checks.
+func (d *Detector) CheckFresh(ctx context.Context, outboundID string) (*IPResult, error) {
+	d.mu.Lock()
+	delete(d.cache, outboundID)
+	d.mu.Unlock()
+	// A capture-mode transition may leave idle sockets bound to the previous
+	// route. Active requests are unaffected; the next probe gets a fresh socket.
+	d.client.CloseIdleConnections()
+	return d.Check(ctx, outboundID)
 }
 
 // fillGeo performs a best-effort geo lookup for the IP.

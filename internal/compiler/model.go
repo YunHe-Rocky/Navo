@@ -115,6 +115,8 @@ type DNSServer struct {
 	Address         string `json:"address"` // resolver address, e.g. "tls://1.1.1.1"
 	Server          string `json:"server,omitempty"`
 	ServerPort      int    `json:"server_port,omitempty"`
+	Path            string `json:"path,omitempty"`
+	TLSServerName   string `json:"tls_server_name,omitempty"`
 	AddressResolver string `json:"address_resolver,omitempty"`
 	AddressStrategy string `json:"address_strategy,omitempty"`
 	Detour          string `json:"detour,omitempty"` // outbound tag to use
@@ -130,15 +132,16 @@ type DNSRule struct {
 
 // TUNConfig represents TUN mode settings.
 type TUNConfig struct {
-	Enabled        bool     `json:"enabled"`
-	InterfaceName  string   `json:"interface_name"`
-	MTU            int      `json:"mtu"`
-	Address        []string `json:"address"` // IPv4/IPv6 addresses
-	AutoRoute      bool     `json:"auto_route"`
-	StrictRoute    bool     `json:"strict_route"`
-	IPv6Enabled    bool     `json:"ipv6_enabled"`
-	IncludePackage []string `json:"include_package,omitempty"`
-	ExcludePackage []string `json:"exclude_package,omitempty"`
+	Enabled           bool     `json:"enabled"`
+	InterfaceName     string   `json:"interface_name"`
+	MTU               int      `json:"mtu"`
+	Address           []string `json:"address"` // IPv4/IPv6 addresses
+	AutoRoute         bool     `json:"auto_route"`
+	StrictRoute       bool     `json:"strict_route"`
+	IPv6Enabled       bool     `json:"ipv6_enabled"`
+	OutboundInterface string   `json:"outbound_interface,omitempty"`
+	IncludePackage    []string `json:"include_package,omitempty"`
+	ExcludePackage    []string `json:"exclude_package,omitempty"`
 }
 
 // InboundConfig represents local listening configuration.
@@ -169,15 +172,18 @@ type ControllerConfig struct {
 // Config is the complete Navo internal configuration model.
 // It serves as the source of truth, from which sing-box config is compiled.
 type Config struct {
-	SchemaVersion int               `json:"schema_version"`
-	Log           LogConfig         `json:"log"`
-	Inbounds      []InboundConfig   `json:"inbounds"`
-	Outbounds     []Outbound        `json:"outbounds"`
-	RoutingRules  []RoutingRule     `json:"routing_rules"`
-	DNS           *DNSConfig        `json:"dns,omitempty"`
-	TUN           *TUNConfig        `json:"tun,omitempty"`
-	FinalOutbound string            `json:"final_outbound,omitempty"`
-	Controller    *ControllerConfig `json:"controller,omitempty"`
+	SchemaVersion int             `json:"schema_version"`
+	Log           LogConfig       `json:"log"`
+	Inbounds      []InboundConfig `json:"inbounds"`
+	Outbounds     []Outbound      `json:"outbounds"`
+	RoutingRules  []RoutingRule   `json:"routing_rules"`
+	DNS           *DNSConfig      `json:"dns,omitempty"`
+	TUN           *TUNConfig      `json:"tun,omitempty"`
+	FinalOutbound string          `json:"final_outbound,omitempty"`
+	// OutboundInterface freezes core-originated DNS and direct sockets to the
+	// physical egress selected by Windows instead of a virtual adapter.
+	OutboundInterface string            `json:"outbound_interface,omitempty"`
+	Controller        *ControllerConfig `json:"controller,omitempty"`
 }
 
 // ── Config Revision ──

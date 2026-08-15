@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -77,17 +78,22 @@ func (s *Supervisor) Start(ctx context.Context, configPath string) error {
 	if s.reconciler != nil {
 		result, err := s.reconciler.Reconcile(ctx, &network.ReconcileConfig{ListenPort: 0})
 		if err != nil {
+			s.mu.Lock()
 			s.lastError = err.Error()
-			log.Printf("[supervisor] reconciliation error: %v", err)
+			s.mu.Unlock()
+			s.setState(StateFailed)
+			return fmt.Errorf("network reconciliation failed: %w", err)
 		} else if result.RecoveryState == host.RecoveryDirty {
-			log.Printf("[supervisor] reconciliation found %d issues (fixed=%d unfixed=%d)",
+			err := fmt.Errorf("network reconciliation remained dirty: found=%d fixed=%d unfixed=%d",
 				len(result.IssuesFound), len(result.IssuesFixed), len(result.IssuesUnfixed))
+			s.mu.Lock()
+			s.lastError = err.Error()
+			s.mu.Unlock()
+			s.setState(StateFailed)
+			return err
 		}
 	}
 	s.transition(EventReconcileDone)
-	s.setState(StateReady)
-
-	// Ready
 	s.setState(StateReady)
 
 	// Start the core
@@ -126,6 +132,8 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 		s.mu.Lock()
 		s.lastError = stopErr.Error()
 		s.mu.Unlock()
+		s.setState(StateFailed)
+		return stopErr
 	}
 
 	// Mark normal only after a verified clean stop; failed cleanup remains dirty
@@ -143,9 +151,16 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 
 // Restart stops and restarts the core.
 func (s *Supervisor) Restart(ctx context.Context, configPath string) error {
-	if err := s.Stop(ctx); err != nil && s.state != StateStopped {
-		// Force stop if graceful failed
-		s.host.Stop(context.Background(), true, 5*time.Second)
+	if err := s.Stop(ctx); err != nil {
+		// A replacement must never start while the old process may still own the
+		// listener or TUN handle. Force cleanup is independent and bounded.
+		forceCtx, forceCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		forceErr := s.host.Stop(forceCtx, true, 5*time.Second)
+		forceCancel()
+		if forceErr != nil {
+			s.setState(StateFailed)
+			return errors.Join(err, fmt.Errorf("force stop before restart: %w", forceErr))
+		}
 		s.setState(StateStopped)
 	}
 	return s.Start(ctx, configPath)
@@ -158,6 +173,8 @@ func (s *Supervisor) SwapConfig(ctx context.Context, newConfigPath string) error
 		s.mu.Unlock()
 		return fmt.Errorf("cannot swap config: not running (state=%s)", s.state)
 	}
+	previousConfigPath := s.activeConfigPath
+	cancel := s.cancel
 	s.mu.Unlock()
 
 	if err := s.transition(EventConfigSwap); err != nil {
@@ -165,15 +182,57 @@ func (s *Supervisor) SwapConfig(ctx context.Context, newConfigPath string) error
 	}
 
 	s.setState(StateStopping)
+	if cancel != nil {
+		// Stop the old crash monitor before stopping its process. Otherwise it can
+		// race the coordinated replacement and restart the old configuration.
+		cancel()
+	}
 
 	if err := s.host.Stop(ctx, false, 10*time.Second); err != nil {
-		s.lastError = err.Error()
+		stopErr := err
+		s.mu.Lock()
+		s.lastError = stopErr.Error()
+		s.mu.Unlock()
+		forceCtx, forceCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		forceErr := s.host.Stop(forceCtx, true, 5*time.Second)
+		forceCancel()
+		if forceErr != nil {
+			s.setState(StateFailed)
+			return errors.Join(
+				fmt.Errorf("stop old core before config swap: %w", stopErr),
+				fmt.Errorf("force stop old core: %w", forceErr),
+			)
+		}
+		s.setState(StateStopped)
+		if previousConfigPath != "" {
+			rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			rollbackErr := s.Start(rollbackCtx, previousConfigPath)
+			rollbackCancel()
+			if rollbackErr != nil {
+				return errors.Join(
+					fmt.Errorf("stop old core before config swap: %w", stopErr),
+					fmt.Errorf("restore previous config: %w", rollbackErr),
+				)
+			}
+		}
+		return fmt.Errorf("stop old core before config swap: %w; previous config restored", stopErr)
 	}
 
 	s.transition(EventStopped)
 	s.setState(StateStopped)
 
-	return s.Start(ctx, newConfigPath)
+	if err := s.Start(ctx, newConfigPath); err != nil {
+		if previousConfigPath == "" {
+			return err
+		}
+		rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer rollbackCancel()
+		if rollbackErr := s.Start(rollbackCtx, previousConfigPath); rollbackErr != nil {
+			return fmt.Errorf("start replacement: %w; restore previous config: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("start replacement: %w; previous config restored", err)
+	}
+	return nil
 }
 
 // Status returns the current supervisor status.
@@ -250,7 +309,9 @@ func (s *Supervisor) startCore(ctx context.Context, configPath string) error {
 	}
 
 	s.setState(StateStarting)
+	s.mu.Lock()
 	s.activeConfigPath = configPath
+	s.mu.Unlock()
 
 	// The request context bounds startup only. The core must outlive the
 	// capture.prepare IPC request that started it and is stopped explicitly by
@@ -264,7 +325,9 @@ func (s *Supervisor) startCore(ctx context.Context, configPath string) error {
 	stopStartupCancellation()
 	if err != nil {
 		lifecycleCancel()
+		s.mu.Lock()
 		s.lastError = err.Error()
+		s.mu.Unlock()
 		s.transition(EventFail)
 		s.setState(StateFailed)
 		return fmt.Errorf("failed to start core: %w", err)

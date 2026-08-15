@@ -60,6 +60,13 @@ type persistedMetadata struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 }
 
+// Removal holds a reversible repository mutation. Credential deletion is
+// finalized only after Service has activated the corresponding core config.
+type Removal struct {
+	Subscription Subscription
+	Outbounds    []compiler.Outbound
+}
+
 // NewManager creates a new subscription manager.
 func NewManager() *Manager {
 	return NewManagerWithPath("")
@@ -200,6 +207,19 @@ func (m *Manager) UpdateTLSCompatibility(
 
 // Remove removes a subscription and every node owned by it.
 func (m *Manager) Remove(id string) (bool, error) {
+	removal, found, err := m.Detach(id)
+	if err != nil || !found {
+		return found, err
+	}
+	if err := m.FinalizeRemoval(context.Background(), removal); err != nil {
+		return false, errors.Join(err, m.RestoreRemoval(removal))
+	}
+	return true, nil
+}
+
+// Detach removes subscription metadata and nodes while retaining credentials
+// so a failed active-config mutation can restore the exact source.
+func (m *Manager) Detach(id string) (*Removal, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -207,31 +227,61 @@ func (m *Manager) Remove(id string) (bool, error) {
 		if s.ID == id {
 			previousSubs := append([]Subscription(nil), m.subs...)
 			previousOutbounds := append([]compiler.Outbound(nil), m.outbounds...)
+			removedOutbounds := make([]compiler.Outbound, 0)
 			m.subs = append(m.subs[:i], m.subs[i+1:]...)
 			filtered := m.outbounds[:0]
 			for _, outbound := range m.outbounds {
-				if outbound.ProviderID != id {
-					filtered = append(filtered, outbound)
+				if outbound.ProviderID == id {
+					removedOutbounds = append(removedOutbounds, outbound)
+					continue
 				}
+				filtered = append(filtered, outbound)
 			}
 			m.outbounds = filtered
 			if err := m.saveLocked(); err != nil {
 				m.subs = previousSubs
 				m.outbounds = previousOutbounds
-				return false, err
+				return nil, false, err
 			}
-			if s.URLCredentialRef != "" {
-				if err := m.credentialStore.Delete(context.Background(), s.URLCredentialRef); err != nil {
-					m.subs = previousSubs
-					m.outbounds = previousOutbounds
-					rollbackErr := m.saveLocked()
-					return false, errors.Join(fmt.Errorf("delete subscription credential: %w", err), rollbackErr)
-				}
-			}
-			return true, nil
+			return &Removal{Subscription: s, Outbounds: removedOutbounds}, true, nil
 		}
 	}
-	return false, nil
+	return nil, false, nil
+}
+
+// RestoreRemoval restores a detached source after core-config activation fails.
+func (m *Manager) RestoreRemoval(removal *Removal) error {
+	if removal == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previousSubs := append([]Subscription(nil), m.subs...)
+	previousOutbounds := append([]compiler.Outbound(nil), m.outbounds...)
+	for _, existing := range m.subs {
+		if existing.ID == removal.Subscription.ID {
+			return fmt.Errorf("subscription %q already exists", removal.Subscription.ID)
+		}
+	}
+	m.subs = append(m.subs, removal.Subscription)
+	m.outbounds = append(m.outbounds, removal.Outbounds...)
+	if err := m.saveLocked(); err != nil {
+		m.subs = previousSubs
+		m.outbounds = previousOutbounds
+		return err
+	}
+	return nil
+}
+
+// FinalizeRemoval deletes the detached URL credential after config commit.
+func (m *Manager) FinalizeRemoval(ctx context.Context, removal *Removal) error {
+	if removal == nil || removal.Subscription.URLCredentialRef == "" {
+		return nil
+	}
+	if err := m.credentialStore.Delete(ctx, removal.Subscription.URLCredentialRef); err != nil {
+		return fmt.Errorf("delete subscription credential: %w", err)
+	}
+	return nil
 }
 
 // List returns all subscriptions.

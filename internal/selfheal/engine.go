@@ -89,6 +89,11 @@ func (e *Engine) Stop() {
 	e.wg.Wait()
 	e.mu.Lock()
 	e.started = false
+	e.cancel = nil
+	// Events accepted by a previous lifecycle must never execute after restart.
+	e.queue = make(chan ErrorEvent, e.cfg.QueueSize)
+	e.pending = make(map[string]pendingEvent)
+	e.locks = make(map[string]*sync.Mutex)
 	e.mu.Unlock()
 }
 
@@ -139,6 +144,12 @@ func (e *Engine) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case event := <-e.queue:
+			e.mu.Lock()
+			stopping := e.stopping
+			e.mu.Unlock()
+			if stopping || ctx.Err() != nil {
+				return
+			}
 			key, _ := eventKey(event)
 			e.mu.Lock()
 			if pending, ok := e.pending[key]; ok {
@@ -203,6 +214,13 @@ func (e *Engine) process(ctx context.Context, event ErrorEvent) {
 		e.emitCircuit("SELFHEAL_CIRCUIT_HALF_OPEN", event, resourceHash)
 	}
 	if err := e.sleep(ctx, backoff(attempt)); err != nil {
+		if circuit == "half_open" {
+			if resetErr := e.budgets.cancelHalfOpen(event); resetErr != nil {
+				_ = logstore.Emit(logstore.LevelError, "SelfHeal", "CircuitBreaker", "SELFHEAL_HALF_OPEN_RELEASE_FAILED", map[string]any{
+					"error_code": event.Code, "resource_hash": resourceHash,
+				})
+			}
+		}
 		return
 	}
 	started := time.Now()

@@ -111,7 +111,7 @@ func TestBundledSingBoxValidatesTUNDNSAndICMPConfig(t *testing.T) {
 			TUN: &compiler.TUNConfig{
 				Enabled: true, InterfaceName: "Navo",
 				MTU: 1500, Address: []string{"172.19.0.1/30"},
-				AutoRoute: true, StrictRoute: true,
+				AutoRoute: false, StrictRoute: false,
 			},
 		},
 		RuntimeDir: t.TempDir(), RevisionID: "tun-native-validation",
@@ -133,6 +133,59 @@ func TestBundledSingBoxValidatesTUNDNSAndICMPConfig(t *testing.T) {
 	cancelValidate()
 	if !result.Valid {
 		t.Fatalf("native TUN validation failed: output=%q err=%v", result.Output, result.Err)
+	}
+}
+
+func TestBundledMihomoValidatesTUNProxyDNSConfig(t *testing.T) {
+	root := filepath.Join("..", "..")
+	binary := filepath.Join(root, "third_party", "mihomo", "mihomo.exe")
+	if _, err := os.Stat(binary); err != nil {
+		t.Skip("bundled Mihomo binary is unavailable")
+	}
+
+	adapter := NewMihomoAdapter()
+	upstreamID := "upstream"
+	request := CompileRequest{
+		Selection: selection.ActiveSelection{
+			CoreType: core.TypeMihomo, SourceType: source.TypeUpstreamProxy,
+			CaptureMode: capture.ModeTUN, UpstreamProxyID: &upstreamID,
+		},
+		Config: &compiler.Config{
+			SchemaVersion: 1,
+			Log:           compiler.LogConfig{Level: "info", Timestamp: true},
+			Inbounds: []compiler.InboundConfig{
+				{Type: "mixed", Tag: "mixed-in", Listen: "127.0.0.1", ListenPort: 12080},
+				{Type: "tun", Tag: "tun-in", Sniff: true},
+			},
+			Outbounds: []compiler.Outbound{
+				{ID: "direct", Name: "Direct", Type: compiler.OutboundDirect, Enabled: true},
+				{ID: "upstream", Name: "Upstream", Type: compiler.OutboundSOCKS, Server: "127.0.0.1", Port: 1080, Enabled: true},
+			},
+			FinalOutbound: "upstream",
+			TUN: &compiler.TUNConfig{
+				Enabled: true, InterfaceName: "Navo", MTU: 1500,
+				Address: []string{"172.19.0.1/30"}, OutboundInterface: "Ethernet",
+			},
+		},
+		RuntimeDir: t.TempDir(), RevisionID: "mihomo-tun-native-validation",
+	}
+	compiled, err := adapter.Compile(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versionCtx, cancelVersion := context.WithTimeout(context.Background(), 5*time.Second)
+	version, err := adapter.DetectVersion(versionCtx, binary)
+	cancelVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	validateCtx, cancelValidate := context.WithTimeout(context.Background(), 10*time.Second)
+	result := adapter.Validate(validateCtx, CoreInstallation{
+		Type: core.TypeMihomo, BinaryPath: binary, Version: version,
+	}, compiled)
+	cancelValidate()
+	if !result.Valid {
+		t.Fatalf("native Mihomo TUN validation failed: output=%q err=%v", result.Output, result.Err)
 	}
 }
 

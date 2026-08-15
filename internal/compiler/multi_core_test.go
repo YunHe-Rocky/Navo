@@ -54,7 +54,8 @@ func TestMihomoTUNIncludesRoutingAndDNSGuards(t *testing.T) {
 		TUN: &TUNConfig{
 			Enabled: true, InterfaceName: "NAVO-TUN", MTU: 1500,
 			Address:   []string{"172.19.0.1/30"},
-			AutoRoute: true, StrictRoute: true,
+			AutoRoute: false, StrictRoute: false,
+			OutboundInterface: "Ethernet 2",
 		},
 	}
 	data, err := GenerateMihomo(cfg)
@@ -65,9 +66,25 @@ func TestMihomoTUNIncludesRoutingAndDNSGuards(t *testing.T) {
 	if err := yaml.Unmarshal(data, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	tunConfig, _ := decoded["tun"].(map[string]any)
+	if _, exists := decoded["tun"]; exists {
+		t.Fatal("Mihomo top-level TUN can replace Navo's frozen address plan")
+	}
+	listeners, _ := decoded["listeners"].([]any)
+	if len(listeners) != 1 {
+		t.Fatalf("Mihomo TUN listener missing: %#v", decoded["listeners"])
+	}
+	tunConfig, _ := listeners[0].(map[string]any)
+	if tunConfig["name"] != "NAVO-TUN" || tunConfig["device"] != "NAVO-TUN" || tunConfig["type"] != "tun" {
+		t.Fatalf("Mihomo TUN listener identity mismatch: %#v", tunConfig)
+	}
+	if decoded["interface-name"] != "Ethernet 2" {
+		t.Fatalf("Mihomo physical egress is not frozen: %#v", decoded)
+	}
 	if tunConfig["auto-detect-interface"] != true {
 		t.Fatalf("missing physical-interface detection: %#v", tunConfig)
+	}
+	if tunConfig["auto-route"] != false || tunConfig["strict-route"] != false {
+		t.Fatalf("Mihomo took ownership of Navo routes: %#v", tunConfig)
 	}
 	if _, ok := tunConfig["dns-hijack"]; !ok {
 		t.Fatalf("missing DNS hijack: %#v", tunConfig)
@@ -79,6 +96,42 @@ func TestMihomoTUNIncludesRoutingAndDNSGuards(t *testing.T) {
 	dnsConfig, _ := decoded["dns"].(map[string]any)
 	if dnsConfig["enable"] != true {
 		t.Fatalf("missing enabled DNS module: %#v", dnsConfig)
+	}
+	nameservers, _ := dnsConfig["nameserver"].([]any)
+	if len(nameservers) != 1 || nameservers[0] != "dhcp://system" {
+		t.Fatalf("Mihomo DNS is not bound to frozen physical egress: %#v", dnsConfig)
+	}
+}
+
+func TestMihomoTUNProxyRoutesDoHThroughSelectedGroup(t *testing.T) {
+	cfg := &Config{
+		Log: LogConfig{Level: "info"},
+		TUN: &TUNConfig{
+			Enabled: true, InterfaceName: "Navo", MTU: 1500,
+			Address: []string{"172.19.0.1/30"}, OutboundInterface: "Ethernet",
+		},
+		Outbounds: []Outbound{
+			{ID: "direct", Type: OutboundDirect, Enabled: true},
+			{ID: "proxy", Type: OutboundSOCKS, Server: "127.0.0.1", Port: 1080, Enabled: true},
+		},
+		FinalOutbound: "proxy",
+	}
+	data, err := GenerateMihomo(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	dns := decoded["dns"].(map[string]any)
+	nameservers := dns["nameserver"].([]any)
+	if len(nameservers) != 1 || nameservers[0] != "https://1.1.1.1/dns-query#NAVO" {
+		t.Fatalf("Mihomo target DNS bypasses selected group: %#v", dns)
+	}
+	bootstrap := dns["proxy-server-nameserver"].([]any)
+	if len(bootstrap) != 1 || bootstrap[0] != "dhcp://system" {
+		t.Fatalf("Mihomo bootstrap DNS is missing: %#v", dns)
 	}
 }
 

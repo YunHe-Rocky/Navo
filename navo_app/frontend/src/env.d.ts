@@ -3,6 +3,7 @@
 import type {
   Dashboard,
   CoreUpdateReport,
+	CoreUpdateStatus,
   HostStatus,
   IPDetection,
 	LogMetadata,
@@ -20,6 +21,7 @@ import type {
 declare global {
   interface Window {
     runtime?: {
+	  EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void;
       WindowSetBackgroundColour(red: number, green: number, blue: number, alpha: number): void;
       WindowSetLightTheme(): void;
       WindowSetDarkTheme(): void;
@@ -36,6 +38,7 @@ declare global {
 		  RunTrafficTransfer(sizeMiB: number, direction: string): Promise<ProxyBenchmark>;
           CheckCoreUpdates(): Promise<CoreUpdateReport>;
 		  GetCoreUpdateStatus(): Promise<CoreUpdateReport>;
+		  InstallCoreUpdate(coreId: string): Promise<CoreUpdateStatus>;
           OpenCoreRelease(coreId: string): Promise<void>;
           ListRoutes(): Promise<Routes>;
           ListSubscriptions(): Promise<Subscriptions>;
@@ -44,6 +47,8 @@ declare global {
           SetTUN(enabled: boolean): Promise<void>;
           SetCaptureMode(mode: string): Promise<void>;
           SetRuntimeMode(mode: string): Promise<void>;
+          SetRoutingListMode(mode: string): Promise<void>;
+          SetRoutingRules(blacklist: string[], whitelist: string[]): Promise<void>;
           SelectRoute(id: string): Promise<void>;
           TestRoute(id: string): Promise<TestResult>;
           CreateUpstream(request: UpstreamRequest): Promise<void>;
@@ -54,6 +59,8 @@ declare global {
 			QueryLogs(query: LogQuery): Promise<LogQueryResult>;
 			GetLogMetadata(): Promise<LogMetadata>;
 			ClearPersistedLogs(): Promise<void>;
+			RequestExit(): Promise<void>;
+			MinimizeToTray(): Promise<void>;
         };
       };
     };

@@ -8,8 +8,10 @@ package service
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -36,20 +38,27 @@ import (
 	"navo/internal/upstreamproxy"
 )
 
+const (
+	defaultServiceIPCRequestTimeout = 30 * time.Second
+	captureServiceIPCRequestTimeout = 2 * time.Minute
+	coreServiceIPCRequestTimeout    = 4 * time.Minute
+)
+
 // Config holds the service configuration.
 type Config struct {
-	SingBoxPath         string               // path to sing-box.exe
-	MihomoPath          string               // optional path to mihomo.exe
-	XrayPath            string               // optional path to xray.exe
-	ConfigPath          string               // path to sing-box config JSON
-	ConfigDir           string               // directory for config storage
-	PipeName            string               // named pipe name for IPC, e.g. "Navo.Agent.Service.v1"
-	ProxyPort           int                  // local mixed inbound port
-	SelectionRepository selection.Repository // local active-selection store
-	RevisionRepository  revision.Repository  // local revision-history store
-	CredentialStore     credential.Store     // optional override for tests
-	DeferCoreStart      bool                 // combined desktop starts disconnected
-	EnableExternalPipe  bool                 // standalone Service IPC only; disabled in desktop process
+	SingBoxPath          string               // path to sing-box.exe
+	MihomoPath           string               // optional path to mihomo.exe
+	XrayPath             string               // optional path to xray.exe
+	ConfigPath           string               // path to sing-box config JSON
+	ConfigDir            string               // directory for config storage
+	PipeName             string               // named pipe name for IPC, e.g. "Navo.Agent.Service.v1"
+	ProxyPort            int                  // local mixed inbound port
+	SelectionRepository  selection.Repository // local active-selection store
+	RevisionRepository   revision.Repository  // local revision-history store
+	CredentialStore      credential.Store     // optional override for tests
+	DeferCoreStart       bool                 // combined desktop starts disconnected
+	EnableExternalPipe   bool                 // standalone Service IPC only; disabled in desktop process
+	TUNDataPlaneVerifier TUNDataPlaneVerifier // optional deterministic verifier for tests
 }
 
 // Service is the Windows Service that manages the proxy core and TUN infrastructure.
@@ -60,16 +69,24 @@ type Service struct {
 	selfHeal       *selfheal.Engine
 	selfHealEvents <-chan supervisor.StateEvent
 
-	reconciler *network.Reconciler
-	tunManager tun.Manager
+	reconciler  *network.Reconciler
+	tunManager  tun.Manager
+	tunVerifier TUNDataPlaneVerifier
 
-	captureMu      sync.Mutex
-	networkManager *network.Manager
-	tunFaultMu     sync.RWMutex
-	tunFaultID     string
-	tunFault       string
-	coreDetectOnce sync.Once
-	coreDetections []coreDetection
+	captureMu       sync.Mutex
+	networkManager  tunNetworkManager
+	tunRuntimeMu    sync.RWMutex
+	tunStage        network.TUNStage
+	tunSessionID    string
+	tunAdapter      network.AdapterSnapshot
+	tunVerification VerifyResult
+	tunPlanMu       sync.RWMutex
+	tunPlan         network.TUNActivationPlan
+	tunFaultMu      sync.RWMutex
+	tunFaultID      string
+	tunFault        string
+	coreDetectOnce  sync.Once
+	coreDetections  []coreDetection
 
 	subMgr             *subscription.Manager
 	upstreamMgr        *upstreamproxy.Manager
@@ -82,7 +99,7 @@ type Service struct {
 	metricsConfig      string
 	metricsCoreID      string
 	metricsReason      string
-	prober             *monitor.Prober
+	prober             outboundProber
 	ipDetector         *ipdetect.Detector
 	directIPDetector   *ipdetect.Detector
 	endpointStatusMu   sync.RWMutex
@@ -93,6 +110,7 @@ type Service struct {
 
 	runtimeMu sync.Mutex
 	runtime   runtimeState
+	ipcReplay ipcReplayCache
 
 	pipeListener  pipe.Listener
 	storePath     string
@@ -106,6 +124,10 @@ type Service struct {
 	stopOnce  sync.Once
 	readyCh   chan struct{}
 	readyOnce sync.Once
+}
+
+type outboundProber interface {
+	ProbeTCP(context.Context, string, string, int) *monitor.ProbeResult
 }
 
 // New creates a new Service with TUN infrastructure wired in.
@@ -210,8 +232,12 @@ func New(cfg Config) (*Service, error) {
 		selectionRepo:    cfg.SelectionRepository,
 		revisionRepo:     cfg.RevisionRepository,
 		coreAdapters:     coreadapter.NewDefaultRegistry(),
+		tunVerifier:      cfg.TUNDataPlaneVerifier,
 		stopCh:           make(chan struct{}),
 		readyCh:          make(chan struct{}),
+	}
+	if service.tunVerifier == nil {
+		service.tunVerifier = newTUNDataPlaneVerifier()
 	}
 	service.runtime = runtime
 	return service, nil
@@ -249,6 +275,21 @@ func (s *Service) Run(ctx context.Context) error {
 
 	log.Printf("[service] starting Navo Service")
 	log.Printf("[service] sing-box: %s", s.cfg.SingBoxPath)
+	stopSupervisor := func() error {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), captureRollbackTimeout)
+		defer stopCancel()
+		return s.sup.Stop(stopCtx)
+	}
+	// Recover the exact V2 network journal before compiling or starting a core.
+	recoveryManager, err := s.newTUNRecoveryManager(s.runtimeTUNName())
+	if err != nil {
+		return fmt.Errorf("initialize TUN recovery: %w", err)
+	}
+	s.networkManager = recoveryManager
+	if err := recoveryManager.Recover(ctx); err != nil {
+		return fmt.Errorf("recover TUN network transaction: %w", err)
+	}
+	s.networkManager = nil
 
 	// Always compile the initial configuration for the persisted core. The
 	// launcher bootstrap file is sing-box JSON and must never be passed to a
@@ -271,14 +312,14 @@ func (s *Service) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to start supervisor: %w", err)
 		}
 		if err := s.commitHealthyRuntime(ctx); err != nil {
-			_ = s.sup.Stop(context.Background())
+			_ = stopSupervisor()
 			return fmt.Errorf("commit healthy runtime: %w", err)
 		}
 		log.Printf("[service] supervisor running (PID: %d)", s.sup.Status().PID)
 	}
 	if err := s.selfHeal.Start(ctx); err != nil {
 		if s.sup.State() != supervisor.StateStopped {
-			_ = s.sup.Stop(context.Background())
+			_ = stopSupervisor()
 		}
 		return fmt.Errorf("start self-heal engine: %w", err)
 	}
@@ -291,7 +332,7 @@ func (s *Service) Run(ctx context.Context) error {
 		if err != nil {
 			s.selfHeal.Stop()
 			if s.sup.State() != supervisor.StateStopped {
-				_ = s.sup.Stop(context.Background())
+				_ = stopSupervisor()
 			}
 			return fmt.Errorf("start service pipe: %w", err)
 		}
@@ -340,6 +381,7 @@ func (s *Service) Status() supervisor.SupervisorStatus {
 // shutdown performs graceful shutdown.
 func (s *Service) shutdown() error {
 	log.Printf("[service] shutting down...")
+	var shutdownErr error
 	if s.selfHealEvents != nil {
 		s.sup.Unsubscribe(s.selfHealEvents)
 		s.selfHealEvents = nil
@@ -364,19 +406,21 @@ func (s *Service) shutdown() error {
 	)
 	defer shutdownCancel()
 	if s.networkManager != nil {
-		if err := s.networkManager.Deactivate(shutdownCtx); err != nil {
+		if err := s.deactivateTUNNetwork(shutdownCtx); err != nil {
 			log.Printf("[service] restore TUN network state during shutdown: %v", err)
+			shutdownErr = errors.Join(shutdownErr, err)
 		}
-		s.networkManager = nil
 	}
 	// Stop supervisor (which stops the currently selected core).
 	if s.sup.State() != supervisor.StateStopped {
 		if err := s.sup.Stop(shutdownCtx); err != nil {
 			log.Printf("[service] supervisor stop error: %v", err)
+			shutdownErr = errors.Join(shutdownErr, err)
 		}
 	}
 	if err := s.tunManager.Destroy(shutdownCtx); err != nil {
 		log.Printf("[service] release TUN adapter during shutdown: %v", err)
+		shutdownErr = errors.Join(shutdownErr, err)
 	}
 
 	s.mu.Lock()
@@ -384,7 +428,7 @@ func (s *Service) shutdown() error {
 	s.mu.Unlock()
 
 	log.Printf("[service] shutdown complete")
-	return nil
+	return shutdownErr
 }
 
 func (s *Service) watchSupervisorEvents(ctx context.Context, events <-chan supervisor.StateEvent) {
@@ -463,7 +507,7 @@ func (s *Service) handleConnection(ctx context.Context, ch *pipe.Channel) {
 		log.Printf("[service] received: method=%v", msg["method"])
 
 		// Dispatch based on method
-		requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		requestCtx, cancel := context.WithTimeout(ctx, serviceIPCRequestTimeout(msg))
 		response := s.dispatch(requestCtx, msg)
 		cancel()
 		if response != nil {
@@ -478,6 +522,20 @@ func (s *Service) handleConnection(ctx context.Context, ch *pipe.Channel) {
 				return
 			}
 		}
+	}
+}
+
+func serviceIPCRequestTimeout(msg map[string]interface{}) time.Duration {
+	method, _ := msg["method"].(string)
+	switch method {
+	case "core.select", "core.update.stop", "core.update.start":
+		return coreServiceIPCRequestTimeout
+	case "capture.prepare", "network.recover", "outbound.select", "outbound.create", "outbound.delete",
+		"subscription.add", "subscription.remove", "subscription.refresh",
+		"runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set":
+		return captureServiceIPCRequestTimeout
+	default:
+		return defaultServiceIPCRequestTimeout
 	}
 }
 
@@ -498,6 +556,20 @@ func (s *Service) Dispatch(ctx context.Context, msg map[string]interface{}) map[
 }
 
 func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[string]interface{} {
+	requestID, _ := msg["request_id"].(string)
+	if requestID == "" {
+		return s.dispatchUncached(ctx, msg)
+	}
+	fingerprint, err := fingerprintIPCRequest(msg)
+	if err != nil {
+		return errorResponse(requestID, "INVALID_ARGUMENT", fmt.Errorf("fingerprint IPC request: %w", err))
+	}
+	return s.ipcReplay.execute(ctx, requestID, fingerprint, func() map[string]interface{} {
+		return s.dispatchUncached(ctx, msg)
+	})
+}
+
+func (s *Service) dispatchUncached(ctx context.Context, msg map[string]interface{}) map[string]interface{} {
 	method, _ := msg["method"].(string)
 	requestID, _ := msg["request_id"].(string)
 	_ = logstore.Emit(logstore.LevelDebug, logServiceForMethod(method), "IPC", "request received", map[string]any{
@@ -514,22 +586,26 @@ func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[
 		return s.handleCoreList(requestID)
 	case "core.select":
 		return s.handleCoreSelect(ctx, requestID, msg)
+	case "core.update.stop":
+		return s.handleCoreUpdateStop(ctx, requestID, msg)
+	case "core.update.start":
+		return s.handleCoreUpdateStart(ctx, requestID, msg)
 	case "tun.enable":
-		return s.handleTUNEnable(requestID, msg)
+		return s.handleTUNEnable(ctx, requestID, msg)
 	case "tun.disable":
-		return s.handleTUNDisable(requestID)
+		return s.handleTUNDisable(ctx, requestID)
 	case "tun.status":
-		return s.handleTUNStatus(requestID)
+		return s.handleTUNStatus(ctx, requestID)
 	case "tun.config":
-		return s.handleTUNConfig(requestID, msg)
+		return s.handleTUNConfig(ctx, requestID, msg)
 	case "capture.prepare":
 		return s.handleCapturePrepare(ctx, requestID, msg)
 	case "subscription.add":
-		return s.handleSubAdd(requestID, msg)
+		return s.handleSubAdd(ctx, requestID, msg)
 	case "subscription.update":
 		return s.handleSubUpdate(requestID, msg)
 	case "subscription.remove":
-		return s.handleSubRemove(requestID, msg)
+		return s.handleSubRemove(ctx, requestID, msg)
 	case "subscription.list":
 		return s.handleSubList(requestID)
 	case "subscription.refresh":
@@ -537,11 +613,11 @@ func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[
 	case "outbound.list":
 		return s.handleOutboundList(requestID)
 	case "outbound.select":
-		return s.handleOutboundSelect(requestID, msg)
+		return s.handleOutboundSelect(ctx, requestID, msg)
 	case "outbound.create":
-		return s.handleOutboundCreate(requestID, msg)
+		return s.handleOutboundCreate(ctx, requestID, msg)
 	case "outbound.delete":
-		return s.handleOutboundDelete(requestID, msg)
+		return s.handleOutboundDelete(ctx, requestID, msg)
 	case "outbound.update":
 		return s.handleOutboundUpdate(requestID, msg)
 	case "outbound.test":
@@ -551,7 +627,11 @@ func (s *Service) dispatch(ctx context.Context, msg map[string]interface{}) map[
 	case "runtime.status":
 		return s.handleRuntimeStatus(requestID)
 	case "runtime.mode.set":
-		return s.handleRuntimeModeSet(requestID, msg)
+		return s.handleRuntimeModeSet(ctx, requestID, msg)
+	case "runtime.rules.set":
+		return s.handleRuntimeRulesSet(ctx, requestID, msg)
+	case "runtime.list_mode.set":
+		return s.handleRuntimeListModeSet(ctx, requestID, msg)
 	case "metrics.current":
 		return s.handleMetricsCurrent(requestID)
 	case "ip.check":
@@ -661,6 +741,10 @@ func (s *Service) handleCoreSelect(
 	if coreID == "" {
 		return errorResponse(requestID, "INVALID", fmt.Errorf("core_id is required"))
 	}
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "CORE_SWITCH_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
 	if coreID == s.host.ID() {
 		return response(requestID, map[string]interface{}{"active": coreID})
 	}
@@ -681,40 +765,49 @@ func (s *Service) handleCoreSelect(
 	previousHost, previousSupervisor := s.host, s.sup
 	previousConfigPath := s.cfg.ConfigPath
 	previousRuntime := s.runtime
+	nextSupervisor := supervisor.NewSupervisor(nextHost, s.reconciler)
+	restorePrevious := func(cause error) error {
+		rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer rollbackCancel()
+		var rollbackErr error
+		if s.host == nextHost && nextSupervisor.State() != supervisor.StateStopped {
+			if err := nextSupervisor.Stop(rollbackCtx); err != nil {
+				forceErr := nextHost.Stop(rollbackCtx, true, 5*time.Second)
+				rollbackErr = errors.Join(err, forceErr)
+			}
+		}
+		if rollbackErr != nil {
+			return errors.Join(cause, fmt.Errorf("stop failed replacement core: %w", rollbackErr))
+		}
+		s.runtime = previousRuntime
+		s.host, s.sup = previousHost, previousSupervisor
+		s.cfg.ConfigPath = previousConfigPath
+		if err := s.saveRuntimeStateLocked(s.cfg.ConfigDir); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+		if wasRunning && previousSupervisor.State() != supervisor.StateRunning {
+			if err := previousSupervisor.Start(rollbackCtx, previousConfigPath); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restart previous core: %w", err))
+			}
+		}
+		return errors.Join(cause, rollbackErr)
+	}
 	if wasRunning {
 		if err := previousSupervisor.Stop(ctx); err != nil {
 			return errorResponse(requestID, "CORE_SWITCH_FAILED", err)
 		}
 	}
-	nextSupervisor := supervisor.NewSupervisor(nextHost, s.reconciler)
 	s.runtime.CoreID = coreID
 	s.host, s.sup = nextHost, nextSupervisor
 	if err := s.applyRuntimeConfigLocked(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
-		s.runtime = previousRuntime
-		s.host, s.sup = previousHost, previousSupervisor
-		s.cfg.ConfigPath = previousConfigPath
-		if wasRunning {
-			_ = previousSupervisor.Start(context.Background(), previousConfigPath)
-		}
-		return errorResponse(requestID, "CORE_SWITCH_FAILED", err)
+		return errorResponse(requestID, "CORE_SWITCH_FAILED", restorePrevious(err))
 	}
 	if wasRunning {
 		if err := nextSupervisor.Start(ctx, s.cfg.ConfigPath); err != nil {
-			s.runtime = previousRuntime
-			s.host, s.sup = previousHost, previousSupervisor
-			s.cfg.ConfigPath = previousConfigPath
-			_ = s.saveRuntimeStateLocked(s.cfg.ConfigDir)
-			_ = previousSupervisor.Start(context.Background(), previousConfigPath)
-			return errorResponse(requestID, "CORE_SWITCH_FAILED", err)
+			return errorResponse(requestID, "CORE_SWITCH_FAILED", restorePrevious(err))
 		}
 		if err := s.commitHealthyRuntimeLocked(ctx); err != nil {
-			_ = nextSupervisor.Stop(context.Background())
-			s.runtime = previousRuntime
-			s.host, s.sup = previousHost, previousSupervisor
-			s.cfg.ConfigPath = previousConfigPath
-			_ = s.saveRuntimeStateLocked(s.cfg.ConfigDir)
-			_ = previousSupervisor.Start(context.Background(), previousConfigPath)
-			return errorResponse(requestID, "CORE_SWITCH_COMMIT_FAILED", err)
+			return errorResponse(requestID, "CORE_SWITCH_COMMIT_FAILED", restorePrevious(err))
 		}
 	}
 	return response(requestID, map[string]interface{}{"active": coreID})
@@ -726,6 +819,49 @@ func fileExists(path string) bool {
 	}
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func (s *Service) handleCoreUpdateStop(ctx context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
+	coreID, _ := msg["core_id"].(string)
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "CORE_UPDATE_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	if coreID == "" || coreID != s.host.ID() {
+		return errorResponse(requestID, "CORE_UPDATE_TARGET_MISMATCH", errors.New("only the active core can be stopped for update"))
+	}
+	if s.sup.State() == supervisor.StateStopped {
+		return response(requestID, map[string]interface{}{"stopped": true})
+	}
+	s.sup.SetRestartSuppressed(true)
+	if err := s.sup.Stop(ctx); err != nil {
+		s.sup.SetRestartSuppressed(false)
+		return errorResponse(requestID, "CORE_UPDATE_STOP_FAILED", err)
+	}
+	return response(requestID, map[string]interface{}{"stopped": true})
+}
+
+func (s *Service) handleCoreUpdateStart(ctx context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
+	coreID, _ := msg["core_id"].(string)
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "CORE_UPDATE_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	if coreID == "" || coreID != s.host.ID() {
+		return errorResponse(requestID, "CORE_UPDATE_TARGET_MISMATCH", errors.New("only the active core can be restarted after update"))
+	}
+	s.sup.SetRestartSuppressed(false)
+	if s.sup.State() == supervisor.StateRunning {
+		return response(requestID, map[string]interface{}{"running": true})
+	}
+	if err := s.sup.Start(ctx, s.cfg.ConfigPath); err != nil {
+		return errorResponse(requestID, "CORE_UPDATE_START_FAILED", err)
+	}
+	return response(requestID, map[string]interface{}{"running": true})
 }
 
 func (s *Service) handleCoreRestart(requestID string) map[string]interface{} {
@@ -752,10 +888,11 @@ func (s *Service) handleCoreRestart(requestID string) map[string]interface{} {
 	}
 }
 
-func (s *Service) handleTUNEnable(requestID string, msg map[string]interface{}) map[string]interface{} {
+func (s *Service) handleTUNEnable(ctx context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
 	name, _ := msg["name"].(string)
-	if name == "" {
-		name = "Navo"
+	name, nameErr := normalizeOwnedTUNName(name)
+	if nameErr != nil {
+		return errorResponse(requestID, "NET_ADAPTER_OWNERSHIP", nameErr)
 	}
 	mtu, _ := msg["mtu"].(float64)
 	if mtu == 0 {
@@ -775,65 +912,107 @@ func (s *Service) handleTUNEnable(requestID string, msg map[string]interface{}) 
 			fmt.Errorf("wintun.dll was not found beside sing-box.exe"),
 		)
 	}
-	s.runtimeMu.Lock()
-	s.runtime.TUNName, s.runtime.TUNMTU = name, int(mtu)
-	s.runtimeMu.Unlock()
 	return s.handleCapturePrepare(
-		context.Background(), requestID,
-		map[string]interface{}{"mode": capture.ModeTUN.String()},
+		ctx, requestID,
+		map[string]interface{}{
+			"mode": capture.ModeTUN.String(), "tun_name": name, "tun_mtu": int(mtu),
+		},
 	)
 }
 
-func (s *Service) handleTUNDisable(requestID string) map[string]interface{} {
+func (s *Service) handleTUNDisable(ctx context.Context, requestID string) map[string]interface{} {
 	return s.handleCapturePrepare(
-		context.Background(), requestID,
+		ctx, requestID,
 		map[string]interface{}{"mode": capture.ModeSystemProxy.String()},
 	)
 }
 
-func (s *Service) handleTUNStatus(requestID string) map[string]interface{} {
+func (s *Service) handleTUNStatus(ctx context.Context, requestID string) map[string]interface{} {
 	s.runtimeMu.Lock()
 	enabled := s.runtime.TUNEnabled
 	name := s.runtime.TUNName
 	mtu := s.runtime.TUNMTU
 	s.runtimeMu.Unlock()
-	adapter := tun.InspectAdapter(context.Background(), name)
+	if strings.TrimSpace(name) == "" {
+		name = "Navo"
+	}
+	// One native observation is authoritative for state and identity. The
+	// committed snapshot contributes addresses/MTU only when that identity still
+	// matches, avoiding mixed-instant status assembled from two system queries.
+	adapterStatus := tun.InspectAdapter(ctx, name)
+	s.tunRuntimeMu.RLock()
+	stage, sessionID, adapter, verification := s.tunStage, s.tunSessionID, s.tunAdapter, s.tunVerification
+	s.tunRuntimeMu.RUnlock()
+	expected := tunHealthExpectation{
+		sessionID: sessionID, name: name,
+		guid: adapter.InterfaceGUID, index: int(adapter.InterfaceIndex),
+	}
+	identityMatches := adapterStatus.InterfaceIndex > 0 && adapterStatus.InterfaceGUID != "" &&
+		tunObservationMatchesIdentity(expected, adapterStatus)
+	addresses := []string(nil)
+	observedMTU := mtu
+	if identityMatches {
+		addresses = adapter.IPv4Addresses
+		observedMTU = firstPositive(adapter.MTU, mtu)
+	}
 	faultID, fault := s.currentTUNFault()
-	healthy := enabled && adapter.State == capture.AdapterEnabled
+	healthy := enabled && sessionID != "" && stage == network.TUNStageHealthCommitted &&
+		s.sup.State() == supervisor.StateRunning && tunObservationHealthy(expected, adapterStatus)
 	routeCount := 0
 	if healthy {
-		routeCount = 1
+		routeCount = 2
 	}
 	return map[string]interface{}{
 		"request_id": requestID,
 		"type":       "RESPONSE",
 		"payload": map[string]interface{}{
-			"installed":       s.wintunAvailable(),
-			"created":         adapter.State != capture.AdapterMissing,
-			"enabled":         healthy,
-			"name":            adapter.Name,
-			"state":           adapter.State,
-			"identifier":      adapter.InterfaceGUID,
-			"interface_index": adapter.InterfaceIndex,
-			"addresses":       []string{"172.19.0.1/30"},
-			"mtu":             mtu,
-			"route_count":     routeCount,
-			"fault_id":        faultID,
-			"last_error":      fault,
+			"installed":         s.wintunAvailable(),
+			"created":           adapterStatus.State != capture.AdapterMissing,
+			"enabled":           healthy,
+			"name":              adapterStatus.Name,
+			"state":             adapterStatus.State,
+			"identifier":        adapterStatus.InterfaceGUID,
+			"interface_index":   adapterStatus.InterfaceIndex,
+			"addresses":         addresses,
+			"mtu":               observedMTU,
+			"route_count":       routeCount,
+			"stage":             stage,
+			"verification":      verification,
+			"fault_id":          faultID,
+			"last_error":        fault,
+			"observation_error": adapterStatus.Error,
 		},
 	}
 }
 
-func (s *Service) handleTUNConfig(requestID string, msg map[string]interface{}) map[string]interface{} {
+func firstPositive(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func (s *Service) handleTUNConfig(ctx context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
 	name, _ := msg["name"].(string)
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "TUN_CONFIG_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
 	s.runtimeMu.Lock()
 	currentName := s.runtime.TUNName
 	currentMTU := s.runtime.TUNMTU
+	configuredName := currentName
+	configuredMTU := currentMTU
 	enabled := s.runtime.TUNEnabled
 	s.runtimeMu.Unlock()
 	if name == "" {
 		name = currentName
 	}
+	ownedName, nameErr := normalizeOwnedTUNName(name)
+	if nameErr != nil {
+		return errorResponse(requestID, "NET_ADAPTER_OWNERSHIP", nameErr)
+	}
+	name = ownedName
 	if mtu, ok := msg["mtu"].(float64); ok {
 		currentMTU = int(mtu)
 	}
@@ -844,12 +1023,30 @@ func (s *Service) handleTUNConfig(requestID string, msg map[string]interface{}) 
 			fmt.Errorf("TUN MTU must be between 1280 and 9000"),
 		)
 	}
-	if err := s.setTUNRuntime(
-		context.Background(),
-		enabled,
-		name,
-		currentMTU,
-	); err != nil {
+	if enabled && (name != configuredName || currentMTU != configuredMTU) {
+		return errorResponse(
+			requestID,
+			"TUN_RESTART_REQUIRED",
+			fmt.Errorf("disable TUN before changing its adapter configuration"),
+		)
+	}
+	if enabled {
+		return response(requestID, map[string]interface{}{"status": "unchanged"})
+	}
+	s.runtimeMu.Lock()
+	previous := s.runtime
+	s.runtime.TUNName = name
+	s.runtime.TUNMTU = currentMTU
+	configDir := s.cfg.ConfigDir
+	if configDir == "" {
+		configDir = filepath.Dir(s.cfg.ConfigPath)
+	}
+	err := s.saveRuntimeStateLocked(configDir)
+	if err != nil {
+		s.runtime = previous
+	}
+	s.runtimeMu.Unlock()
+	if err != nil {
 		return errorResponse(requestID, "NET_007", err)
 	}
 	return map[string]interface{}{
@@ -861,7 +1058,7 @@ func (s *Service) handleTUNConfig(requestID string, msg map[string]interface{}) 
 
 // ── Subscription handlers ──
 
-func (s *Service) handleSubAdd(requestID string, msg map[string]interface{}) map[string]interface{} {
+func (s *Service) handleSubAdd(parent context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
 	name, _ := msg["name"].(string)
 	url, _ := msg["url"].(string)
 	skipTLSVerify, _ := msg["skip_tls_verify"].(bool)
@@ -871,19 +1068,25 @@ func (s *Service) handleSubAdd(requestID string, msg map[string]interface{}) map
 			"payload": map[string]interface{}{"code": "INVALID", "message": "name and url required"},
 		}
 	}
+	ctx, cancel := context.WithTimeout(parent, captureServiceIPCRequestTimeout)
+	defer cancel()
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "SUB_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
 	sub, err := s.subMgr.AddWithOptions(name, url, skipTLSVerify)
 	if err != nil {
 		return errorResponse(requestID, "SUB_001", err)
 	}
 	if boolField(msg, "wait") {
-		outbounds, refreshErr := s.subMgr.Refresh(context.Background())
+		outbounds, refreshErr := s.subMgr.Refresh(ctx)
 		if refreshErr != nil {
 			return errorResponse(requestID, "SUB_002", refreshErr)
 		}
 		if len(outbounds) > 0 {
 			if applyErr := s.applyRuntimeConfig(
-				context.Background(),
-				s.currentOutbounds(context.Background()),
+				ctx,
+				s.currentOutbounds(ctx),
 				"",
 				"",
 			); applyErr != nil {
@@ -894,9 +1097,16 @@ func (s *Service) handleSubAdd(requestID string, msg map[string]interface{}) map
 			"id": sub.ID, "status": "added", "node_count": len(outbounds),
 		})
 	}
-	// Auto-refresh in background to fetch nodes immediately.
+	// Auto-refresh is bounded and joins the same connection transaction before
+	// it can replace the active core configuration.
 	go func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), captureServiceIPCRequestTimeout)
+		defer cancel()
+		if err := s.lockCapture(ctx); err != nil {
+			log.Printf("[service] initial refresh for %q canceled: %v", name, err)
+			return
+		}
+		defer s.captureMu.Unlock()
 		outbounds, err := s.subMgr.Refresh(ctx)
 		if err != nil {
 			log.Printf("[service] initial refresh for %q failed: %v", name, err)
@@ -928,17 +1138,32 @@ func (s *Service) handleSubUpdate(requestID string, msg map[string]interface{}) 
 	})
 }
 
-func (s *Service) handleSubRemove(requestID string, msg map[string]interface{}) map[string]interface{} {
+func (s *Service) handleSubRemove(parent context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
 	id, _ := msg["id"].(string)
-	ok, err := s.subMgr.Remove(id)
+	ctx, cancel := context.WithTimeout(parent, captureServiceIPCRequestTimeout)
+	defer cancel()
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "SUB_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
+	removal, ok, err := s.subMgr.Detach(id)
 	if err != nil {
 		return errorResponse(requestID, "SUB_006", err)
 	}
 	if !ok {
 		return errorResponse(requestID, "NOT_FOUND", fmt.Errorf("subscription not found"))
 	}
-	// Apply config change in background.
-	go s.applyRuntimeConfig(context.Background(), s.currentOutbounds(context.Background()), "", "")
+	if err := s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
+		return errorResponse(requestID, "SUB_008", errors.Join(err, s.subMgr.RestoreRemoval(removal)))
+	}
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cleanupCancel()
+	if err := s.subMgr.FinalizeRemoval(cleanupCtx, removal); err != nil {
+		log.Printf("[service] removed subscription %q but retained its unreachable credential for later cleanup: %v", id, err)
+		return response(requestID, map[string]interface{}{
+			"status": "removed", "cleanup_warning": err.Error(),
+		})
+	}
 	return response(requestID, map[string]interface{}{"status": "removed"})
 }
 
@@ -964,7 +1189,13 @@ func (s *Service) handleSubRefresh(
 	requestID string,
 	msg map[string]interface{},
 ) map[string]interface{} {
+	ctx, cancel := context.WithTimeout(ctx, captureServiceIPCRequestTimeout)
+	defer cancel()
 	if boolField(msg, "wait") {
+		if err := s.lockCapture(ctx); err != nil {
+			return errorResponse(requestID, "SUB_BUSY", err)
+		}
+		defer s.captureMu.Unlock()
 		outbounds, err := s.subMgr.Refresh(ctx)
 		if err != nil {
 			return errorResponse(requestID, "SUB_004", err)
@@ -980,7 +1211,13 @@ func (s *Service) handleSubRefresh(
 	}
 	// Respond immediately; fetch and apply in background.
 	go func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), captureServiceIPCRequestTimeout)
+		defer cancel()
+		if err := s.lockCapture(ctx); err != nil {
+			log.Printf("[service] subscription refresh canceled: %v", err)
+			return
+		}
+		defer s.captureMu.Unlock()
 		outbounds, err := s.subMgr.Refresh(ctx)
 		if err != nil {
 			log.Printf("[service] subscription refresh failed: %v", err)
@@ -1105,49 +1342,70 @@ func (s *Service) handleIPCheck(requestID string) map[string]interface{} {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Fetch source IP (direct, no proxy) and proxy IP in parallel
+	// A user-triggered dual-link check must not reuse results from a previous
+	// capture mode. Direct remains independently useful while capture is off.
 	var sourceResult, proxyResult *ipdetect.IPResult
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
 	go func() {
 		defer wg.Done()
-		res, err := s.directIPDetector.Check(ctx, "source")
+		res, err := s.directIPDetector.CheckFresh(ctx, "source")
 		if err != nil {
 			sourceResult = &ipdetect.IPResult{
 				OutboundID: "source",
-				IP:         "检测暂不可用",
 				Error:      err.Error(),
+				CheckedAt:  time.Now(),
 			}
 		} else {
 			sourceResult = res
 		}
 	}()
 
-	go func() {
-		defer wg.Done()
-		res, err := s.ipDetector.Check(ctx, "current")
-		if err != nil {
-			proxyResult = &ipdetect.IPResult{
-				OutboundID: "current",
-				IP:         "检测暂不可用",
-				Error:      err.Error(),
+	proxyState := "inactive"
+	if s.sup.State() == supervisor.StateRunning {
+		proxyState = "unavailable"
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := s.ipDetector.CheckFresh(ctx, "current")
+			if err != nil {
+				proxyResult = &ipdetect.IPResult{
+					OutboundID: "current",
+					Error:      err.Error(),
+					CheckedAt:  time.Now(),
+				}
+				return
 			}
-		} else {
 			proxyResult = res
+			proxyState = "available"
+		}()
+	} else {
+		proxyResult = &ipdetect.IPResult{
+			OutboundID: "current",
+			Error:      "代理或 TUN 未启用",
+			CheckedAt:  time.Now(),
 		}
-	}()
+	}
 
 	wg.Wait()
-	s.diagnosticMu.Lock()
-	s.exitIP = proxyResult.IP
-	s.exitCountry = proxyResult.Country
-	s.diagnosticMu.Unlock()
+	if net.ParseIP(strings.TrimSpace(proxyResult.IP)) != nil {
+		s.diagnosticMu.Lock()
+		s.exitIP = proxyResult.IP
+		s.exitCountry = proxyResult.Country
+		s.diagnosticMu.Unlock()
+	}
+	sourceState := "unavailable"
+	if net.ParseIP(strings.TrimSpace(sourceResult.IP)) != nil && sourceResult.Error == "" {
+		sourceState = "available"
+	}
 
 	return map[string]interface{}{
 		"request_id": requestID, "type": "RESPONSE",
 		"payload": map[string]interface{}{
 			"source": map[string]interface{}{
+				"available":  sourceState == "available",
+				"state":      sourceState,
 				"ip":         sourceResult.IP,
 				"country":    sourceResult.Country,
 				"city":       sourceResult.City,
@@ -1162,6 +1420,8 @@ func (s *Service) handleIPCheck(requestID string) map[string]interface{} {
 				"error":      sourceResult.Error,
 			},
 			"proxy": map[string]interface{}{
+				"available":  proxyState == "available",
+				"state":      proxyState,
 				"ip":         proxyResult.IP,
 				"country":    proxyResult.Country,
 				"city":       proxyResult.City,

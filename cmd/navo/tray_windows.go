@@ -22,14 +22,18 @@ var embeddedIcon []byte
 const (
 	wmApp      = 0x8000
 	wmTrayIcon = wmApp + 1
+	wmTrayShow = wmApp + 2
 
 	nimAdd        = 0x00000000
+	nimModify     = 0x00000001
 	nimDelete     = 0x00000002
 	nimSetVersion = 0x00000004
 	nifMessage    = 0x00000001
 	nifIcon       = 0x00000002
 	nifTip        = 0x00000004
+	nifInfo       = 0x00000010
 	notifyIconV4  = 4
+	niifInfo      = 0x00000001
 
 	tpmLeftAlign   = 0x0000
 	tpmBottomAlign = 0x0020
@@ -76,6 +80,7 @@ var (
 	procDispatchMessageW    = user32.NewProc("DispatchMessageW")
 	procPostMessageW        = user32.NewProc("PostMessageW")
 	procPostQuitMessage     = user32.NewProc("PostQuitMessage")
+	procRegisterWindowMsgW  = user32.NewProc("RegisterWindowMessageW")
 	procFindWindowW         = user32.NewProc("FindWindowW")
 	procShowWindow          = user32.NewProc("ShowWindow")
 	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
@@ -88,8 +93,9 @@ var (
 	procDestroyIcon         = user32.NewProc("DestroyIcon")
 	procMessageBoxW         = user32.NewProc("MessageBoxW")
 
-	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
-	procShellNotifyIconW = shell32.NewProc("Shell_NotifyIconW")
+	procGetModuleHandleW       = kernel32.NewProc("GetModuleHandleW")
+	procShellNotifyIconW       = shell32.NewProc("Shell_NotifyIconW")
+	procShellNotifyIconGetRect = shell32.NewProc("Shell_NotifyIconGetRect")
 )
 
 type notifyIconData struct {
@@ -113,6 +119,20 @@ type notifyIconData struct {
 type point struct {
 	x int32
 	y int32
+}
+
+type rect struct {
+	left   int32
+	top    int32
+	right  int32
+	bottom int32
+}
+
+type notifyIconIdentifier struct {
+	cbSize   uint32
+	hwnd     syscall.Handle
+	uID      uint32
+	guidItem [16]byte
 }
 
 type windowClassEx struct {
@@ -140,9 +160,11 @@ type windowMessage struct {
 }
 
 type trayController struct {
-	hwnd syscall.Handle
-	done <-chan struct{}
-	once sync.Once
+	hwnd      syscall.Handle
+	done      <-chan struct{}
+	refresh   <-chan error
+	refreshMu sync.Mutex
+	once      sync.Once
 }
 
 func (t *trayController) Close(timeout time.Duration) {
@@ -156,6 +178,28 @@ func (t *trayController) Close(timeout time.Duration) {
 	case <-t.done:
 	case <-time.After(timeout):
 		log.Printf("[navo] tray shutdown timed out")
+	}
+}
+
+// EnsureVisible synchronously refreshes the shell icon before the UI hides.
+// If Explorer has recreated its taskbar, the tray window re-adds the icon.
+func (t *trayController) EnsureVisible() error {
+	if t == nil || t.hwnd == 0 {
+		return fmt.Errorf("native tray is unavailable")
+	}
+	t.refreshMu.Lock()
+	defer t.refreshMu.Unlock()
+	ok, _, callErr := procPostMessageW.Call(uintptr(t.hwnd), wmTrayShow, 0, 0)
+	if ok == 0 {
+		return fmt.Errorf("queue native tray refresh: %w", callErr)
+	}
+	select {
+	case err := <-t.refresh:
+		return err
+	case <-t.done:
+		return fmt.Errorf("native tray stopped during refresh")
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("native tray refresh timed out")
 	}
 }
 
@@ -175,6 +219,7 @@ func startTray(
 ) (*trayController, error) {
 	ready := make(chan trayReady, 1)
 	done := make(chan struct{})
+	refresh := make(chan error, 1)
 
 	go func() {
 		defer close(done)
@@ -275,17 +320,17 @@ func startTray(
 		trayOnShow = onShow
 		trayOnExit = onExit
 		trayBackendInstance = backend
+		trayRefreshResults = refresh
+		defer func() { trayRefreshResults = nil }()
 
-		tip, _ := syscall.UTF16FromString("Navo")
-		nid := notifyIconData{
-			cbSize:           uint32(unsafe.Sizeof(notifyIconData{})),
-			hwnd:             syscall.Handle(hwnd),
-			uID:              1,
-			uFlags:           nifMessage | nifIcon | nifTip,
-			uCallbackMessage: wmTrayIcon,
-			hIcon:            syscall.Handle(hIcon),
-		}
-		copy(nid.szTip[:], tip)
+		trayIconHandle = syscall.Handle(hIcon)
+		defer func() { trayIconHandle = 0 }()
+		taskbarCreatedName, _ := syscall.UTF16PtrFromString("TaskbarCreated")
+		registeredMessage, _, _ := procRegisterWindowMsgW.Call(uintptr(unsafe.Pointer(taskbarCreatedName)))
+		trayTaskbarCreatedMessage = uint32(registeredMessage)
+		defer func() { trayTaskbarCreatedMessage = 0 }()
+
+		nid := newNotifyIconData(syscall.Handle(hwnd), syscall.Handle(hIcon), false)
 
 		if added, _, callErr := procShellNotifyIconW.Call(
 			nimAdd,
@@ -317,16 +362,25 @@ func startTray(
 		<-done
 		return nil, result.err
 	}
-	return &trayController{hwnd: result.hwnd, done: done}, nil
+	return &trayController{hwnd: result.hwnd, done: done, refresh: refresh}, nil
 }
 
 var (
-	trayOnShow          func()
-	trayOnExit          func()
-	trayBackendInstance trayBackend
+	trayOnShow                func()
+	trayOnExit                func()
+	trayBackendInstance       trayBackend
+	trayIconHandle            syscall.Handle
+	trayTaskbarCreatedMessage uint32
+	trayRefreshResults        chan<- error
 )
 
 func trayWndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+	if trayTaskbarCreatedMessage != 0 && msg == trayTaskbarCreatedMessage {
+		if err := restoreTrayIcon(hwnd, false); err != nil {
+			log.Printf("[navo] restore tray icon after Explorer restart: %v", err)
+		}
+		return 0
+	}
 	switch msg {
 	case wmTrayIcon:
 		// NOTIFYICON_VERSION_4 packs the event code into the low word.
@@ -335,6 +389,18 @@ func trayWndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintpt
 			dispatchTrayAction(showTrayMenu(hwnd))
 		case wmLButtonUp:
 			dispatchTrayAction(&trayAction{Kind: trayActionOpen})
+		}
+		return 0
+	case wmTrayShow:
+		err := restoreTrayIcon(hwnd, true)
+		if err != nil {
+			log.Printf("[navo] refresh tray icon before minimize: %v", err)
+		}
+		if trayRefreshResults != nil {
+			select {
+			case trayRefreshResults <- err:
+			default:
+			}
 		}
 		return 0
 	case wmClose:
@@ -346,6 +412,74 @@ func trayWndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintpt
 	}
 	result, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
 	return result
+}
+
+func newNotifyIconData(hwnd, hIcon syscall.Handle, minimized bool) notifyIconData {
+	nid := notifyIconData{
+		cbSize:           uint32(unsafe.Sizeof(notifyIconData{})),
+		hwnd:             hwnd,
+		uID:              1,
+		uFlags:           nifMessage | nifIcon | nifTip,
+		uCallbackMessage: wmTrayIcon,
+		hIcon:            hIcon,
+	}
+	copy(nid.szTip[:], utf16Text("Navo"))
+	if minimized {
+		nid.uFlags |= nifInfo
+		copy(nid.szInfoTitle[:], utf16Text("Navo 已最小化"))
+		copy(nid.szInfo[:], utf16Text("程序仍在后台运行，点击托盘图标可重新打开。"))
+		nid.dwInfoFlags = niifInfo
+	}
+	return nid
+}
+
+func restoreTrayIcon(hwnd syscall.Handle, minimized bool) error {
+	if trayIconHandle == 0 {
+		return fmt.Errorf("tray icon handle is unavailable")
+	}
+	nid := newNotifyIconData(hwnd, trayIconHandle, false)
+	if !trayIconRegistered(hwnd) {
+		added, _, callErr := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid)))
+		if added == 0 {
+			return fmt.Errorf("add tray icon: %w", callErr)
+		}
+		nid.uVersion = notifyIconV4
+		if versioned, _, callErr := procShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid))); versioned == 0 {
+			return fmt.Errorf("set tray icon version: %w", callErr)
+		}
+	}
+	if minimized {
+		notification := newNotifyIconData(hwnd, trayIconHandle, true)
+		notification.uFlags = nifInfo
+		if shown, _, callErr := procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&notification))); shown == 0 {
+			// The icon is already confirmed visible. Notifications may be disabled
+			// by Windows policy, so treat this as non-fatal feedback degradation.
+			log.Printf("[navo] tray minimize notification unavailable: %v", callErr)
+		}
+	}
+	return nil
+}
+
+func trayIconRegistered(hwnd syscall.Handle) bool {
+	identifier := notifyIconIdentifier{
+		cbSize: uint32(unsafe.Sizeof(notifyIconIdentifier{})),
+		hwnd:   hwnd,
+		uID:    1,
+	}
+	var bounds rect
+	hresult, _, _ := procShellNotifyIconGetRect.Call(
+		uintptr(unsafe.Pointer(&identifier)),
+		uintptr(unsafe.Pointer(&bounds)),
+	)
+	return int32(hresult) >= 0
+}
+
+func utf16Text(value string) []uint16 {
+	encoded, err := syscall.UTF16FromString(value)
+	if err != nil {
+		return []uint16{0}
+	}
+	return encoded
 }
 
 func trayEventCode(lParam uintptr) uint32 {

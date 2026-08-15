@@ -14,7 +14,7 @@ func TestEnableFailsClosedWhenWinINetSnapshotCannotBeRead(t *testing.T) {
 		return nil, errors.New("registry unavailable")
 	}
 	setCalled := false
-	manager.setProxy = func(string) error {
+	manager.applyProxy = func(ProxyConfig) error {
 		setCalled = true
 		return nil
 	}
@@ -29,7 +29,6 @@ func TestEnableFailsClosedWhenWinINetSnapshotCannotBeRead(t *testing.T) {
 func TestEnableCommitsOwnershipAfterMutationAndNotification(t *testing.T) {
 	manager := NewManagerWithDirectory(t.TempDir())
 	manager.getProxy = func() (*ProxyConfig, error) { return &ProxyConfig{Enabled: false}, nil }
-	manager.setProxy = func(string) error { return nil }
 	manager.applyProxy = func(ProxyConfig) error { return nil }
 	manager.notify = func() error { return nil }
 	if err := manager.Enable("127.0.0.1:12080"); err != nil {
@@ -45,6 +44,19 @@ func TestEnableCommitsOwnershipAfterMutationAndNotification(t *testing.T) {
 	}
 	if owner.Phase != ownershipCommitted {
 		t.Fatalf("ownership phase = %q", owner.Phase)
+	}
+}
+
+func TestOwnedProxyConfigSuppressesPACAndWPAD(t *testing.T) {
+	got := ownedProxyConfig("127.0.0.1:12080")
+	if !got.Enabled || got.ProxyServer != "127.0.0.1:12080" || !got.ProxyServerPresent {
+		t.Fatalf("owned proxy endpoint = %#v", got)
+	}
+	if got.AutoConfigURL != "" || got.AutoConfigURLPresent || got.AutoDetect || !got.AutoDetectPresent {
+		t.Fatalf("PAC/WPAD was not suppressed: %#v", got)
+	}
+	if got.BypassList != "<local>" || !got.BypassListPresent {
+		t.Fatalf("owned bypass list = %#v", got)
 	}
 }
 
@@ -92,6 +104,16 @@ func TestOwnershipDoesNotOverwriteNewerExternalProxy(t *testing.T) {
 		Enabled: true, ProxyServer: owner.ProxyServer,
 	}) {
 		t.Fatal("the exact enabled Navo endpoint should remain owned")
+	}
+	if ownershipMatchesCurrent(owner, ProxyConfig{
+		Enabled: true, ProxyServer: owner.ProxyServer, AutoConfigURL: "https://proxy.example/pac",
+	}) {
+		t.Fatal("an active PAC must invalidate Navo ownership")
+	}
+	if ownershipMatchesCurrent(owner, ProxyConfig{
+		Enabled: true, ProxyServer: owner.ProxyServer, AutoDetect: true,
+	}) {
+		t.Fatal("active WPAD must invalidate Navo ownership")
 	}
 }
 
@@ -151,5 +173,46 @@ func TestDisableRestoresExactOwnedProxy(t *testing.T) {
 	}
 	if restored != want {
 		t.Fatalf("restored proxy = %#v, want %#v", restored, want)
+	}
+}
+
+func TestOwnedProxyRecoveryCanRetryAfterTransientRegistryFailure(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManagerWithDirectory(dir)
+	ownerData, _ := json.Marshal(ownershipRecord{ProxyServer: "127.0.0.1:12080"})
+	if err := os.WriteFile(manager.ownerPath, ownerData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := ProxyConfig{Enabled: true, ProxyServer: "127.0.0.1:10808"}
+	backupData, _ := json.Marshal(want)
+	if err := os.WriteFile(manager.backupPath, backupData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager.getProxy = func() (*ProxyConfig, error) {
+		return &ProxyConfig{Enabled: true, ProxyServer: "127.0.0.1:12080"}, nil
+	}
+	attempts := 0
+	manager.applyProxy = func(ProxyConfig) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("registry temporarily unavailable")
+		}
+		return nil
+	}
+	manager.notify = func() error { return nil }
+	if err := manager.Disable(); err == nil {
+		t.Fatal("transient restoration failure unexpectedly succeeded")
+	}
+	if _, err := os.Stat(manager.ownerPath); err != nil {
+		t.Fatalf("ownership marker was lost before recovery succeeded: %v", err)
+	}
+	if err := manager.Disable(); err != nil {
+		t.Fatalf("retry did not restore the owned proxy: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("restore attempts=%d, want 2", attempts)
+	}
+	if _, err := os.Stat(manager.ownerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ownership marker remains after recovery: %v", err)
 	}
 }

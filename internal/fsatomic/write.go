@@ -8,6 +8,18 @@ import (
 
 var replace = replaceFile
 
+// ReplaceFile atomically replaces destination with an already-flushed file
+// from the same directory without changing the directory's ACL.
+func ReplaceFile(source, destination string) error {
+	if source == "" || destination == "" {
+		return fmt.Errorf("atomic replace paths must not be empty")
+	}
+	if filepath.Clean(filepath.Dir(source)) != filepath.Clean(filepath.Dir(destination)) {
+		return fmt.Errorf("atomic replace requires source and destination in the same directory")
+	}
+	return replaceFile(source, destination)
+}
+
 // WriteFile replaces path only after the complete temporary file is flushed.
 // The temporary file lives in the destination directory so the final rename
 // cannot cross volumes.

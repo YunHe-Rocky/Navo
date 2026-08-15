@@ -316,8 +316,10 @@ func (h *SingBoxHost) Start(ctx context.Context, configPath string) (int, error)
 	// Extract listen port from config for health checks
 	h.listenPort = listenPort
 
-	// Wait for port to be ready
-	if err := h.waitForPort(ctx, h.listenPort, 10*time.Second, h.exitCh); err != nil {
+	// Mihomo may finish API/DNS startup before its mixed listener while Wintun
+	// reattaches during a rapid disable/re-enable transition. Keep readiness
+	// bounded, but do not kill a live core at the old 10-second cold-start edge.
+	if err := h.waitForPort(ctx, h.listenPort, 30*time.Second, h.exitCh); err != nil {
 		h.status.State = HostStateFailed
 		h.status.LastError = err.Error()
 		h.lastError = err.Error()

@@ -229,6 +229,23 @@ func TestValidateAcceptsModernUDPDNS(t *testing.T) {
 	}
 }
 
+func TestSingBoxBindsFrozenPhysicalInterface(t *testing.T) {
+	cfg := makeTestConfig()
+	cfg.OutboundInterface = "WLAN 2"
+	data, err := Generate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generated map[string]any
+	if err := json.Unmarshal(data, &generated); err != nil {
+		t.Fatal(err)
+	}
+	route := generated["route"].(map[string]any)
+	if route["default_interface"] != "WLAN 2" || route["auto_detect_interface"] != false {
+		t.Fatalf("route interface binding = %#v", route)
+	}
+}
+
 func TestValidateRejectsUnsupportedOutbound(t *testing.T) {
 	cfg := &Config{
 		SchemaVersion: 1,
@@ -802,6 +819,44 @@ func TestGenerate_TUNConfig(t *testing.T) {
 	}
 	if !hasDNSHijack || !hasDirectICMP {
 		t.Fatalf("missing TUN DNS/ICMP rules: %#v", rules)
+	}
+}
+
+func TestGenerate_TUNProxyRoutesDoHThroughSelectedOutbound(t *testing.T) {
+	cfg := &Config{
+		SchemaVersion: 1,
+		Log:           LogConfig{Level: "warn"},
+		Inbounds:      []InboundConfig{{Type: "tun", Tag: "tun-in"}},
+		Outbounds: []Outbound{
+			{ID: "direct", Type: OutboundDirect, Enabled: true},
+			{ID: "proxy", Type: OutboundSOCKS, Server: "127.0.0.1", Port: 1080, Enabled: true},
+		},
+		TUN:           &TUNConfig{Enabled: true, MTU: 1500, Address: []string{"172.19.0.1/30"}},
+		FinalOutbound: "proxy",
+	}
+
+	data, err := Generate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	dns := result["dns"].(map[string]interface{})
+	server := dns["servers"].([]interface{})[0].(map[string]interface{})
+	if server["type"] != "https" || server["server"] != "1.1.1.1" || server["path"] != "/dns-query" {
+		t.Fatalf("unexpected proxied DoH server: %#v", server)
+	}
+	if server["detour"] != "proxy" {
+		t.Fatalf("DoH bypasses selected outbound: %#v", server)
+	}
+	tls := server["tls"].(map[string]interface{})
+	if tls["enabled"] != true || tls["server_name"] != "cloudflare-dns.com" {
+		t.Fatalf("DoH TLS identity is incomplete: %#v", tls)
+	}
+	if result["route"].(map[string]interface{})["default_domain_resolver"] != "dns-proxy" {
+		t.Fatalf("unexpected default resolver: %#v", result["route"])
 	}
 }
 

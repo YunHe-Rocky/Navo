@@ -8,10 +8,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"syscall"
-	"time"
 )
 
 type windowsPlatform struct{}
@@ -62,28 +60,6 @@ func verifyFileSHA256(path, expected string) error {
 		return fmt.Errorf("Wintun DLL SHA-256 mismatch: got %s", actual)
 	}
 	return nil
-}
-
-func (windowsPlatform) WaitForAdapter(ctx context.Context, name string, timeout time.Duration) error {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		interfaces, err := net.Interfaces()
-		if err == nil {
-			for _, iface := range interfaces {
-				if iface.Name == name {
-					return nil
-				}
-			}
-		}
-		select {
-		case <-waitCtx.Done():
-			return fmt.Errorf("Wintun adapter %q did not become ready within %s: %w", name, timeout, waitCtx.Err())
-		case <-ticker.C:
-		}
-	}
 }
 
 func checkAdministrator() error {

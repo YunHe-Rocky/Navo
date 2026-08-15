@@ -2,6 +2,18 @@ const trafficSeries = new Set([
   "localUploadBps", "localDownloadBps", "proxyUploadBps", "proxyDownloadBps",
 ]);
 
+export function seriesForCaptureMode(mode) {
+  return mode === "system_proxy" || mode === "tun"
+    ? ["proxyDownloadBps", "proxyUploadBps"]
+    : ["localDownloadBps", "localUploadBps"];
+}
+
+export function trafficContextForCaptureMode(mode) {
+  if (mode === "tun") return { id: "tun", label: "TUN 流量", source: "代理内核计数" };
+  if (mode === "system_proxy") return { id: "system_proxy", label: "系统代理流量", source: "代理内核计数" };
+  return { id: "off", label: "本地流量", source: "物理网卡计数" };
+}
+
 export function parseTrafficPreferences(serialized) {
   const defaults = { visibleSeries: ["localDownloadBps", "proxyDownloadBps"], windowSeconds: 60 };
   try {

@@ -1,0 +1,337 @@
+﻿{
+    "executed_at":  "2026-08-03T08:14:00.9424265+00:00",
+    "windows":  "Microsoft Windows NT 10.0.26200.0",
+    "core":  "sing-box",
+    "core_version":  "1.13.14",
+    "core_sha256":  "db0d779948214cf761011d154c3a5da36df20394fa01a9fc798f1dc39fe9d183",
+    "wintun_sha256":  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+    "failure_point":  "none",
+    "crash_point":  "none",
+    "scenario":  "repeat",
+    "profile_mode":  "isolated-clone",
+    "direct_ip_before":  "124.160.204.143",
+    "direct_ip_after":  null,
+    "host_environment":  {
+                             "adapters":  [
+                                              {
+                                                  "Name":  "6to4 Adapter",
+                                                  "ifIndex":  2,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接",
+                                                  "ifIndex":  5,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Wintun Userspace Tunnel",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网 2",
+                                                  "ifIndex":  6,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "Remote NDIS based Internet Sharing Device",
+                                                  "HardwareInterface":  true
+                                              },
+                                              {
+                                                  "Name":  "Microsoft IP-HTTPS Platform Interface",
+                                                  "ifIndex":  7,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet2",
+                                                  "ifIndex":  8,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 10",
+                                                  "ifIndex":  11,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Microsoft Wi-Fi Direct Virtual Adapter #2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet8",
+                                                  "ifIndex":  13,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet8",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "Teredo Tunneling Pseudo-Interface",
+                                                  "ifIndex":  14,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "蓝牙网络连接",
+                                                  "ifIndex":  15,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Bluetooth Device (Personal Area Network)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网",
+                                                  "ifIndex":  17,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Realtek Gaming 2.5GbE Family Controller",
+                                                  "HardwareInterface":  true
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet1",
+                                                  "ifIndex":  20,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet1",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网(内核调试器)",
+                                                  "ifIndex":  21,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "Microsoft Kernel Debug Network Adapter",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 9",
+                                                  "ifIndex":  22,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Microsoft Wi-Fi Direct Virtual Adapter",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "WLAN 2",
+                                                  "ifIndex":  24,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "RZ608 Wi-Fi 6E 80MHz",
+                                                  "HardwareInterface":  true
+                                              }
+                                          ],
+                             "optional_features":  {
+                                                       "Microsoft-Hyper-V-All":  "Disabled",
+                                                       "Microsoft-Windows-Subsystem-Linux":  "Disabled"
+                                                   }
+                         },
+    "status":  "failed",
+    "activation":  {
+                       "payload":  {
+                                       "code":  "TUN_EXIT_IP_MISMATCH",
+                                       "message":  "TUN_EXIT_IP_MISMATCH: stage=DATA_PLANE_VERIFIED resource=proxy_exit_ip expected=TUN != 124.160.204.143 and TUN == local-proxy actual=tun=165.254.151.219 proxy=: Get \"https://www.cloudflare.com/cdn-cgi/trace\": read tcp 127.0.0.1:51420-\u003e127.0.0.1:12080: wsarecv: An existing connection was forcibly closed by the remote host."
+                                   },
+                       "request_id":  "tun-acceptance-1785744843877",
+                       "type":  "ERROR"
+                   },
+    "tun_status":  {
+                       "payload":  {
+                                       "addresses":  null,
+                                       "created":  false,
+                                       "enabled":  false,
+                                       "fault_id":  "",
+                                       "identifier":  "",
+                                       "installed":  true,
+                                       "interface_index":  0,
+                                       "last_error":  "",
+                                       "mtu":  1500,
+                                       "name":  "Navo",
+                                       "route_count":  0,
+                                       "stage":  "",
+                                       "state":  "missing",
+                                       "verification":  {
+                                                            "dns":  false,
+                                                            "dns_latency_ms":  0,
+                                                            "tcp":  false,
+                                                            "https":  false,
+                                                            "direct_ip":  "",
+                                                            "exit_ip":  "",
+                                                            "udp":  "",
+                                                            "verified_at":  "0001-01-01T00:00:00Z"
+                                                        }
+                                   },
+                       "request_id":  "tun-acceptance-1785744889275",
+                       "type":  "RESPONSE"
+                   },
+    "no_proxy_https":  null,
+    "capture_after":  null,
+    "core_log":  [
+
+                 ],
+    "rollback":  "passed_after_failure",
+    "before":  {
+                   "routes":  [
+
+                              ],
+                   "nrpt":  [
+
+                            ],
+                   "firewall":  [
+
+                                ],
+                   "adapters":  [
+
+                                ],
+                   "dns":  [
+                               {
+                                   "InterfaceIndex":  1,
+                                   "InterfaceAlias":  "Loopback Pseudo-Interface 1",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  5,
+                                   "InterfaceAlias":  "本地连接",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  6,
+                                   "InterfaceAlias":  "以太网 2",
+                                   "ServerAddresses":  [
+                                                           "10.206.146.219"
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  8,
+                                   "InterfaceAlias":  "VMware Network Adapter VMnet2",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  11,
+                                   "InterfaceAlias":  "本地连接* 10",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  13,
+                                   "InterfaceAlias":  "VMware Network Adapter VMnet8",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  15,
+                                   "InterfaceAlias":  "蓝牙网络连接",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  17,
+                                   "InterfaceAlias":  "以太网",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  20,
+                                   "InterfaceAlias":  "VMware Network Adapter VMnet1",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  24,
+                                   "InterfaceAlias":  "WLAN 2",
+                                   "ServerAddresses":  [
+                                                           "10.198.42.15"
+                                                       ]
+                               }
+                           ]
+               },
+    "after":  {
+                  "routes":  [
+
+                             ],
+                  "nrpt":  [
+
+                           ],
+                  "firewall":  [
+
+                               ],
+                  "adapters":  [
+
+                               ],
+                  "dns":  [
+                              {
+                                  "InterfaceIndex":  1,
+                                  "InterfaceAlias":  "Loopback Pseudo-Interface 1",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  5,
+                                  "InterfaceAlias":  "本地连接",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  6,
+                                  "InterfaceAlias":  "以太网 2",
+                                  "ServerAddresses":  [
+                                                          "10.206.146.219"
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  8,
+                                  "InterfaceAlias":  "VMware Network Adapter VMnet2",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  11,
+                                  "InterfaceAlias":  "本地连接* 10",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  13,
+                                  "InterfaceAlias":  "VMware Network Adapter VMnet8",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  15,
+                                  "InterfaceAlias":  "蓝牙网络连接",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  17,
+                                  "InterfaceAlias":  "以太网",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  20,
+                                  "InterfaceAlias":  "VMware Network Adapter VMnet1",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  24,
+                                  "InterfaceAlias":  "WLAN 2",
+                                  "ServerAddresses":  [
+                                                          "10.198.42.15"
+                                                      ]
+                              }
+                          ]
+              },
+    "error":  "TUN activation failed: {\"payload\":{\"code\":\"TUN_EXIT_IP_MISMATCH\",\"message\":\"TUN_EXIT_IP_MISMATCH: stage=DATA_PLANE_VERI\r\nFIED resource=proxy_exit_ip expected=TUN != 124.160.204.143 and TUN == local-proxy actual=tun=165.254.151.219 proxy=: G\r\net \\\"https://www.cloudflare.com/cdn-cgi/trace\\\": read tcp 127.0.0.1:51420-\\u003e127.0.0.1:12080: wsarecv: An existing c\r\nonnection was forcibly closed by the remote host.\"},\"request_id\":\"tun-acceptance-1785744843877\",\"type\":\"ERROR\"}\r\n所在位置 D:\\WorkSpace\\Navo\\scripts\\test-tun-elevated.ps1:153 字符: 9\r\n+         throw \"TUN activation failed: $($Activation | ConvertTo-Json  ...\r\n+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (TUN activation ...\"type\":\"ERROR\"}:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : TUN activation failed: {\"payload\":{\"code\":\"TUN_EXIT_IP_MISMATCH\",\"message\":\"TUN_EXIT_IP_ \r\n   MISMATCH: stage=DATA_PLANE_VERIFIED resource=proxy_exit_ip expected=TUN != 124.160.204.143 and TUN == local-proxy   \r\n  actual=tun=165.254.151.219 proxy=: Get \\\"https://www.cloudflare.com/cdn-cgi/trace\\\": read tcp 127.0.0.1:51420-\\u00   \r\n 3e127.0.0.1:12080: wsarecv: An existing connection was forcibly closed by the remote host.\"},\"request_id\":\"tun-acc    \r\neptance-1785744843877\",\"type\":\"ERROR\"}"
+}

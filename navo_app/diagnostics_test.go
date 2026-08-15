@@ -95,7 +95,7 @@ func TestCheckCoreUpdatesVerifiesIntegrityAndVersion(t *testing.T) {
 
 	releaseAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(writer, `{"tag_name":"v1.3.0","html_url":"https://github.com/SagerNet/sing-box/releases/tag/v1.3.0"}`)
+		_, _ = io.WriteString(writer, `{"tag_name":"v1.3.0","html_url":"https://github.com/SagerNet/sing-box/releases/tag/v1.3.0","assets":[{"name":"sing-box-1.3.0-windows-amd64.zip","browser_download_url":"https://github.com/SagerNet/sing-box/releases/download/v1.3.0/sing-box.zip","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1024}]}`)
 	}))
 	defer releaseAPI.Close()
 
@@ -115,6 +115,9 @@ func TestCheckCoreUpdatesVerifiesIntegrityAndVersion(t *testing.T) {
 	}
 	if item.ReleaseURL != "https://github.com/SagerNet/sing-box/releases/tag/v1.3.0" {
 		t.Fatalf("release URL = %q", item.ReleaseURL)
+	}
+	if !item.InstallSupported || item.AssetName != "sing-box-1.3.0-windows-amd64.zip" {
+		t.Fatalf("install status = %#v", item)
 	}
 }
 

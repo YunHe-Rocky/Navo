@@ -1,0 +1,730 @@
+﻿{
+    "executed_at":  "2026-08-14T06:00:15.2084007+00:00",
+    "windows":  "Microsoft Windows NT 10.0.26200.0",
+    "core":  "sing-box",
+    "core_version":  "1.13.14",
+    "core_sha256":  "db0d779948214cf761011d154c3a5da36df20394fa01a9fc798f1dc39fe9d183",
+    "wintun_sha256":  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+    "failure_point":  "none",
+    "crash_point":  "none",
+    "scenario":  "system-proxy-routing-modes",
+    "runtime_mode":  "bypass_mainland",
+    "profile_mode":  "generated-upstream",
+    "upstream":  "socks5://127.0.0.1:10808",
+    "selected_outbound":  null,
+    "direct_ip_before":  "183.158.168.94",
+    "direct_ip_after":  "183.158.168.94",
+    "host_environment":  {
+                             "adapters":  [
+                                              {
+                                                  "Name":  "6to4 Adapter",
+                                                  "ifIndex":  2,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接 3",
+                                                  "ifIndex":  3,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Wintun Userspace Tunnel #3",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 7",
+                                                  "ifIndex":  4,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "WAN Miniport (IPv6)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 8",
+                                                  "ifIndex":  5,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "WAN Miniport (Network Monitor)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接",
+                                                  "ifIndex":  6,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Wintun Userspace Tunnel",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "Microsoft IP-HTTPS Platform Interface",
+                                                  "ifIndex":  8,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet2",
+                                                  "ifIndex":  9,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 2",
+                                                  "ifIndex":  11,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "WAN Miniport (IKEv2)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 10",
+                                                  "ifIndex":  12,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Microsoft Wi-Fi Direct Virtual Adapter #2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 5",
+                                                  "ifIndex":  13,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "WAN Miniport (PPPOE)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet8",
+                                                  "ifIndex":  14,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet8",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "Teredo Tunneling Pseudo-Interface",
+                                                  "ifIndex":  15,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "蓝牙网络连接",
+                                                  "ifIndex":  16,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Bluetooth Device (Personal Area Network)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接 2",
+                                                  "ifIndex":  17,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Wintun Userspace Tunnel #2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 1",
+                                                  "ifIndex":  18,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "WAN Miniport (SSTP)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网",
+                                                  "ifIndex":  19,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Realtek Gaming 2.5GbE Family Controller",
+                                                  "HardwareInterface":  true
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 6",
+                                                  "ifIndex":  20,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "WAN Miniport (IP)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 4",
+                                                  "ifIndex":  21,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "WAN Miniport (PPTP)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet1",
+                                                  "ifIndex":  22,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet1",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网(内核调试器)",
+                                                  "ifIndex":  23,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "Microsoft Kernel Debug Network Adapter",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 9",
+                                                  "ifIndex":  24,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Microsoft Wi-Fi Direct Virtual Adapter",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 3",
+                                                  "ifIndex":  25,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "WAN Miniport (L2TP)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "WLAN 2",
+                                                  "ifIndex":  26,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "RZ608 Wi-Fi 6E 80MHz",
+                                                  "HardwareInterface":  true
+                                              }
+                                          ],
+                             "optional_features":  {
+                                                       "Microsoft-Hyper-V-All":  "unavailable",
+                                                       "Microsoft-Windows-Subsystem-Linux":  "unavailable"
+                                                   }
+                         },
+    "status":  "passed",
+    "activation":  {
+                       "payload":  {
+                                       "adapter":  {
+                                                       "state":  "",
+                                                       "name":  "Navo"
+                                                   },
+                                       "can_retry_tun":  false,
+                                       "committed_mode":  "system_proxy",
+                                       "desired_mode":  "system_proxy",
+                                       "fault_id":  "",
+                                       "last_error":  "",
+                                       "phase":  "running",
+                                       "state":  "running_system_proxy",
+                                       "transition_id":  "",
+                                       "updated_at":  "2026-08-14T06:00:37.5395741Z"
+                                   },
+                       "request_id":  "tun-acceptance-1786687229456",
+                       "timestamp":  1786687237539,
+                       "type":  "RESPONSE"
+                   },
+    "tun_status":  null,
+    "no_proxy_https":  null,
+    "external_sites":  null,
+    "stability_seconds":  30,
+    "tun_status_delayed":  null,
+    "external_sites_delayed":  null,
+    "reenabled_tun_status":  null,
+    "external_sites_reenabled":  null,
+    "routing_modes":  {
+                          "system_proxy":  {
+                                               "bypass_mainland":  {
+                                                                       "set":  {
+                                                                                   "payload":  {
+                                                                                                   "mode":  "bypass_mainland",
+                                                                                                   "sites":  {
+                                                                                                                 "github":  {
+                                                                                                                                "dns":  true,
+                                                                                                                                "tcp":  true,
+                                                                                                                                "https":  true,
+                                                                                                                                "status_code":  200
+                                                                                                                            },
+                                                                                                                 "google":  {
+                                                                                                                                "dns":  true,
+                                                                                                                                "tcp":  true,
+                                                                                                                                "https":  true,
+                                                                                                                                "status_code":  204
+                                                                                                                            }
+                                                                                                             },
+                                                                                                   "verified":  true
+                                                                                               },
+                                                                                   "request_id":  "tun-acceptance-1786687249768",
+                                                                                   "type":  "RESPONSE"
+                                                                               },
+                                                                       "status":  {
+                                                                                      "payload":  {
+                                                                                                      "active_id":  "TUN-acceptance-upstream-1786687224902984100",
+                                                                                                      "blacklist":  [
+                                                                                                                        "google.com",
+                                                                                                                        "github.com",
+                                                                                                                        "chatgpt.com",
+                                                                                                                        "openai.com",
+                                                                                                                        "api4.ipify.org",
+                                                                                                                        "ipv4.icanhazip.com",
+                                                                                                                        "203.0.113.0/24"
+                                                                                                                    ],
+                                                                                                      "exit_country":  "",
+                                                                                                      "exit_ip":  "",
+                                                                                                      "list_mode":  "off",
+                                                                                                      "mode":  "bypass_mainland",
+                                                                                                      "tun_enabled":  false,
+                                                                                                      "whitelist":  [
+                                                                                                                        "baidu.com",
+                                                                                                                        "qq.com",
+                                                                                                                        "api4.ipify.org",
+                                                                                                                        "ipv4.icanhazip.com",
+                                                                                                                        "198.51.100.0/24"
+                                                                                                                    ]
+                                                                                                  },
+                                                                                      "request_id":  "tun-acceptance-1786687255347",
+                                                                                      "type":  "RESPONSE"
+                                                                                  },
+                                                                       "external_sites":  {
+                                                                                              "github":  {
+                                                                                                             "dns":  true,
+                                                                                                             "tcp":  true,
+                                                                                                             "https":  true,
+                                                                                                             "status_code":  200
+                                                                                                         },
+                                                                                              "google":  {
+                                                                                                             "dns":  true,
+                                                                                                             "tcp":  true,
+                                                                                                             "https":  true,
+                                                                                                             "status_code":  204
+                                                                                                         }
+                                                                                          },
+                                                                       "application_sites":  {
+                                                                                                 "google":  {
+                                                                                                                "uri":  "https://www.google.com/generate_204",
+                                                                                                                "status":  204,
+                                                                                                                "attempts":  1,
+                                                                                                                "proxy_source":  "wininet"
+                                                                                                            },
+                                                                                                 "github":  {
+                                                                                                                "uri":  "https://github.com/",
+                                                                                                                "status":  200,
+                                                                                                                "attempts":  1,
+                                                                                                                "proxy_source":  "wininet"
+                                                                                                            },
+                                                                                                 "chatgpt":  {
+                                                                                                                 "uri":  "https://chatgpt.com/",
+                                                                                                                 "status":  403,
+                                                                                                                 "attempts":  1,
+                                                                                                                 "proxy_source":  "wininet"
+                                                                                                             },
+                                                                                                 "openai_api":  {
+                                                                                                                    "uri":  "https://api.openai.com/v1/models",
+                                                                                                                    "status":  401,
+                                                                                                                    "attempts":  1,
+                                                                                                                    "proxy_source":  "wininet"
+                                                                                                                }
+                                                                                             },
+                                                                       "exit_ip":  "165.254.151.219"
+                                                                   },
+                                               "global":  {
+                                                              "set":  {
+                                                                          "payload":  {
+                                                                                          "mode":  "global",
+                                                                                          "sites":  {
+                                                                                                        "github":  {
+                                                                                                                       "dns":  true,
+                                                                                                                       "tcp":  true,
+                                                                                                                       "https":  true,
+                                                                                                                       "status_code":  200
+                                                                                                                   },
+                                                                                                        "google":  {
+                                                                                                                       "dns":  true,
+                                                                                                                       "tcp":  true,
+                                                                                                                       "https":  true,
+                                                                                                                       "status_code":  204
+                                                                                                                   }
+                                                                                                    },
+                                                                                          "verified":  true
+                                                                                      },
+                                                                          "request_id":  "tun-acceptance-1786687267086",
+                                                                          "type":  "RESPONSE"
+                                                                      },
+                                                              "status":  {
+                                                                             "payload":  {
+                                                                                             "active_id":  "TUN-acceptance-upstream-1786687224902984100",
+                                                                                             "blacklist":  [
+                                                                                                               "google.com",
+                                                                                                               "github.com",
+                                                                                                               "chatgpt.com",
+                                                                                                               "openai.com",
+                                                                                                               "api4.ipify.org",
+                                                                                                               "ipv4.icanhazip.com",
+                                                                                                               "203.0.113.0/24"
+                                                                                                           ],
+                                                                                             "exit_country":  "",
+                                                                                             "exit_ip":  "",
+                                                                                             "list_mode":  "off",
+                                                                                             "mode":  "global",
+                                                                                             "tun_enabled":  false,
+                                                                                             "whitelist":  [
+                                                                                                               "baidu.com",
+                                                                                                               "qq.com",
+                                                                                                               "api4.ipify.org",
+                                                                                                               "ipv4.icanhazip.com",
+                                                                                                               "198.51.100.0/24"
+                                                                                                           ]
+                                                                                         },
+                                                                             "request_id":  "tun-acceptance-1786687272704",
+                                                                             "type":  "RESPONSE"
+                                                                         },
+                                                              "external_sites":  {
+                                                                                     "github":  {
+                                                                                                    "dns":  true,
+                                                                                                    "tcp":  true,
+                                                                                                    "https":  true,
+                                                                                                    "status_code":  200
+                                                                                                },
+                                                                                     "google":  {
+                                                                                                    "dns":  true,
+                                                                                                    "tcp":  true,
+                                                                                                    "https":  true,
+                                                                                                    "status_code":  204
+                                                                                                }
+                                                                                 },
+                                                              "application_sites":  {
+                                                                                        "google":  {
+                                                                                                       "uri":  "https://www.google.com/generate_204",
+                                                                                                       "status":  204,
+                                                                                                       "attempts":  1,
+                                                                                                       "proxy_source":  "wininet"
+                                                                                                   },
+                                                                                        "github":  {
+                                                                                                       "uri":  "https://github.com/",
+                                                                                                       "status":  200,
+                                                                                                       "attempts":  1,
+                                                                                                       "proxy_source":  "wininet"
+                                                                                                   },
+                                                                                        "chatgpt":  {
+                                                                                                        "uri":  "https://chatgpt.com/",
+                                                                                                        "status":  403,
+                                                                                                        "attempts":  1,
+                                                                                                        "proxy_source":  "wininet"
+                                                                                                    },
+                                                                                        "openai_api":  {
+                                                                                                           "uri":  "https://api.openai.com/v1/models",
+                                                                                                           "status":  401,
+                                                                                                           "attempts":  1,
+                                                                                                           "proxy_source":  "wininet"
+                                                                                                       }
+                                                                                    },
+                                                              "exit_ip":  "165.254.151.219"
+                                                          },
+                                               "direct":  {
+                                                              "set":  {
+                                                                          "payload":  {
+                                                                                          "mode":  "direct",
+                                                                                          "sites":  {
+                                                                                                        "baidu":  {
+                                                                                                                      "dns":  true,
+                                                                                                                      "tcp":  true,
+                                                                                                                      "https":  true,
+                                                                                                                      "status_code":  200
+                                                                                                                  },
+                                                                                                        "xiaomi":  {
+                                                                                                                       "dns":  true,
+                                                                                                                       "tcp":  true,
+                                                                                                                       "https":  true,
+                                                                                                                       "status_code":  204
+                                                                                                                   }
+                                                                                                    },
+                                                                                          "verified":  true
+                                                                                      },
+                                                                          "request_id":  "tun-acceptance-1786687284691",
+                                                                          "type":  "RESPONSE"
+                                                                      },
+                                                              "status":  {
+                                                                             "payload":  {
+                                                                                             "active_id":  "TUN-acceptance-upstream-1786687224902984100",
+                                                                                             "blacklist":  [
+                                                                                                               "google.com",
+                                                                                                               "github.com",
+                                                                                                               "chatgpt.com",
+                                                                                                               "openai.com",
+                                                                                                               "api4.ipify.org",
+                                                                                                               "ipv4.icanhazip.com",
+                                                                                                               "203.0.113.0/24"
+                                                                                                           ],
+                                                                                             "exit_country":  "",
+                                                                                             "exit_ip":  "",
+                                                                                             "list_mode":  "off",
+                                                                                             "mode":  "direct",
+                                                                                             "tun_enabled":  false,
+                                                                                             "whitelist":  [
+                                                                                                               "baidu.com",
+                                                                                                               "qq.com",
+                                                                                                               "api4.ipify.org",
+                                                                                                               "ipv4.icanhazip.com",
+                                                                                                               "198.51.100.0/24"
+                                                                                                           ]
+                                                                                         },
+                                                                             "request_id":  "tun-acceptance-1786687296480",
+                                                                             "type":  "RESPONSE"
+                                                                         },
+                                                              "external_sites":  {
+                                                                                     "baidu":  {
+                                                                                                   "dns":  true,
+                                                                                                   "tcp":  true,
+                                                                                                   "https":  true,
+                                                                                                   "status_code":  200
+                                                                                               },
+                                                                                     "xiaomi":  {
+                                                                                                    "dns":  true,
+                                                                                                    "tcp":  true,
+                                                                                                    "https":  true,
+                                                                                                    "status_code":  204
+                                                                                                }
+                                                                                 },
+                                                              "application_sites":  {
+                                                                                        "baidu":  {
+                                                                                                      "uri":  "https://www.baidu.com/",
+                                                                                                      "status":  200,
+                                                                                                      "attempts":  1,
+                                                                                                      "proxy_source":  "wininet"
+                                                                                                  },
+                                                                                        "xiaomi":  {
+                                                                                                       "uri":  "https://connect.rom.miui.com/generate_204",
+                                                                                                       "status":  204,
+                                                                                                       "attempts":  1,
+                                                                                                       "proxy_source":  "wininet"
+                                                                                                   }
+                                                                                    },
+                                                              "exit_ip":  "183.158.168.94"
+                                                          }
+                                           }
+                      },
+    "routing_rules":  {
+                          "payload":  {
+                                          "blacklist":  [
+                                                            "google.com",
+                                                            "github.com",
+                                                            "chatgpt.com",
+                                                            "openai.com",
+                                                            "api4.ipify.org",
+                                                            "ipv4.icanhazip.com",
+                                                            "203.0.113.0/24"
+                                                        ],
+                                          "sites":  {
+                                                        "github":  {
+                                                                       "dns":  true,
+                                                                       "tcp":  true,
+                                                                       "https":  true,
+                                                                       "status_code":  200
+                                                                   },
+                                                        "google":  {
+                                                                       "dns":  true,
+                                                                       "tcp":  true,
+                                                                       "https":  true,
+                                                                       "status_code":  204
+                                                                   }
+                                                    },
+                                          "verified":  true,
+                                          "whitelist":  [
+                                                            "baidu.com",
+                                                            "qq.com",
+                                                            "api4.ipify.org",
+                                                            "ipv4.icanhazip.com",
+                                                            "198.51.100.0/24"
+                                                        ]
+                                      },
+                          "request_id":  "tun-acceptance-1786687237555",
+                          "type":  "RESPONSE"
+                      },
+    "wininet_before":  {
+                           "proxy_enable":  1,
+                           "proxy_server":  "127.0.0.1:10808",
+                           "proxy_override":  "\u003clocal\u003e;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*",
+                           "auto_config_url":  "",
+                           "auto_detect":  null
+                       },
+    "wininet_owned":  {
+                          "proxy_enable":  1,
+                          "proxy_server":  "127.0.0.1:12080",
+                          "proxy_override":  "\u003clocal\u003e",
+                          "auto_config_url":  "",
+                          "auto_detect":  null
+                      },
+    "wininet_after":  {
+                          "proxy_enable":  1,
+                          "proxy_server":  "127.0.0.1:10808",
+                          "proxy_override":  "\u003clocal\u003e;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*",
+                          "auto_config_url":  "",
+                          "auto_detect":  null
+                      },
+    "capture_after":  {
+                          "payload":  {
+                                          "adapter":  {
+                                                          "state":  "",
+                                                          "name":  "Navo"
+                                                      },
+                                          "can_retry_tun":  false,
+                                          "committed_mode":  "off",
+                                          "desired_mode":  "off",
+                                          "fault_id":  "",
+                                          "last_error":  "",
+                                          "phase":  "stopped",
+                                          "state":  "stopped",
+                                          "transition_id":  "",
+                                          "updated_at":  "2026-08-14T06:02:38.6055981Z"
+                                      },
+                          "request_id":  "tun-acceptance-1786687358607",
+                          "timestamp":  1786687358609,
+                          "type":  "RESPONSE"
+                      },
+    "core_log":  null,
+    "rollback":  "passed",
+    "before":  null,
+    "after":  null,
+    "error":  null,
+    "routing_list_modes":  {
+                               "blacklist":  {
+                                                 "set":  {
+                                                             "payload":  {
+                                                                             "mode":  "blacklist",
+                                                                             "sites":  {
+                                                                                           "baidu":  {
+                                                                                                         "dns":  true,
+                                                                                                         "tcp":  true,
+                                                                                                         "https":  true,
+                                                                                                         "status_code":  200
+                                                                                                     },
+                                                                                           "xiaomi":  {
+                                                                                                          "dns":  true,
+                                                                                                          "tcp":  true,
+                                                                                                          "https":  true,
+                                                                                                          "status_code":  204
+                                                                                                      }
+                                                                                       },
+                                                                             "verified":  true
+                                                                         },
+                                                             "request_id":  "tun-acceptance-1786687319237",
+                                                             "type":  "RESPONSE"
+                                                         },
+                                                 "status":  {
+                                                                "payload":  {
+                                                                                "active_id":  "TUN-acceptance-upstream-1786687224902984100",
+                                                                                "blacklist":  [
+                                                                                                  "google.com",
+                                                                                                  "github.com",
+                                                                                                  "chatgpt.com",
+                                                                                                  "openai.com",
+                                                                                                  "api4.ipify.org",
+                                                                                                  "ipv4.icanhazip.com",
+                                                                                                  "203.0.113.0/24"
+                                                                                              ],
+                                                                                "exit_country":  "",
+                                                                                "exit_ip":  "",
+                                                                                "list_mode":  "blacklist",
+                                                                                "mode":  "direct",
+                                                                                "tun_enabled":  false,
+                                                                                "whitelist":  [
+                                                                                                  "baidu.com",
+                                                                                                  "qq.com",
+                                                                                                  "api4.ipify.org",
+                                                                                                  "ipv4.icanhazip.com",
+                                                                                                  "198.51.100.0/24"
+                                                                                              ]
+                                                                            },
+                                                                "request_id":  "tun-acceptance-1786687322393",
+                                                                "type":  "RESPONSE"
+                                                            },
+                                                 "exit_ip":  "165.254.151.219"
+                                             },
+                               "whitelist":  {
+                                                 "set":  {
+                                                             "payload":  {
+                                                                             "mode":  "whitelist",
+                                                                             "sites":  {
+                                                                                           "github":  {
+                                                                                                          "dns":  true,
+                                                                                                          "tcp":  true,
+                                                                                                          "https":  true,
+                                                                                                          "status_code":  200
+                                                                                                      },
+                                                                                           "google":  {
+                                                                                                          "dns":  true,
+                                                                                                          "tcp":  true,
+                                                                                                          "https":  true,
+                                                                                                          "status_code":  204
+                                                                                                      }
+                                                                                       },
+                                                                             "verified":  true
+                                                                         },
+                                                             "request_id":  "tun-acceptance-1786687329712",
+                                                             "type":  "RESPONSE"
+                                                         },
+                                                 "status":  {
+                                                                "payload":  {
+                                                                                "active_id":  "TUN-acceptance-upstream-1786687224902984100",
+                                                                                "blacklist":  [
+                                                                                                  "google.com",
+                                                                                                  "github.com",
+                                                                                                  "chatgpt.com",
+                                                                                                  "openai.com",
+                                                                                                  "api4.ipify.org",
+                                                                                                  "ipv4.icanhazip.com",
+                                                                                                  "203.0.113.0/24"
+                                                                                              ],
+                                                                                "exit_country":  "",
+                                                                                "exit_ip":  "",
+                                                                                "list_mode":  "whitelist",
+                                                                                "mode":  "global",
+                                                                                "tun_enabled":  false,
+                                                                                "whitelist":  [
+                                                                                                  "baidu.com",
+                                                                                                  "qq.com",
+                                                                                                  "api4.ipify.org",
+                                                                                                  "ipv4.icanhazip.com",
+                                                                                                  "198.51.100.0/24"
+                                                                                              ]
+                                                                            },
+                                                                "request_id":  "tun-acceptance-1786687335865",
+                                                                "type":  "RESPONSE"
+                                                            },
+                                                 "exit_ip":  "183.158.168.94"
+                                             },
+                               "off":  {
+                                           "set":  {
+                                                       "payload":  {
+                                                                       "mode":  "off",
+                                                                       "sites":  {
+                                                                                     "github":  {
+                                                                                                    "dns":  true,
+                                                                                                    "tcp":  true,
+                                                                                                    "https":  true,
+                                                                                                    "status_code":  200
+                                                                                                },
+                                                                                     "google":  {
+                                                                                                    "dns":  true,
+                                                                                                    "tcp":  true,
+                                                                                                    "https":  true,
+                                                                                                    "status_code":  204
+                                                                                                }
+                                                                                 },
+                                                                       "verified":  true
+                                                                   },
+                                                       "request_id":  "tun-acceptance-1786687347851",
+                                                       "type":  "RESPONSE"
+                                                   },
+                                           "status":  {
+                                                          "payload":  {
+                                                                          "active_id":  "TUN-acceptance-upstream-1786687224902984100",
+                                                                          "blacklist":  [
+                                                                                            "google.com",
+                                                                                            "github.com",
+                                                                                            "chatgpt.com",
+                                                                                            "openai.com",
+                                                                                            "api4.ipify.org",
+                                                                                            "ipv4.icanhazip.com",
+                                                                                            "203.0.113.0/24"
+                                                                                        ],
+                                                                          "exit_country":  "",
+                                                                          "exit_ip":  "",
+                                                                          "list_mode":  "off",
+                                                                          "mode":  "global",
+                                                                          "tun_enabled":  false,
+                                                                          "whitelist":  [
+                                                                                            "baidu.com",
+                                                                                            "qq.com",
+                                                                                            "api4.ipify.org",
+                                                                                            "ipv4.icanhazip.com",
+                                                                                            "198.51.100.0/24"
+                                                                                        ]
+                                                                      },
+                                                          "request_id":  "tun-acceptance-1786687352410",
+                                                          "type":  "RESPONSE"
+                                                      },
+                                           "exit_ip":  "165.254.151.219"
+                                       }
+                           }
+}

@@ -5,7 +5,10 @@ $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $env:GOPATH = Join-Path $ProjectRoot ".cache\go-path"
 $env:GOMODCACHE = Join-Path $env:GOPATH "pkg\mod"
 $env:GOCACHE = Join-Path $ProjectRoot ".cache\go-build"
-New-Item -ItemType Directory -Force $env:GOMODCACHE, $env:GOCACHE | Out-Null
+$BuildTemp = Join-Path $ProjectRoot ".cache\tmp"
+$env:TEMP = $BuildTemp
+$env:TMP = $BuildTemp
+New-Item -ItemType Directory -Force $env:GOMODCACHE, $env:GOCACHE, $BuildTemp | Out-Null
 
 Push-Location $ProjectRoot
 try {

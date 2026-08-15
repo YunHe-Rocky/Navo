@@ -115,8 +115,9 @@ func TestVerificationFailureRollsBackAndOpensCircuit(t *testing.T) {
 		if rollbacks.Load() != 1 {
 			return false
 		}
-		_, err := os.Stat(cfg.StateFile)
-		return err == nil
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return len(engine.pending) == 0
 	})
 	if repairs.Load() != 1 {
 		t.Fatalf("repair calls = %d", repairs.Load())
@@ -130,6 +131,110 @@ func TestVerificationFailureRollsBackAndOpensCircuit(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"open_until"`) {
 		t.Fatal("circuit did not open")
+	}
+}
+
+func TestStopDuringHalfOpenBackoffReleasesCircuit(t *testing.T) {
+	var calls atomic.Int32
+	policy := testPolicy(CodeDNSMismatch, &calls)
+	policy.Def.Budget.MaxAttempts = 1
+	policy.Def.Budget.Cooldown = time.Minute
+	cfg := DefaultConfig(filepath.Join(t.TempDir(), "selfheal-state.json"))
+	registry, err := NewRegistry(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(cfg, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	engine.budgets.now = func() time.Time { return now }
+	event := ErrorEvent{Code: CodeDNSMismatch, SourceService: "Network", ResourceID: "dns"}
+	if _, state, allowed, err := engine.budgets.begin(event, policy.Def.Budget); err != nil || !allowed || state != "closed" {
+		t.Fatalf("begin initial attempt: state=%q allowed=%v err=%v", state, allowed, err)
+	}
+	if state, err := engine.budgets.complete(event, policy.Def.Budget, false); err != nil || state != "opened" {
+		t.Fatalf("open circuit: state=%q err=%v", state, err)
+	}
+	now = now.Add(policy.Def.Budget.Cooldown + time.Second)
+
+	sleepStarted := make(chan struct{})
+	engine.sleep = func(ctx context.Context, _ time.Duration) error {
+		close(sleepStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.Submit(event) {
+		t.Fatal("half-open event was not accepted")
+	}
+	select {
+	case <-sleepStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("half-open attempt did not reach backoff")
+	}
+	engine.Stop()
+
+	_, state, allowed, err := engine.budgets.begin(event, policy.Def.Budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed || state != "half_open" {
+		t.Fatalf("canceled half-open attempt stayed busy: state=%q allowed=%v", state, allowed)
+	}
+}
+
+func TestStopDropsQueuedEventsBeforeRestart(t *testing.T) {
+	var calls atomic.Int32
+	policy := testPolicy(CodeTrafficCollectorStale, &calls)
+	blocked := make(chan struct{})
+	policy.CheckFunc = func(ctx context.Context, event ErrorEvent) (bool, error) {
+		if event.ResourceID != "blocking" {
+			return true, nil
+		}
+		close(blocked)
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
+	cfg := DefaultConfig("")
+	registry, err := NewRegistry(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(cfg, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.sleep = func(context.Context, time.Duration) error { return nil }
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.Submit(ErrorEvent{Code: CodeTrafficCollectorStale, SourceService: "Monitor", ResourceID: "blocking"}) {
+		t.Fatal("blocking event was not accepted")
+	}
+	select {
+	case <-blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking event did not start")
+	}
+	if !engine.Submit(ErrorEvent{Code: CodeTrafficCollectorStale, SourceService: "Monitor", ResourceID: "stale"}) {
+		t.Fatal("queued event was not accepted")
+	}
+	engine.Stop()
+	if calls.Load() != 0 {
+		t.Fatalf("queued repair ran during stop: calls=%d", calls.Load())
+	}
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(engine.Stop)
+	time.Sleep(50 * time.Millisecond)
+	if calls.Load() != 0 {
+		t.Fatalf("stale queued repair ran after restart: calls=%d", calls.Load())
 	}
 }
 

@@ -1,11 +1,13 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.0",
+    [ValidatePattern('^Navo(?:-[A-Za-z0-9._-]+)?$')]
+    [string]$PayloadName = "Navo"
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$ReleaseRoot = Join-Path $ProjectRoot "release\Navo"
+$ReleaseRoot = Join-Path (Join-Path $ProjectRoot "release") $PayloadName
 $InstallerRoot = Join-Path $ProjectRoot "installer"
 $CacheRoot = Join-Path $ProjectRoot ".cache\installer"
 $StagingRoot = Join-Path $CacheRoot "payload"

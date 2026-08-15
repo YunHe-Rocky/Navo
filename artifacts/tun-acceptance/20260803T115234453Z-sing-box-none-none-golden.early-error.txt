@@ -1,0 +1,6 @@
+﻿Direct public IP lookup failed
+所在位置 D:\WorkSpace\Navo\scripts\test-tun-elevated.ps1:229 字符: 9
++         throw "Direct public IP lookup failed"
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Direct public IP lookup failed:String) [], RuntimeException
+    + FullyQualifiedErrorId : Direct public IP lookup failed

@@ -7,6 +7,8 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -17,12 +19,19 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"navo/internal/agent/systemproxy"
 	"navo/internal/domain/capture"
 	"navo/internal/logstore"
 	"navo/internal/pipe"
+)
+
+const (
+	defaultIPCRequestTimeout    = 30 * time.Second
+	captureIPCRequestTimeout    = 2 * time.Minute
+	coreSwitchIPCRequestTimeout = 4 * time.Minute
 )
 
 // Config holds the User Agent configuration.
@@ -34,13 +43,18 @@ type Config struct {
 	// SendToServiceFn is an optional direct function that replaces the Named Pipe
 	// relay to the service. When set, the agent calls this function directly
 	// instead of opening a pipe connection.
-	SendToServiceFn    func(msg map[string]interface{}) (map[string]interface{}, error)
-	IsElevatedFn       func() bool
-	ProxyProbeFn       func(context.Context, string) error
-	ShowUIFn           func() error
-	CaptureJournalPath string
-	CaptureProbeFn     func(context.Context, capture.Mode) error
-	ProxyManager       *systemproxy.Manager
+	// SendToServiceContextFn is preferred because capture recovery and UI
+	// cancellation must stop the Service mutation itself, not only its waiter.
+	SendToServiceContextFn func(context.Context, map[string]interface{}) (map[string]interface{}, error)
+	SendToServiceFn        func(msg map[string]interface{}) (map[string]interface{}, error)
+	IsElevatedFn           func() bool
+	ProxyProbeFn           func(context.Context, string) error
+	ShowUIFn               func() error
+	MinimizeToTrayFn       func() error
+	RequestExitFn          func()
+	CaptureJournalPath     string
+	CaptureProbeFn         func(context.Context, capture.Mode) error
+	ProxyManager           *systemproxy.Manager
 }
 
 // Agent is the user-session agent.
@@ -51,7 +65,9 @@ type Agent struct {
 
 	serviceCh      *pipe.Channel // connection to service
 	serviceMu      sync.Mutex    // serializes request/response pairs on serviceCh
-	captureMu      sync.Mutex    // serializes cross-layer capture mode transactions
+	serviceSession string        // isolates Service replay IDs from UI request IDs
+	serviceSeq     atomic.Uint64
+	captureMu      sync.Mutex // serializes cross-layer capture mode transactions
 	captureStateMu sync.RWMutex
 	captureState   capture.Snapshot
 	captureJournal *capture.JournalStore
@@ -82,6 +98,10 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.IsElevatedFn == nil {
 		cfg.IsElevatedFn = processIsElevated
 	}
+	serviceSessionBytes := make([]byte, 16)
+	if _, err := rand.Read(serviceSessionBytes); err != nil {
+		return nil, fmt.Errorf("create Agent Service request session: %w", err)
+	}
 
 	proxyProbe := cfg.ProxyProbeFn
 	if proxyProbe == nil {
@@ -92,10 +112,11 @@ func New(cfg Config) (*Agent, error) {
 		proxyManager = systemproxy.NewManager()
 	}
 	agent := &Agent{
-		cfg:        cfg,
-		proxy:      proxyManager,
-		proxyProbe: proxyProbe,
-		stopCh:     make(chan struct{}),
+		cfg:            cfg,
+		proxy:          proxyManager,
+		proxyProbe:     proxyProbe,
+		serviceSession: hex.EncodeToString(serviceSessionBytes),
+		stopCh:         make(chan struct{}),
 	}
 	agent.initializeCaptureState()
 	return agent, nil
@@ -103,9 +124,6 @@ func New(cfg Config) (*Agent, error) {
 
 // Run starts the agent. Connects to the service and listens for UI connections.
 func (a *Agent) Run(ctx context.Context) error {
-	if err := a.proxy.RecoverOwned(); err != nil {
-		log.Printf("[agent] recover system proxy from previous shutdown: %v", err)
-	}
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
@@ -119,7 +137,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	log.Printf("[agent] UI pipe: %s", a.cfg.UIPipeName)
 
 	// Connect to the Windows Service before accepting any UI connections.
-	if a.cfg.SendToServiceFn == nil {
+	if a.cfg.SendToServiceContextFn == nil && a.cfg.SendToServiceFn == nil {
 		a.waitForServicePipe(ctx, 10*time.Second)
 	}
 
@@ -240,36 +258,141 @@ func (a *Agent) connectToServiceWithRetry(ctx context.Context) {
 
 // SendToService sends a message to the Windows Service with automatic retry.
 func (a *Agent) SendToService(msg map[string]interface{}) (map[string]interface{}, error) {
+	return a.SendToServiceContext(context.Background(), msg)
+}
+
+// SendToServiceContext sends one at-most-once identified request. Named Pipe
+// reconnects reuse the request ID so Service replay protection can return the
+// original response without repeating a mutation.
+func (a *Agent) SendToServiceContext(
+	ctx context.Context,
+	msg map[string]interface{},
+) (map[string]interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	serviceRequest, parentRequestID := a.prepareServiceRequest(msg)
+	if a.cfg.SendToServiceContextFn != nil {
+		response, err := a.cfg.SendToServiceContextFn(ctx, serviceRequest)
+		return restoreParentRequestID(response, parentRequestID), err
+	}
 	if a.cfg.SendToServiceFn != nil {
-		return a.cfg.SendToServiceFn(msg)
+		response, err := a.cfg.SendToServiceFn(serviceRequest)
+		return restoreParentRequestID(response, parentRequestID), err
 	}
 
-	a.serviceMu.Lock()
+	if err := a.lockService(ctx); err != nil {
+		return nil, err
+	}
 	defer a.serviceMu.Unlock()
 
+	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if a.serviceCh == nil {
-			if err := a.connectToService(context.Background()); err != nil {
-				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			if err := a.connectToService(ctx); err != nil {
+				lastErr = err
+				if !waitForContext(ctx, time.Duration(attempt+1)*500*time.Millisecond) {
+					return nil, ctx.Err()
+				}
 				continue
 			}
 		}
-		if err := a.serviceCh.Send(msg); err != nil {
-			a.serviceCh = nil
-			time.Sleep(200 * time.Millisecond)
+		deadline := time.Now().Add(agentIPCRequestTimeout(serviceRequest))
+		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+			deadline = ctxDeadline
+		}
+		if err := a.serviceCh.SetDeadline(deadline); err != nil {
+			lastErr = err
+			a.dropServiceChannelLocked()
+			continue
+		}
+		if err := a.serviceCh.Send(serviceRequest); err != nil {
+			lastErr = err
+			a.dropServiceChannelLocked()
+			if !waitForContext(ctx, 200*time.Millisecond) {
+				return nil, ctx.Err()
+			}
 			continue
 		}
 
 		var response map[string]interface{}
-		a.serviceCh.SetDeadline(time.Now().Add(30 * time.Second))
 		if err := a.serviceCh.Receive(&response); err != nil {
-			a.serviceCh = nil
-			time.Sleep(200 * time.Millisecond)
+			lastErr = err
+			a.dropServiceChannelLocked()
+			if !waitForContext(ctx, 200*time.Millisecond) {
+				return nil, ctx.Err()
+			}
 			continue
 		}
-		return response, nil
+		return restoreParentRequestID(response, parentRequestID), nil
 	}
-	return nil, fmt.Errorf("not connected to service")
+	return nil, fmt.Errorf("service request failed after reconnect attempts: %w", lastErr)
+}
+
+// prepareServiceRequest establishes a separate correlation namespace for the
+// Agent-to-Service hop. One logical call gets one ID, which is then retained by
+// all Named Pipe reconnect attempts inside SendToServiceContext.
+func (a *Agent) prepareServiceRequest(msg map[string]interface{}) (map[string]interface{}, string) {
+	request := make(map[string]interface{}, len(msg)+1)
+	for key, value := range msg {
+		request[key] = value
+	}
+	parentRequestID, _ := request["request_id"].(string)
+	request["request_id"] = fmt.Sprintf(
+		"agent-%s-%d",
+		a.serviceSession,
+		a.serviceSeq.Add(1),
+	)
+	return request, parentRequestID
+}
+
+func restoreParentRequestID(response map[string]interface{}, parentRequestID string) map[string]interface{} {
+	if response == nil {
+		return nil
+	}
+	restored := make(map[string]interface{}, len(response)+1)
+	for key, value := range response {
+		restored[key] = value
+	}
+	restored["request_id"] = parentRequestID
+	return restored
+}
+
+func (a *Agent) lockService(ctx context.Context) error {
+	ticker := time.NewTicker(captureLockPollInterval)
+	defer ticker.Stop()
+	for {
+		if a.serviceMu.TryLock() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (a *Agent) dropServiceChannelLocked() {
+	if a.serviceCh == nil {
+		return
+	}
+	_ = a.serviceCh.Close()
+	a.serviceCh = nil
+}
+
+func waitForContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // ── System Proxy ──
@@ -291,7 +414,7 @@ func probeHTTPProxy(ctx context.Context, address string) error {
 	if err != nil {
 		return fmt.Errorf("parse proxy endpoint: %w", err)
 	}
-	var lastErr error
+	probeErrors := make([]error, 0, 3)
 	endpoints := []string{
 		"http://connectivitycheck.gstatic.com/generate_204",
 		"http://cp.cloudflare.com/generate_204",
@@ -301,7 +424,7 @@ func probeHTTPProxy(ctx context.Context, address string) error {
 		if err := probeHTTPProxyOnce(ctx, proxyURL, address, endpoint); err == nil {
 			return nil
 		} else {
-			lastErr = err
+			probeErrors = append(probeErrors, err)
 		}
 		if attempt == len(endpoints)-1 {
 			break
@@ -314,8 +437,23 @@ func probeHTTPProxy(ctx context.Context, address string) error {
 		case <-timer.C:
 		}
 	}
-	return lastErr
+	return fmt.Errorf("all end-to-end proxy probes failed: %w", errors.Join(probeErrors...))
 }
+
+type proxyReadinessError struct {
+	endpoint   string
+	statusCode int
+	cause      error
+}
+
+func (e *proxyReadinessError) Error() string {
+	if e.cause != nil {
+		return fmt.Sprintf("%s through local proxy: %v", e.endpoint, e.cause)
+	}
+	return fmt.Sprintf("%s through local proxy returned HTTP %d", e.endpoint, e.statusCode)
+}
+
+func (e *proxyReadinessError) Unwrap() error { return e.cause }
 
 func probeHTTPProxyOnce(
 	ctx context.Context,
@@ -341,12 +479,12 @@ func probeHTTPProxyOnce(
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("end-to-end request through %s: %w", address, err)
+		return &proxyReadinessError{endpoint: endpoint, cause: fmt.Errorf("request through %s: %w", address, err)}
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	if response.StatusCode < 200 || response.StatusCode >= 400 {
-		return fmt.Errorf("end-to-end request returned HTTP %d", response.StatusCode)
+		return &proxyReadinessError{endpoint: endpoint, statusCode: response.StatusCode}
 	}
 	return nil
 }
@@ -417,7 +555,7 @@ func (a *Agent) handleUIConnection(ctx context.Context, ch *pipe.Channel) {
 
 		log.Printf("[agent] UI request: method=%v", msg["method"])
 
-		requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		requestCtx, cancel := context.WithTimeout(ctx, agentIPCRequestTimeout(msg))
 		response := a.dispatchUI(requestCtx, msg)
 		cancel()
 		if response != nil {
@@ -430,6 +568,21 @@ func (a *Agent) handleUIConnection(ctx context.Context, ch *pipe.Channel) {
 				return
 			}
 		}
+	}
+}
+
+func agentIPCRequestTimeout(msg map[string]interface{}) time.Duration {
+	method, _ := msg["method"].(string)
+	switch method {
+	case "core.select":
+		return coreSwitchIPCRequestTimeout
+	case "capture.set", "capture.prepare", "tun.enable", "proxy.enable", "proxy.disable", "proxy.toggle", "network.recover",
+		"runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set",
+		"outbound.select", "outbound.create", "outbound.delete",
+		"subscription.add", "subscription.remove", "subscription.refresh":
+		return captureIPCRequestTimeout
+	default:
+		return defaultIPCRequestTimeout
 	}
 }
 
@@ -451,6 +604,25 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 			return agentError(requestID, "UI_START_FAILED", err)
 		}
 		return agentResponse(requestID, map[string]interface{}{"shown": true})
+	case "ui.hide":
+		if a.cfg.MinimizeToTrayFn == nil {
+			return agentError(requestID, "TRAY_UNAVAILABLE", fmt.Errorf("system tray is unavailable; window remains visible"))
+		}
+		if err := a.cfg.MinimizeToTrayFn(); err != nil {
+			return agentError(requestID, "TRAY_REFRESH_FAILED", err)
+		}
+		return agentResponse(requestID, map[string]interface{}{"tray_visible": true})
+	case "ui.exit":
+		if a.cfg.RequestExitFn == nil {
+			return agentError(requestID, "UI_EXIT_UNAVAILABLE", fmt.Errorf("application shutdown coordinator is unavailable"))
+		}
+		// Return the IPC acknowledgement before the launcher begins tearing down
+		// the UI pipe and WebView process.
+		go func(requestExit func()) {
+			time.Sleep(50 * time.Millisecond)
+			requestExit()
+		}(a.cfg.RequestExitFn)
+		return agentResponse(requestID, map[string]interface{}{"accepted": true})
 	case "tray.snapshot":
 		return a.handleTraySnapshot(requestID)
 	case "connection.enable":
@@ -463,6 +635,13 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 		return a.handleNetworkRecover(requestID)
 	case "capture.set":
 		return a.setCaptureModeContext(ctx, requestID, msg)
+	case "core.select":
+		return a.selectCoreWithCapture(ctx, requestID, msg)
+	case "outbound.select":
+		return a.selectOutboundWithCapture(ctx, requestID, msg)
+	case "outbound.create", "outbound.delete",
+		"subscription.add", "subscription.remove", "subscription.refresh":
+		return a.mutateSourcesWithCapture(ctx, requestID, msg)
 	case "capture.status":
 		return agentResponse(requestID, a.captureStatusPayload())
 	case "tun.enable":
@@ -484,16 +663,16 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 			"type":       "RESPONSE",
 			"payload":    status,
 		}
-	case "core.status", "core.list", "core.select",
+	case "core.status", "core.list", "core.update.stop", "core.update.start",
 		"tun.status", "tun.config",
-		"subscription.add", "subscription.update", "subscription.remove", "subscription.list", "subscription.refresh",
-		"outbound.list", "outbound.select", "outbound.create", "outbound.delete", "outbound.update", "outbound.test", "outbound.testAll",
-		"runtime.status", "runtime.mode.set",
+		"subscription.update", "subscription.list",
+		"outbound.list", "outbound.update", "outbound.test", "outbound.testAll",
+		"runtime.status", "runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set",
 		"metrics.current", "ip.check", "ip.check_all",
 		"diagnostics.export", "log.tail", "core.log.tail",
 		"logs.query", "logs.services", "logs.levels", "logs.clear.persisted":
 		// Forward to service
-		resp, err := a.SendToService(msg)
+		resp, err := a.SendToServiceContext(ctx, msg)
 		if err != nil {
 			return map[string]interface{}{
 				"request_id": requestID,
@@ -548,6 +727,14 @@ func (a *Agent) setCaptureModeContext(
 		if errors.Is(err, errCaptureBusy) {
 			return agentError(requestID, "CAPTURE_BUSY", err)
 		}
+		var serviceErr *serviceCaptureError
+		if errors.As(err, &serviceErr) && serviceErr.code != "" {
+			return agentError(requestID, serviceErr.code, err)
+		}
+		var readinessErr *proxyReadinessError
+		if errors.As(err, &readinessErr) {
+			return agentError(requestID, "PROXY_DATAPLANE_UNAVAILABLE", err)
+		}
 		return agentError(requestID, "CAPTURE_TRANSITION_FAILED", err)
 	}
 	return agentResponse(requestID, a.captureStatusPayload())
@@ -581,7 +768,11 @@ func (a *Agent) tunEnabled() (bool, error) {
 }
 
 func (a *Agent) callService(requestID, method string) map[string]interface{} {
-	resp, err := a.SendToService(map[string]interface{}{
+	return a.callServiceContext(context.Background(), requestID, method)
+}
+
+func (a *Agent) callServiceContext(ctx context.Context, requestID, method string) map[string]interface{} {
+	resp, err := a.SendToServiceContext(ctx, map[string]interface{}{
 		"request_id": requestID,
 		"method":     method,
 	})
@@ -605,9 +796,15 @@ func responseMessage(resp map[string]interface{}) string {
 	return message
 }
 
+func responseCode(resp map[string]interface{}) string {
+	payload, _ := resp["payload"].(map[string]interface{})
+	code, _ := payload["code"].(string)
+	return code
+}
+
 func agentError(requestID, code string, err error) map[string]interface{} {
-	_ = logstore.Emit(logstore.LevelError, "Agent", "UIIPC", "request failed", map[string]any{
-		"request_id": requestID, "error_code": code,
+	_ = logstore.Emit(logstore.LevelError, "Agent", "UIIPC", "request failed: "+code, map[string]any{
+		"request_id": requestID, "error_code": code, "reason": err.Error(),
 	})
 	return map[string]interface{}{
 		"request_id": requestID,
@@ -652,9 +849,9 @@ func (a *Agent) shutdown() error {
 	}
 
 	// Close connections
-	if a.serviceCh != nil {
-		a.serviceCh.Close()
-	}
+	a.serviceMu.Lock()
+	a.dropServiceChannelLocked()
+	a.serviceMu.Unlock()
 	if a.uiListener != nil {
 		a.uiListener.Close()
 	}

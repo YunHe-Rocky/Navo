@@ -1,0 +1,546 @@
+﻿{
+    "executed_at":  "2026-08-09T10:48:17.9637376+00:00",
+    "windows":  "Microsoft Windows NT 10.0.26200.0",
+    "core":  "mihomo",
+    "core_version":  "1.19.29",
+    "core_sha256":  "4316ff91fecec2fca9acb5612d7400ba228c069ffd325b1f17f46f1d4ef7e0cd",
+    "wintun_sha256":  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+    "failure_point":  "none",
+    "crash_point":  "none",
+    "scenario":  "tun-off-tun",
+    "profile_mode":  "isolated-clone",
+    "upstream":  null,
+    "direct_ip_before":  "211.90.237.75",
+    "direct_ip_after":  null,
+    "host_environment":  {
+                             "adapters":  [
+                                              {
+                                                  "Name":  "6to4 Adapter",
+                                                  "ifIndex":  2,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接",
+                                                  "ifIndex":  5,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Wintun Userspace Tunnel",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网 2",
+                                                  "ifIndex":  6,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "Remote NDIS based Internet Sharing Device",
+                                                  "HardwareInterface":  true
+                                              },
+                                              {
+                                                  "Name":  "Microsoft IP-HTTPS Platform Interface",
+                                                  "ifIndex":  7,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet2",
+                                                  "ifIndex":  8,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 10",
+                                                  "ifIndex":  11,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Microsoft Wi-Fi Direct Virtual Adapter #2",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet8",
+                                                  "ifIndex":  13,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet8",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "Teredo Tunneling Pseudo-Interface",
+                                                  "ifIndex":  14,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "蓝牙网络连接",
+                                                  "ifIndex":  15,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Bluetooth Device (Personal Area Network)",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网",
+                                                  "ifIndex":  17,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Realtek Gaming 2.5GbE Family Controller",
+                                                  "HardwareInterface":  true
+                                              },
+                                              {
+                                                  "Name":  "VMware Network Adapter VMnet1",
+                                                  "ifIndex":  20,
+                                                  "Status":  "Up",
+                                                  "InterfaceDescription":  "VMware Virtual Ethernet Adapter for VMnet1",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "以太网(内核调试器)",
+                                                  "ifIndex":  21,
+                                                  "Status":  "Not Present",
+                                                  "InterfaceDescription":  "Microsoft Kernel Debug Network Adapter",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "本地连接* 9",
+                                                  "ifIndex":  22,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "Microsoft Wi-Fi Direct Virtual Adapter",
+                                                  "HardwareInterface":  false
+                                              },
+                                              {
+                                                  "Name":  "WLAN 2",
+                                                  "ifIndex":  24,
+                                                  "Status":  "Disconnected",
+                                                  "InterfaceDescription":  "RZ608 Wi-Fi 6E 80MHz",
+                                                  "HardwareInterface":  true
+                                              }
+                                          ],
+                             "optional_features":  {
+                                                       "Microsoft-Hyper-V-All":  "Disabled",
+                                                       "Microsoft-Windows-Subsystem-Linux":  "Disabled"
+                                                   }
+                         },
+    "status":  "failed",
+    "activation":  {
+                       "payload":  {
+                                       "adapter":  {
+                                                       "state":  "",
+                                                       "name":  "Navo",
+                                                       "interface_guid":  "{409DD5C4-2E6C-6FBF-B422-02692F33EE87}",
+                                                       "interface_index":  54
+                                                   },
+                                       "can_retry_tun":  false,
+                                       "committed_mode":  "tun",
+                                       "desired_mode":  "tun",
+                                       "fault_id":  "",
+                                       "last_error":  "",
+                                       "phase":  "running",
+                                       "state":  "running_tun",
+                                       "transition_id":  "",
+                                       "updated_at":  "2026-08-09T10:48:59.9520489Z"
+                                   },
+                       "request_id":  "tun-acceptance-1786272502787",
+                       "timestamp":  1786272539952,
+                       "type":  "RESPONSE"
+                   },
+    "tun_status":  {
+                       "payload":  {
+                                       "addresses":  [
+                                                         "172.19.0.1/30"
+                                                     ],
+                                       "created":  true,
+                                       "enabled":  true,
+                                       "fault_id":  "",
+                                       "identifier":  "{409DD5C4-2E6C-6FBF-B422-02692F33EE87}",
+                                       "installed":  true,
+                                       "interface_index":  54,
+                                       "last_error":  "",
+                                       "mtu":  1500,
+                                       "name":  "Navo",
+                                       "observation_error":  "",
+                                       "route_count":  2,
+                                       "stage":  "HEALTH_COMMITTED",
+                                       "state":  "enabled",
+                                       "verification":  {
+                                                            "dns":  true,
+                                                            "dns_latency_ms":  294,
+                                                            "tcp":  true,
+                                                            "https":  true,
+                                                            "direct_ip":  "211.90.237.75",
+                                                            "exit_ip":  "165.254.151.219",
+                                                            "proxy_exit_ip":  "165.254.151.219",
+                                                            "sites":  {
+                                                                          "github":  {
+                                                                                         "dns":  true,
+                                                                                         "tcp":  true,
+                                                                                         "https":  true,
+                                                                                         "status_code":  200
+                                                                                     },
+                                                                          "google":  {
+                                                                                         "dns":  true,
+                                                                                         "tcp":  true,
+                                                                                         "https":  true,
+                                                                                         "status_code":  204
+                                                                                     }
+                                                                      },
+                                                            "udp":  "unsupported",
+                                                            "udp_reason":  "selected outbound does not declare UDP support",
+                                                            "verified_at":  "2026-08-09T10:48:54.0214053Z"
+                                                        }
+                                   },
+                       "request_id":  "tun-acceptance-1786272539967",
+                       "type":  "RESPONSE"
+                   },
+    "no_proxy_https":  {
+                           "status":  200,
+                           "bytes":  201
+                       },
+    "external_sites":  {
+                           "google":  {
+                                          "uri":  "https://www.google.com/generate_204",
+                                          "status":  204,
+                                          "attempts":  1
+                                      },
+                           "github":  {
+                                          "uri":  "https://github.com/",
+                                          "status":  200,
+                                          "attempts":  1
+                                      }
+                       },
+    "stability_seconds":  30,
+    "tun_status_delayed":  {
+                               "payload":  {
+                                               "addresses":  [
+                                                                 "172.19.0.1/30"
+                                                             ],
+                                               "created":  true,
+                                               "enabled":  true,
+                                               "fault_id":  "",
+                                               "identifier":  "{409DD5C4-2E6C-6FBF-B422-02692F33EE87}",
+                                               "installed":  true,
+                                               "interface_index":  54,
+                                               "last_error":  "",
+                                               "mtu":  1500,
+                                               "name":  "Navo",
+                                               "observation_error":  "",
+                                               "route_count":  2,
+                                               "stage":  "HEALTH_COMMITTED",
+                                               "state":  "enabled",
+                                               "verification":  {
+                                                                    "dns":  true,
+                                                                    "dns_latency_ms":  294,
+                                                                    "tcp":  true,
+                                                                    "https":  true,
+                                                                    "direct_ip":  "211.90.237.75",
+                                                                    "exit_ip":  "165.254.151.219",
+                                                                    "proxy_exit_ip":  "165.254.151.219",
+                                                                    "sites":  {
+                                                                                  "github":  {
+                                                                                                 "dns":  true,
+                                                                                                 "tcp":  true,
+                                                                                                 "https":  true,
+                                                                                                 "status_code":  200
+                                                                                             },
+                                                                                  "google":  {
+                                                                                                 "dns":  true,
+                                                                                                 "tcp":  true,
+                                                                                                 "https":  true,
+                                                                                                 "status_code":  204
+                                                                                             }
+                                                                              },
+                                                                    "udp":  "unsupported",
+                                                                    "udp_reason":  "selected outbound does not declare UDP support",
+                                                                    "verified_at":  "2026-08-09T10:48:54.0214053Z"
+                                                                }
+                                           },
+                               "request_id":  "tun-acceptance-1786272575707",
+                               "type":  "RESPONSE"
+                           },
+    "external_sites_delayed":  {
+                                   "google":  {
+                                                  "uri":  "https://www.google.com/generate_204",
+                                                  "status":  204,
+                                                  "attempts":  1
+                                              },
+                                   "github":  {
+                                                  "uri":  "https://github.com/",
+                                                  "status":  200,
+                                                  "attempts":  1
+                                              }
+                               },
+    "reenabled_tun_status":  null,
+    "external_sites_reenabled":  null,
+    "capture_after":  null,
+    "core_log":  [
+                     "time=\"2026-08-09T18:48:28.174648100+08:00\" level=info msg=\"Start initial configuration in progress\"",
+                     "time=\"2026-08-09T18:48:28.175176000+08:00\" level=info msg=\"Geodata Loader mode: memconservative\"",
+                     "time=\"2026-08-09T18:48:28.175176000+08:00\" level=info msg=\"Geosite Matcher implementation: succinct\"",
+                     "time=\"2026-08-09T18:48:28.175176000+08:00\" level=info msg=\"Initial configuration complete, total time: 0ms\"",
+                     "time=\"2026-08-09T18:48:28.176239900+08:00\" level=info msg=\"RESTful API listening at: 127.0.0.1:13080\"",
+                     "time=\"2026-08-09T18:48:28.177283200+08:00\" level=info msg=\"Sniffer is closed\"",
+                     "time=\"2026-08-09T18:48:28.177831500+08:00\" level=info msg=\"DNS server(TCP) listening at: [::]:1053\"",
+                     "time=\"2026-08-09T18:48:28.178378300+08:00\" level=info msg=\"DNS server(UDP) listening at: [::]:1053\"",
+                     "time=\"2026-08-09T18:48:28.273495000+08:00\" level=warning msg=\"[TUN] default interface changed by monitor, =\u003e 以太网 2\"",
+                     "time=\"2026-08-09T18:48:29.067880600+08:00\" level=info msg=\"Tun[Navo] proxy listening at: Navo([172.19.0.1/30],[]), mtu: 1500, auto route: false, auto redir: false, ip stack: Mixed\"",
+                     "time=\"2026-08-09T18:48:29.067880600+08:00\" level=info msg=\"Mixed(http+socks) proxy listening at: 127.0.0.1:12080\"",
+                     "time=\"2026-08-09T18:48:29.067880600+08:00\" level=info msg=\"Start initial compatible provider NAVO\"",
+                     "time=\"2026-08-09T18:48:29.067880600+08:00\" level=info msg=\"Start initial compatible provider default\"",
+                     "time=\"2026-08-09T18:48:41.490087500+08:00\" level=info msg=\"[UDP] 172.19.0.1:59747 --\u003e 92.205.179.218:36653 doesn\u0027t match any rule using DIRECT\"",
+                     "time=\"2026-08-09T18:48:41.995470200+08:00\" level=info msg=\"[TCP] 172.19.0.1:64071 --\u003e 2.16.55.223:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:44.549977600+08:00\" level=info msg=\"[TCP] 172.19.0.1:54309 --\u003e client.wns.windows.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:44.569213100+08:00\" level=info msg=\"[TCP] 172.19.0.1:54310 --\u003e client.wns.windows.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:45.443199800+08:00\" level=info msg=\"[TCP] 172.19.0.1:59044 --\u003e 2.16.55.223:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:47.543962400+08:00\" level=info msg=\"[TCP] 172.19.0.1:64095 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:48.104253400+08:00\" level=info msg=\"[TCP] 172.19.0.1:62074 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:48.132701200+08:00\" level=info msg=\"[TCP] 172.19.0.1:62075 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:48.135538000+08:00\" level=info msg=\"[TCP] 172.19.0.1:62073 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:49.048029100+08:00\" level=info msg=\"[TCP] 172.19.0.1:58912 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:49.058718600+08:00\" level=info msg=\"[TCP] 172.19.0.1:58913 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:49.647623500+08:00\" level=info msg=\"[TCP] 172.19.0.1:58911 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:50.415902200+08:00\" level=info msg=\"[TCP] 172.19.0.1:54098 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:51.044258200+08:00\" level=info msg=\"[TCP] 172.19.0.1:54100 --\u003e ipv6.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:51.047495200+08:00\" level=info msg=\"[TCP] 172.19.0.1:54101 --\u003e ipv6.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:51.049700300+08:00\" level=info msg=\"[TCP] 172.19.0.1:54105 --\u003e ipv6.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:51.067309800+08:00\" level=info msg=\"[TCP] 172.19.0.1:54115 --\u003e www.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:51.071203200+08:00\" level=info msg=\"[TCP] 172.19.0.1:54110 --\u003e www.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:51.085131300+08:00\" level=info msg=\"[TCP] 172.19.0.1:54113 --\u003e www.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:53.828676100+08:00\" level=info msg=\"[TCP] 172.19.0.1:54142 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:53.828676100+08:00\" level=info msg=\"[TCP] 172.19.0.1:54140 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:53.835829600+08:00\" level=info msg=\"[TCP] 172.19.0.1:54141 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:55.384074700+08:00\" level=info msg=\"[TCP] 172.19.0.1:50321 --\u003e www.cloudflare.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:55.946013300+08:00\" level=info msg=\"[TCP] 172.19.0.1:50319 --\u003e www.cloudflare.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:56.075707300+08:00\" level=info msg=\"[TCP] 172.19.0.1:50317 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:56.836024300+08:00\" level=info msg=\"[TCP] 127.0.0.1:50323 --\u003e www.cloudflare.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:58.364724300+08:00\" level=info msg=\"[TCP] 172.19.0.1:50344 --\u003e www.google.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:58.468654900+08:00\" level=info msg=\"[TCP] 172.19.0.1:50343 --\u003e github.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:58.838879500+08:00\" level=info msg=\"[TCP] 172.19.0.1:50346 --\u003e github.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:48:59.335879800+08:00\" level=info msg=\"[TCP] 172.19.0.1:50345 --\u003e www.google.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:01.128339800+08:00\" level=info msg=\"[TCP] 172.19.0.1:59341 --\u003e www.cloudflare.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:01.566380800+08:00\" level=info msg=\"[TCP] 172.19.0.1:61416 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:02.638603800+08:00\" level=info msg=\"[TCP] 172.19.0.1:61421 --\u003e www.google.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:02.703051100+08:00\" level=info msg=\"[TCP] 172.19.0.1:61419 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:04.316207300+08:00\" level=info msg=\"[TCP] 172.19.0.1:61423 --\u003e github.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:14.671094600+08:00\" level=info msg=\"[TCP] 172.19.0.1:56700 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:16.339634100+08:00\" level=info msg=\"[TCP] 172.19.0.1:63278 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:19.558539600+08:00\" level=info msg=\"[TCP] 172.19.0.1:63282 --\u003e www.123pan.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:21.968622800+08:00\" level=info msg=\"[TCP] 172.19.0.1:56705 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:24.258686300+08:00\" level=info msg=\"[TCP] 172.19.0.1:56708 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:26.741154200+08:00\" level=info msg=\"[TCP] 172.19.0.1:56719 --\u003e www.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:26.744782300+08:00\" level=info msg=\"[TCP] 172.19.0.1:56725 --\u003e www.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:26.773603000+08:00\" level=info msg=\"[TCP] 172.19.0.1:56722 --\u003e www.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:27.313546000+08:00\" level=info msg=\"[TCP] 172.19.0.1:56715 --\u003e ipv6.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:27.317907600+08:00\" level=info msg=\"[TCP] 172.19.0.1:56712 --\u003e ipv6.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:27.678959500+08:00\" level=info msg=\"[TCP] 172.19.0.1:56713 --\u003e ipv6.msftncsi.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:27.710146800+08:00\" level=info msg=\"[TCP] 172.19.0.1:51131 --\u003e msedge.b.tlu.dl.delivery.mp.microsoft.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:28.932022200+08:00\" level=info msg=\"[TCP] 172.19.0.1:51133 --\u003e msedge.b.tlu.dl.delivery.mp.microsoft.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:30.078819900+08:00\" level=info msg=\"[TCP] 172.19.0.1:58355 --\u003e link.miyaip.online:8001 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:32.096980100+08:00\" level=info msg=\"[TCP] 172.19.0.1:58357 --\u003e msedge.b.tlu.dl.delivery.mp.microsoft.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:37.775197500+08:00\" level=info msg=\"[TCP] 172.19.0.1:58359 --\u003e www.google.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:49:40.767959700+08:00\" level=info msg=\"[TCP] 172.19.0.1:58361 --\u003e github.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:00.298867900+08:00\" level=info msg=\"Start initial configuration in progress\"",
+                     "time=\"2026-08-09T18:50:00.299473300+08:00\" level=info msg=\"Geodata Loader mode: memconservative\"",
+                     "time=\"2026-08-09T18:50:00.299473300+08:00\" level=info msg=\"Geosite Matcher implementation: succinct\"",
+                     "time=\"2026-08-09T18:50:00.299473300+08:00\" level=info msg=\"Initial configuration complete, total time: 0ms\"",
+                     "time=\"2026-08-09T18:50:00.300533800+08:00\" level=info msg=\"RESTful API listening at: 127.0.0.1:13080\"",
+                     "time=\"2026-08-09T18:50:00.301548200+08:00\" level=info msg=\"Sniffer is closed\"",
+                     "time=\"2026-08-09T18:50:00.302611100+08:00\" level=info msg=\"DNS server(TCP) listening at: [::]:1053\"",
+                     "time=\"2026-08-09T18:50:00.303138900+08:00\" level=info msg=\"DNS server(UDP) listening at: [::]:1053\"",
+                     "time=\"2026-08-09T18:50:00.416008800+08:00\" level=warning msg=\"[TUN] default interface changed by monitor, =\u003e 以太网 2\"",
+                     "time=\"2026-08-09T18:50:01.215912500+08:00\" level=info msg=\"Tun[Navo] proxy listening at: Navo([172.19.0.1/30],[]), mtu: 1500, auto route: false, auto redir: false, ip stack: Mixed\"",
+                     "time=\"2026-08-09T18:50:01.229194700+08:00\" level=info msg=\"Mixed(http+socks) proxy listening at: 127.0.0.1:12080\"",
+                     "time=\"2026-08-09T18:50:01.231203600+08:00\" level=info msg=\"Start initial compatible provider default\"",
+                     "time=\"2026-08-09T18:50:01.231203600+08:00\" level=info msg=\"Start initial compatible provider NAVO\"",
+                     "time=\"2026-08-09T18:50:17.592777400+08:00\" level=info msg=\"[TCP] 172.19.0.1:62144 --\u003e 2.16.55.223:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:17.800810300+08:00\" level=info msg=\"[TCP] mihomo --\u003e 1.1.1.1:443 using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.313609900+08:00\" level=info msg=\"[TCP] 172.19.0.1:51997 --\u003e www.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.639809500+08:00\" level=info msg=\"[TCP] 172.19.0.1:57664 --\u003e www.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.657512000+08:00\" level=info msg=\"[TCP] 172.19.0.1:57669 --\u003e www.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.661133600+08:00\" level=info msg=\"[TCP] 172.19.0.1:57668 --\u003e www.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.661133600+08:00\" level=info msg=\"[TCP] 172.19.0.1:57665 --\u003e ipv6.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.662768300+08:00\" level=info msg=\"[TCP] 172.19.0.1:57670 --\u003e ipv6.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:19.826938900+08:00\" level=info msg=\"[TCP] 172.19.0.1:51998 --\u003e www.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:20.375788200+08:00\" level=info msg=\"[TCP] 172.19.0.1:51994 --\u003e ipv6.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:21.660757800+08:00\" level=info msg=\"[TCP] 172.19.0.1:57692 --\u003e client.wns.windows.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:21.683326000+08:00\" level=info msg=\"[TCP] 172.19.0.1:57671 --\u003e ipv6.msftconnecttest.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:21.683326000+08:00\" level=info msg=\"[TCP] 172.19.0.1:51500 --\u003e client.wns.windows.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:25.538986200+08:00\" level=info msg=\"[TCP] 172.19.0.1:57715 --\u003e www.123pan.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:29.290667900+08:00\" level=info msg=\"[TCP] 172.19.0.1:57722 --\u003e www.cloudflare.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:29.290667900+08:00\" level=info msg=\"[TCP] 172.19.0.1:57720 --\u003e www.cloudflare.com:443 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:29.330517000+08:00\" level=info msg=\"[TCP] 172.19.0.1:57725 --\u003e 123.148.116.78:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:30.845906200+08:00\" level=info msg=\"[TCP] 172.19.0.1:57745 --\u003e msedge.b.tlu.dl.delivery.mp.microsoft.com:80 match Match using NAVO[MiYaIp-1785509919105435700]\"",
+                     "time=\"2026-08-09T18:50:32.657449900+08:00\" level=info msg=\"[UDP] 172.19.0.1:59747 --\u003e 3.33.130.190:36653 doesn\u0027t match any rule using DIRECT\"",
+                     "time=\"2026-08-09T18:50:33.902834700+08:00\" level=info msg=\"[TCP] 172.19.0.1:60325 --\u003e 2.16.55.220:80 match Match using NAVO[MiYaIp-1785509919105435700]\""
+                 ],
+    "rollback":  "passed_after_failure",
+    "before":  {
+                   "routes":  [
+
+                              ],
+                   "nrpt":  [
+
+                            ],
+                   "firewall":  [
+
+                                ],
+                   "adapters":  [
+
+                                ],
+                   "dns":  [
+                               {
+                                   "InterfaceIndex":  1,
+                                   "InterfaceAlias":  "Loopback Pseudo-Interface 1",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  5,
+                                   "InterfaceAlias":  "本地连接",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  6,
+                                   "InterfaceAlias":  "以太网 2",
+                                   "ServerAddresses":  [
+                                                           "10.229.250.172"
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  8,
+                                   "InterfaceAlias":  "VMware Network Adapter VMnet2",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  11,
+                                   "InterfaceAlias":  "本地连接* 10",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  13,
+                                   "InterfaceAlias":  "VMware Network Adapter VMnet8",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  15,
+                                   "InterfaceAlias":  "蓝牙网络连接",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  17,
+                                   "InterfaceAlias":  "以太网",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  20,
+                                   "InterfaceAlias":  "VMware Network Adapter VMnet1",
+                                   "ServerAddresses":  [
+
+                                                       ]
+                               },
+                               {
+                                   "InterfaceIndex":  24,
+                                   "InterfaceAlias":  "WLAN 2",
+                                   "ServerAddresses":  [
+                                                           "10.244.63.193"
+                                                       ]
+                               }
+                           ]
+               },
+    "after":  {
+                  "routes":  [
+
+                             ],
+                  "nrpt":  [
+
+                           ],
+                  "firewall":  [
+
+                               ],
+                  "adapters":  [
+
+                               ],
+                  "dns":  [
+                              {
+                                  "InterfaceIndex":  1,
+                                  "InterfaceAlias":  "Loopback Pseudo-Interface 1",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  5,
+                                  "InterfaceAlias":  "本地连接",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  6,
+                                  "InterfaceAlias":  "以太网 2",
+                                  "ServerAddresses":  [
+                                                          "10.229.250.172"
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  8,
+                                  "InterfaceAlias":  "VMware Network Adapter VMnet2",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  11,
+                                  "InterfaceAlias":  "本地连接* 10",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  13,
+                                  "InterfaceAlias":  "VMware Network Adapter VMnet8",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  15,
+                                  "InterfaceAlias":  "蓝牙网络连接",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  17,
+                                  "InterfaceAlias":  "以太网",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  20,
+                                  "InterfaceAlias":  "VMware Network Adapter VMnet1",
+                                  "ServerAddresses":  [
+
+                                                      ]
+                              },
+                              {
+                                  "InterfaceIndex":  24,
+                                  "InterfaceAlias":  "WLAN 2",
+                                  "ServerAddresses":  [
+                                                          "10.244.63.193"
+                                                      ]
+                              }
+                          ]
+              },
+    "error":  "TUN activation failed: {\"payload\":{\"code\":\"TUN_HTTPS_VERIFY_FAILED\",\"message\":\"TUN_HTTPS_VERIFY_FAILED: stage=DATA_PLAN\r\nE_VERIFIED resource=www.cloudflare.com expected=TLS and HTTP response actual=failed: Get \\\"https://www.cloudflare.com/c\r\ndn-cgi/trace\\\": EOF\"},\"request_id\":\"tun-acceptance-1786272590501\",\"type\":\"ERROR\"}\r\n所在位置 D:\\WorkSpace\\Navo\\scripts\\test-tun-elevated.ps1:166 字符: 9\r\n+         throw \"TUN activation failed: $($Activation | ConvertTo-Json  ...\r\n+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (TUN activation ...\"type\":\"ERROR\"}:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : TUN activation failed: {\"payload\":{\"code\":\"TUN_HTTPS_VERIFY_FAILED\",\"message\":\"TUN_HTTPS \r\n   _VERIFY_FAILED: stage=DATA_PLANE_VERIFIED resource=www.cloudflare.com expected=TLS and HTTP response actual=failed  \r\n  : Get \\\"https://www.cloudflare.com/cdn-cgi/trace\\\": EOF\"},\"request_id\":\"tun-acceptance-1786272590501\",\"type\":\"ERRO   \r\n R\"}"
+}

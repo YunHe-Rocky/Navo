@@ -43,8 +43,9 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
-		Bind:      []interface{}{app},
+		OnStartup:     app.startup,
+		OnBeforeClose: app.beforeClose,
+		Bind:          []interface{}{app},
 		Windows: &windows.Options{
 			Theme:               windows.SystemDefault,
 			BackdropType:        windows.Mica,

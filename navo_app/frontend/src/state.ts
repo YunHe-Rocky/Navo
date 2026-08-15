@@ -77,7 +77,7 @@ export function deriveIconState(
 }
 
 export function riskSummary(result?: IPDetection["proxy"]) {
-  if (!result || result.error || !result.ip || result.ip === "检测暂不可用") {
+  if (!result || result.error || !result.ip) {
     return { label: "检测不可用", level: "unknown", reasons: ["基础 IP 检测未完成"] };
   }
   const reasons: string[] = [];

@@ -117,6 +117,7 @@ type singBoxMultiplex struct {
 type singBoxRoute struct {
 	Rules                 []singBoxRouteRule `json:"rules"`
 	AutoDetectInterface   bool               `json:"auto_detect_interface"`
+	DefaultInterface      string             `json:"default_interface,omitempty"`
 	DefaultDomainResolver string             `json:"default_domain_resolver,omitempty"`
 	Final                 string             `json:"final,omitempty"`
 }
@@ -148,14 +149,16 @@ type singBoxDNS struct {
 }
 
 type singBoxDNSServer struct {
-	Type            string `json:"type,omitempty"`
-	Tag             string `json:"tag"`
-	Address         string `json:"address,omitempty"`
-	Server          string `json:"server,omitempty"`
-	ServerPort      int    `json:"server_port,omitempty"`
-	AddressResolver string `json:"address_resolver,omitempty"`
-	AddressStrategy string `json:"address_strategy,omitempty"`
-	Detour          string `json:"detour,omitempty"`
+	Type            string      `json:"type,omitempty"`
+	Tag             string      `json:"tag"`
+	Address         string      `json:"address,omitempty"`
+	Server          string      `json:"server,omitempty"`
+	ServerPort      int         `json:"server_port,omitempty"`
+	Path            string      `json:"path,omitempty"`
+	TLS             *singBoxTLS `json:"tls,omitempty"`
+	AddressResolver string      `json:"address_resolver,omitempty"`
+	AddressStrategy string      `json:"address_strategy,omitempty"`
+	Detour          string      `json:"detour,omitempty"`
 }
 
 type singBoxDNSRule struct {
@@ -217,7 +220,8 @@ func Generate(cfg *Config) ([]byte, error) {
 	}
 
 	sb.Route = &singBoxRoute{
-		AutoDetectInterface: true,
+		AutoDetectInterface: cfg.OutboundInterface == "",
+		DefaultInterface:    cfg.OutboundInterface,
 		Final:               cfg.FinalOutbound,
 	}
 	for _, inbound := range cfg.Inbounds {
@@ -289,7 +293,7 @@ func Generate(cfg *Config) ([]byte, error) {
 
 	effectiveDNS := cfg.DNS
 	if tunEnabled && (effectiveDNS == nil || !effectiveDNS.Enabled || len(effectiveDNS.Servers) == 0) {
-		effectiveDNS = defaultTUNDNSConfig()
+		effectiveDNS = defaultTUNDNSConfig(cfg.FinalOutbound)
 	}
 	if effectiveDNS != nil && effectiveDNS.Enabled {
 		sb.DNS = buildSingBoxDNS(effectiveDNS)
@@ -312,7 +316,19 @@ func directOutboundTag(outbounds []Outbound) string {
 	return ""
 }
 
-func defaultTUNDNSConfig() *DNSConfig {
+func defaultTUNDNSConfig(finalOutbound string) *DNSConfig {
+	if finalOutbound != "" && finalOutbound != "direct" {
+		return &DNSConfig{
+			Enabled:  true,
+			Strategy: DNSStrategyIPv4Only,
+			Servers: []DNSServer{{
+				Type: "https", Tag: "dns-proxy",
+				Server: "1.1.1.1", ServerPort: 443, Path: "/dns-query",
+				TLSServerName: "cloudflare-dns.com", Detour: finalOutbound,
+			}},
+			Final: "dns-proxy",
+		}
+	}
 	return &DNSConfig{
 		Enabled:  true,
 		Strategy: DNSStrategyIPv4Only,
@@ -432,16 +448,21 @@ func buildSingBoxDNS(dns *DNSConfig) *singBoxDNS {
 	}
 
 	for _, s := range dns.Servers {
-		sb.Servers = append(sb.Servers, singBoxDNSServer{
+		server := singBoxDNSServer{
 			Type:            s.Type,
 			Tag:             s.Tag,
 			Address:         s.Address,
 			Server:          s.Server,
 			ServerPort:      s.ServerPort,
+			Path:            s.Path,
 			AddressResolver: s.AddressResolver,
 			AddressStrategy: s.AddressStrategy,
 			Detour:          s.Detour,
-		})
+		}
+		if s.TLSServerName != "" {
+			server.TLS = &singBoxTLS{Enabled: true, ServerName: s.TLSServerName}
+		}
+		sb.Servers = append(sb.Servers, server)
 	}
 
 	for _, r := range dns.Rules {

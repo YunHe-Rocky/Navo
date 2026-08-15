@@ -69,27 +69,48 @@ func GenerateMihomo(cfg *Config) ([]byte, error) {
 		root["external-controller"] = fmt.Sprintf("%s:%d", cfg.Controller.Listen, cfg.Controller.Port)
 		root["secret"] = cfg.Controller.Secret
 	}
+	if cfg.OutboundInterface != "" {
+		root["interface-name"] = cfg.OutboundInterface
+	}
 	if cfg.TUN != nil && cfg.TUN.Enabled {
-		tunConfig := map[string]any{
-			"enable": true, "stack": "mixed", "device": cfg.TUN.InterfaceName,
+		// Current Mihomo top-level TUN chooses its own IPv4 subnet even when an
+		// inet4-address is supplied. The typed listener honors the frozen address
+		// and keeps route ownership with Navo.
+		tunListener := map[string]any{
+			"name": cfg.TUN.InterfaceName, "type": "tun", "device": cfg.TUN.InterfaceName, "stack": "mixed",
 			"auto-route": cfg.TUN.AutoRoute, "strict-route": cfg.TUN.StrictRoute,
 			"auto-detect-interface": true,
-			"dns-hijack":            []string{"any:53"},
+			"dns-hijack":            []string{"0.0.0.0:53"},
 			"mtu":                   cfg.TUN.MTU,
 		}
 		if len(cfg.TUN.Address) > 0 {
-			// Keep Mihomo's Wintun address aligned with the external route
-			// transaction. Without this, routes target 172.19.0.2 while Mihomo
-			// creates an adapter in a different subnet.
-			tunConfig["inet4-address"] = cfg.TUN.Address
+			tunListener["inet4-address"] = cfg.TUN.Address
 		}
-		root["tun"] = tunConfig
-		root["dns"] = map[string]any{
-			"enable":        true,
-			"listen":        "0.0.0.0:1053",
-			"enhanced-mode": "fake-ip",
-			"nameserver":    []string{"https://1.1.1.1/dns-query"},
+		root["listeners"] = []map[string]any{tunListener}
+		if cfg.OutboundInterface == "" && cfg.TUN.OutboundInterface != "" {
+			root["interface-name"] = cfg.TUN.OutboundInterface
 		}
+		// Resolve the host's DHCP DNS servers while the core starts, before Navo
+		// installs its NRPT capture rule. Binding core sockets to interface-name
+		// keeps the resulting DNS traffic on the frozen physical egress.
+		resolver := "dhcp://system"
+		dns := map[string]any{
+			"enable":                  true,
+			"listen":                  "0.0.0.0:1053",
+			"enhanced-mode":           "fake-ip",
+			"ipv6":                    false,
+			"nameserver":              []string{resolver},
+			"direct-nameserver":       []string{resolver},
+			"proxy-server-nameserver": []string{resolver},
+		}
+		if cfg.FinalOutbound != "" && cfg.FinalOutbound != "direct" {
+			// Resolve target domains with DoH through the selected proxy group.
+			// DHCP remains bootstrap-only; the selected endpoint is pinned before
+			// the TUN core starts, so target answers cannot be locally polluted.
+			dns["default-nameserver"] = []string{"223.5.5.5"}
+			dns["nameserver"] = []string{"https://1.1.1.1/dns-query#NAVO"}
+		}
+		root["dns"] = dns
 	}
 	proxies := make([]map[string]any, 0, len(cfg.Outbounds))
 	for _, outbound := range cfg.Outbounds {

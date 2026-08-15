@@ -1,0 +1,6 @@
+﻿Administrator privileges are required
+At D:\WorkSpace\Navo\scripts\test-tun-elevated.ps1:361 char:36
++ ... t-IsAdministrator)) { throw "Administrator privileges are required" }
++                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Administrator privileges are required:String) [], RuntimeException
+    + FullyQualifiedErrorId : Administrator privileges are required

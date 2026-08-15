@@ -35,7 +35,7 @@ func TestDetector_CheckFallsBackToNextProvider(t *testing.T) {
 	}
 }
 
-func TestDetectorUsesDedicatedHTTP1Transport(t *testing.T) {
+func TestDetectorUsesDedicatedHTTP2CapableTransport(t *testing.T) {
 	first := NewDetector()
 	second := NewDetectorWithProxy("http://127.0.0.1:12080")
 	firstTransport, firstOK := first.client.Transport.(*http.Transport)
@@ -43,11 +43,35 @@ func TestDetectorUsesDedicatedHTTP1Transport(t *testing.T) {
 	if !firstOK || !secondOK || firstTransport == secondTransport {
 		t.Fatal("IP detectors must not share transport state")
 	}
-	if firstTransport.ForceAttemptHTTP2 || secondTransport.ForceAttemptHTTP2 {
-		t.Fatal("IP detection must not initialize HTTP/2 during route transitions")
+	if !firstTransport.ForceAttemptHTTP2 || !secondTransport.ForceAttemptHTTP2 {
+		t.Fatal("IP detection must support providers that negotiate HTTP/2")
 	}
-	if firstTransport.TLSNextProto == nil || secondTransport.TLSNextProto == nil {
-		t.Fatal("HTTP/2 was not explicitly disabled")
+}
+
+func TestDetectorChecksHTTP2OnlyProvider(t *testing.T) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.ProtoMajor != 2 {
+			writer.WriteHeader(http.StatusHTTPVersionNotSupported)
+			return
+		}
+		_, _ = writer.Write([]byte("203.0.113.18\n"))
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	detector := NewDetector()
+	transport := detector.client.Transport.(*http.Transport)
+	transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	detector.endpoints = []echoEndpoint{{name: "http2", url: server.URL}}
+	detector.geoEndpoint = server.URL + "/geo/%s"
+
+	result, err := detector.CheckFresh(context.Background(), "http2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IP != "203.0.113.18" || result.Provider != "http2" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -143,6 +167,35 @@ func TestDetector_Cache(t *testing.T) {
 	}
 	if result.IP != "1.2.3.4" {
 		t.Errorf("cached IP = %s, want 1.2.3.4", result.IP)
+	}
+}
+
+func TestDetectorCheckFreshBypassesModeSensitiveCache(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/" {
+			_, _ = writer.Write([]byte(`{"success":false}`))
+			return
+		}
+		calls++
+		_, _ = writer.Write([]byte("203.0.113." + string(rune('0'+calls))))
+	}))
+	defer server.Close()
+
+	detector := newDetector(nil)
+	detector.client = server.Client()
+	detector.endpoints = []echoEndpoint{{name: "test", url: server.URL}}
+	detector.geoEndpoint = server.URL + "/geo/%s"
+	first, err := detector.Check(context.Background(), "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := detector.CheckFresh(context.Background(), "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || first.IP == second.IP {
+		t.Fatalf("fresh check did not bypass cache: calls=%d first=%q second=%q", calls, first.IP, second.IP)
 	}
 }
 

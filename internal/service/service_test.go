@@ -56,6 +56,91 @@ func TestDispatchDoesNotExposeServiceShutdown(t *testing.T) {
 	}
 }
 
+func TestDispatchRejectsRequestIDReuseForDifferentRequest(t *testing.T) {
+	svc := &Service{}
+	requestID := "reused-request-id"
+
+	svc.Dispatch(context.Background(), map[string]interface{}{
+		"request_id": requestID,
+		"method":     "unknown.first",
+	})
+	result := svc.Dispatch(context.Background(), map[string]interface{}{
+		"request_id": requestID,
+		"method":     "unknown.second",
+	})
+
+	payload, _ := result["payload"].(map[string]interface{})
+	if result["type"] != "ERROR" || payload["code"] != "REQUEST_ID_REUSE" {
+		t.Fatalf("request ID reuse was not rejected: %#v", result)
+	}
+}
+
+func TestCoreSelectCancelsWhileConnectionTransactionIsBusy(t *testing.T) {
+	svc := &Service{}
+	svc.captureMu.Lock()
+	defer svc.captureMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	result := svc.Dispatch(ctx, map[string]interface{}{
+		"request_id": "busy-core-switch",
+		"method":     "core.select",
+		"core_id":    "mihomo",
+	})
+	payload, _ := result["payload"].(map[string]interface{})
+	if result["type"] != "ERROR" || payload["code"] != "CORE_SWITCH_BUSY" {
+		t.Fatalf("busy core switch response = %#v", result)
+	}
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("busy core switch ignored caller cancellation for %v", elapsed)
+	}
+}
+
+func TestDispatchRejectsPhysicalAdapterTargets(t *testing.T) {
+	svc, err := New(Config{
+		SingBoxPath:     filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
+		ConfigDir:       t.TempDir(),
+		CredentialStore: credential.NewMemoryStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"tun.enable", "tun.config"} {
+		result := svc.Dispatch(context.Background(), map[string]interface{}{
+			"request_id": "adapter-ownership-" + method, "method": method, "name": "以太网",
+		})
+		if result["type"] != "ERROR" {
+			t.Fatalf("%s accepted a physical adapter target: %#v", method, result)
+		}
+		payload, _ := result["payload"].(map[string]interface{})
+		if payload["code"] != "NET_ADAPTER_OWNERSHIP" {
+			t.Fatalf("%s returned the wrong error: %#v", method, payload)
+		}
+	}
+}
+
+func TestTUNConfigRejectsLiveMutationButAllowsIdempotentReadback(t *testing.T) {
+	svc := &Service{runtime: runtimeState{
+		TUNEnabled: true,
+		TUNName:    "Navo",
+		TUNMTU:     1500,
+	}}
+	unchanged := svc.handleTUNConfig(context.Background(), "tun-config-same", map[string]interface{}{
+		"name": "Navo", "mtu": float64(1500),
+	})
+	if unchanged["type"] != "RESPONSE" {
+		t.Fatalf("idempotent TUN config = %#v", unchanged)
+	}
+
+	changed := svc.handleTUNConfig(context.Background(), "tun-config-change", map[string]interface{}{
+		"name": "Navo", "mtu": float64(1400),
+	})
+	payload, _ := changed["payload"].(map[string]interface{})
+	if changed["type"] != "ERROR" || payload["code"] != "TUN_RESTART_REQUIRED" {
+		t.Fatalf("live TUN mutation = %#v", changed)
+	}
+}
+
 func TestCombinedServiceBecomesReadyWithoutExternalPipe(t *testing.T) {
 	binary := filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe")
 	if _, err := os.Stat(binary); err != nil {
@@ -385,7 +470,7 @@ func TestService_SubAdd_Validation(t *testing.T) {
 	}
 
 	// Test missing fields
-	resp := svc.handleSubAdd("test", map[string]interface{}{})
+	resp := svc.handleSubAdd(context.Background(), "test", map[string]interface{}{})
 	if resp["type"] != "ERROR" {
 		t.Error("expected error for missing name/url")
 	}
@@ -405,7 +490,7 @@ func TestService_SubAdd_Success(t *testing.T) {
 		"url":             "https://example.com/sub",
 		"skip_tls_verify": true,
 	}
-	resp := svc.handleSubAdd("test", msg)
+	resp := svc.handleSubAdd(context.Background(), "test", msg)
 	if resp["type"] != "RESPONSE" {
 		t.Errorf("type = %v, want RESPONSE", resp["type"])
 	}
@@ -467,7 +552,7 @@ func TestService_SubRemove_NotFound(t *testing.T) {
 	}
 
 	msg := map[string]interface{}{"id": "nonexistent"}
-	resp := svc.handleSubRemove("test", msg)
+	resp := svc.handleSubRemove(context.Background(), "test", msg)
 	if resp["type"] != "ERROR" {
 		t.Error("expected error for nonexistent subscription")
 	}

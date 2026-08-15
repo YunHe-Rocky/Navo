@@ -10,9 +10,17 @@ import (
 	"time"
 
 	"navo/internal/pipe"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const uiPipeName = "Navo.UI.Agent.v1"
+
+const (
+	defaultUIIPCRequestTimeout    = 45 * time.Second
+	captureUIIPCRequestTimeout    = 2 * time.Minute
+	coreSwitchUIIPCRequestTimeout = 4 * time.Minute
+)
 
 type App struct {
 	sequence         atomic.Uint64
@@ -23,6 +31,7 @@ type App struct {
 	benchmarkCancel  context.CancelFunc
 	coreUpdateMu     sync.RWMutex
 	coreUpdateCache  CoreUpdateReport
+	coreInstallMu    sync.Mutex
 }
 
 type Dashboard struct {
@@ -67,9 +76,12 @@ type ProxyStatus struct {
 }
 
 type RuntimeStatus struct {
-	Mode       string `json:"mode"`
-	ActiveID   string `json:"active_id"`
-	TUNEnabled bool   `json:"tun_enabled"`
+	Mode       string   `json:"mode"`
+	ListMode   string   `json:"list_mode"`
+	ActiveID   string   `json:"active_id"`
+	TUNEnabled bool     `json:"tun_enabled"`
+	Blacklist  []string `json:"blacklist"`
+	Whitelist  []string `json:"whitelist"`
 }
 
 type TUNStatus struct {
@@ -251,6 +263,26 @@ func (a *App) startup(ctx context.Context) {
 	a.context = ctx
 }
 
+// beforeClose keeps the Wails child alive until the user explicitly chooses
+// minimize-to-tray or requests the launcher's coordinated shutdown path.
+func (a *App) beforeClose(ctx context.Context) bool {
+	runtime.EventsEmit(ctx, "navo:close-requested")
+	return true
+}
+
+func (a *App) RequestExit() error {
+	_, err := call[struct{}](a, "ui.exit", nil)
+	return err
+}
+
+func (a *App) MinimizeToTray() error {
+	if _, err := call[struct{}](a, "ui.hide", nil); err != nil {
+		return err
+	}
+	runtime.WindowHide(a.context)
+	return nil
+}
+
 func (a *App) GetDashboard() (Dashboard, error) {
 	return call[Dashboard](a, "dashboard.snapshot", nil)
 }
@@ -297,6 +329,19 @@ func (a *App) SetCaptureMode(mode string) error {
 
 func (a *App) SetRuntimeMode(mode string) error {
 	_, err := call[struct{}](a, "runtime.mode.set", map[string]any{"mode": mode})
+	return err
+}
+
+func (a *App) SetRoutingListMode(mode string) error {
+	_, err := call[struct{}](a, "runtime.list_mode.set", map[string]any{"mode": mode})
+	return err
+}
+
+func (a *App) SetRoutingRules(blacklist, whitelist []string) error {
+	_, err := call[struct{}](a, "runtime.rules.set", map[string]any{
+		"blacklist": blacklist,
+		"whitelist": whitelist,
+	})
 	return err
 }
 
@@ -405,7 +450,7 @@ func (a *App) request(method string, payload any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("connect to Navo Agent: %w", err)
 	}
 	defer channel.Close()
-	if err := channel.SetDeadline(time.Now().Add(45 * time.Second)); err != nil {
+	if err := channel.SetDeadline(time.Now().Add(uiIPCRequestTimeout(method))); err != nil {
 		return nil, fmt.Errorf("set IPC deadline: %w", err)
 	}
 	if err := channel.Send(request); err != nil {
@@ -427,4 +472,14 @@ func (a *App) request(method string, payload any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("%s: %s", detail.Code, detail.Message)
 	}
 	return response.Payload, nil
+}
+
+func uiIPCRequestTimeout(method string) time.Duration {
+	if method == "core.select" {
+		return coreSwitchUIIPCRequestTimeout
+	}
+	if method == "capture.set" || method == "runtime.mode.set" || method == "runtime.rules.set" || method == "runtime.list_mode.set" {
+		return captureUIIPCRequestTimeout
+	}
+	return defaultUIIPCRequestTimeout
 }

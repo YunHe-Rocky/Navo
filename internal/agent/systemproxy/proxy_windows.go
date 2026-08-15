@@ -3,19 +3,38 @@
 package systemproxy
 
 import (
+	"context"
 	"fmt"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
 var (
 	advapi32 = syscall.NewLazyDLL("advapi32.dll")
+	wininet  = syscall.NewLazyDLL("wininet.dll")
 
 	procRegOpenKeyExW    = advapi32.NewProc("RegOpenKeyExW")
 	procRegQueryValueExW = advapi32.NewProc("RegQueryValueExW")
 	procRegSetValueExW   = advapi32.NewProc("RegSetValueExW")
 	procRegDeleteValueW  = advapi32.NewProc("RegDeleteValueW")
 	procRegCloseKey      = advapi32.NewProc("RegCloseKey")
+	procInternetOpenW    = wininet.NewProc("InternetOpenW")
+	procInternetOpenURLW = wininet.NewProc("InternetOpenUrlW")
+	procInternetSetOptW  = wininet.NewProc("InternetSetOptionW")
+	procInternetClose    = wininet.NewProc("InternetCloseHandle")
+	procHTTPQueryInfoW   = wininet.NewProc("HttpQueryInfoW")
+)
+
+const (
+	internetOpenTypePreconfig = 0
+	internetFlagReload        = 0x80000000
+	internetFlagNoCacheWrite  = 0x04000000
+	internetOptionConnectMS   = 2
+	internetOptionSendMS      = 5
+	internetOptionReceiveMS   = 6
+	httpQueryStatusCode       = 19
+	httpQueryFlagNumber       = 0x20000000
 )
 
 const (
@@ -300,12 +319,96 @@ func applySystemProxyConfig(cfg ProxyConfig) error {
 }
 
 func notifyProxyChange() error {
-	proc := syscall.NewLazyDLL("wininet.dll").NewProc("InternetSetOptionW")
 	for _, option := range []uintptr{39, 37} { // SETTINGS_CHANGED, REFRESH
-		ok, _, callErr := proc.Call(0, option, 0, 0)
+		ok, _, callErr := procInternetSetOptW.Call(0, option, 0, 0)
 		if ok == 0 {
 			return fmt.Errorf("InternetSetOptionW(%d): %w", option, callErr)
 		}
 	}
 	return nil
+}
+
+// ProbeDefaultProxy performs a real WinINet request with PRECONFIG settings.
+// This proves that a normal current-user Windows application consumes the
+// proxy Navo just committed, rather than only proving the explicit endpoint.
+func ProbeDefaultProxy(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	agent, err := syscall.UTF16PtrFromString("Navo/1.0 WinINet verification")
+	if err != nil {
+		return err
+	}
+	session, _, callErr := procInternetOpenW.Call(
+		uintptr(unsafe.Pointer(agent)),
+		internetOpenTypePreconfig,
+		0,
+		0,
+		0,
+	)
+	if session == 0 {
+		return fmt.Errorf("InternetOpenW(PRECONFIG): %w", callErr)
+	}
+	defer procInternetClose.Call(session)
+
+	timeout := uint32(1500)
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return context.DeadlineExceeded
+		}
+		if remaining < time.Duration(timeout)*time.Millisecond {
+			timeout = uint32(max(250, remaining.Milliseconds()))
+		}
+	}
+	for _, option := range []uintptr{internetOptionConnectMS, internetOptionSendMS, internetOptionReceiveMS} {
+		ok, _, optionErr := procInternetSetOptW.Call(
+			session,
+			option,
+			uintptr(unsafe.Pointer(&timeout)),
+			unsafe.Sizeof(timeout),
+		)
+		if ok == 0 {
+			return fmt.Errorf("InternetSetOptionW(timeout %d): %w", option, optionErr)
+		}
+	}
+
+	var lastErr error
+	for _, endpoint := range []string{
+		"https://connectivitycheck.gstatic.com/generate_204",
+		"https://cp.cloudflare.com/generate_204",
+		"https://www.msftconnecttest.com/connecttest.txt",
+	} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		url, _ := syscall.UTF16PtrFromString(endpoint)
+		request, _, requestErr := procInternetOpenURLW.Call(
+			session,
+			uintptr(unsafe.Pointer(url)),
+			0,
+			0,
+			internetFlagReload|internetFlagNoCacheWrite,
+			0,
+		)
+		if request == 0 {
+			lastErr = fmt.Errorf("InternetOpenUrlW(%s): %w", endpoint, requestErr)
+			continue
+		}
+		var status uint32
+		size := uint32(unsafe.Sizeof(status))
+		ok, _, statusErr := procHTTPQueryInfoW.Call(
+			request,
+			httpQueryStatusCode|httpQueryFlagNumber,
+			uintptr(unsafe.Pointer(&status)),
+			uintptr(unsafe.Pointer(&size)),
+			0,
+		)
+		procInternetClose.Call(request)
+		if ok != 0 && status >= 200 && status < 400 {
+			return nil
+		}
+		lastErr = fmt.Errorf("WinINet status for %s: status=%d error=%v", endpoint, status, statusErr)
+	}
+	return fmt.Errorf("current-user default proxy data plane failed: %w", lastErr)
 }

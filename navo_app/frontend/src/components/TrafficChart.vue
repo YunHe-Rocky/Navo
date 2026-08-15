@@ -6,10 +6,12 @@ const props = defineProps<{
   points: TrafficPoint[];
   visibleSeries: TrafficSeries[];
   stopped?: boolean;
+  statusLabel?: string;
   compact?: boolean;
 }>();
 
 const hovered = ref<number | null>(null);
+const focused = ref(false);
 const width = 720;
 const height = 220;
 const pad = 22;
@@ -35,18 +37,35 @@ const averages = computed(() => Object.fromEntries(series.map((item) => [
     ? props.points.reduce((sum, point) => sum + point[item.id], 0) / props.points.length
     : 0,
 ])) as Record<TrafficSeries, number>);
-// Keep the newest sample expanded by default; pointer/keyboard interaction can
-// inspect an older point without requiring hover-only access.
-const activeIndex = computed(() => hovered.value ?? (props.points.length ? props.points.length - 1 : null));
+const activeIndex = computed(() => hovered.value ?? (
+  focused.value && props.points.length ? props.points.length - 1 : null
+));
 const hoverPoint = computed(() => activeIndex.value === null ? undefined : props.points[activeIndex.value]);
+const activeX = computed(() => activeIndex.value === null ? 0 : xForIndex(activeIndex.value));
+const activeY = computed(() => {
+  if (!hoverPoint.value || !visible.value.length) return height / 2;
+  const highest = Math.max(...visible.value.map((item) => hoverPoint.value?.[item.id] ?? 0));
+  return yForValue(highest);
+});
+const tooltipStyle = computed(() => ({
+  left: `${(activeX.value / width) * 100}%`,
+  top: `${(activeY.value / height) * 100}%`,
+  transform: activeX.value > width * 0.68 ? "translate(calc(-100% - 12px), -50%)" : "translate(12px, -50%)",
+}));
+
+function xForIndex(index: number) {
+  return pad + (index / Math.max(1, props.points.length - 1)) * (width - pad * 2);
+}
+
+function yForValue(value: number) {
+  return height - pad - (value / peak.value) * (height - pad * 2);
+}
 
 function linePath(key: TrafficSeries) {
   if (!props.points.length) return "";
-  const usableWidth = width - pad * 2;
-  const usableHeight = height - pad * 2;
   return props.points.map((point, index) => {
-    const x = pad + (index / Math.max(1, props.points.length - 1)) * usableWidth;
-    const y = height - pad - (point[key] / peak.value) * usableHeight;
+    const x = xForIndex(index);
+    const y = yForValue(point[key]);
     return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
 }
@@ -86,39 +105,55 @@ function setKeyboardPoint(event: KeyboardEvent) {
         <i class="legend"></i>{{ item.symbol }} {{ item.label }}均值 {{ formatRate(averages[item.id]) }}
       </span>
       <span>峰值 {{ formatRate(peak) }}</span>
-      <em v-if="stopped">代理采样已停止，本机采样仍可继续</em>
+      <em v-if="stopped">{{ statusLabel || "当前流量源暂不可用" }}</em>
     </div>
     <div v-if="!points.length || !visible.length" class="chart-empty">
       <strong>{{ visible.length ? "暂无真实流量数据" : "未选择显示曲线" }}</strong>
       <span>后端每 2 秒采样，窗口固定为最近 30 个点。</span>
     </div>
-    <svg
-      v-else
-      viewBox="0 0 720 220"
-      preserveAspectRatio="none"
-      role="img"
-	  tabindex="0"
-      aria-label="最近 60 秒本机与代理上传下载速度折线图"
-	  @pointermove="setHover"
-	  @pointerdown="setHover"
-      @mouseleave="hovered = null"
-	  @keydown="setKeyboardPoint"
-    >
-      <g class="grid-lines">
-        <line v-for="y in [44, 88, 132, 176]" :key="y" x1="22" :y1="y" x2="698" :y2="y" />
-      </g>
-      <path
-        v-for="item in visible"
-        :key="item.id"
-        :class="['line', `series-${item.id}`]"
-        :d="paths[item.id]"
-      />
-    </svg>
-    <div v-if="hoverPoint" class="chart-tooltip" role="status" aria-live="polite">
-      <strong>{{ new Date(hoverPoint.timestamp).toLocaleTimeString() }}</strong>
-      <span v-for="item in visible" :key="item.id" :class="`series-${item.id}`">
-        {{ item.symbol }} {{ item.label }} {{ formatRate(hoverPoint[item.id]) }}
-      </span>
+    <div v-else class="chart-stage">
+      <svg
+        viewBox="0 0 720 220"
+        preserveAspectRatio="none"
+        role="img"
+        tabindex="0"
+        aria-label="最近 60 秒实时上传下载速度折线图；使用左右方向键查看采样点"
+        @pointerenter="setHover"
+        @pointermove="setHover"
+        @pointerdown="setHover"
+        @mouseleave="hovered = null"
+        @focus="focused = true"
+        @blur="focused = false; hovered = null"
+        @keydown="setKeyboardPoint"
+      >
+        <g class="grid-lines">
+          <line v-for="y in [44, 88, 132, 176]" :key="y" x1="22" :y1="y" x2="698" :y2="y" />
+        </g>
+        <path
+          v-for="item in visible"
+          :key="item.id"
+          :class="['line', `series-${item.id}`]"
+          :d="paths[item.id]"
+        />
+        <g v-if="hoverPoint" class="chart-crosshair" aria-hidden="true">
+          <line :x1="activeX" y1="22" :x2="activeX" y2="198" />
+          <line x1="22" :y1="activeY" x2="698" :y2="activeY" />
+          <circle
+            v-for="item in visible"
+            :key="item.id"
+            :class="`series-${item.id}`"
+            :cx="activeX"
+            :cy="yForValue(hoverPoint[item.id])"
+            r="4"
+          />
+        </g>
+      </svg>
+      <div v-if="hoverPoint" class="chart-tooltip" :style="tooltipStyle" role="status" aria-live="polite">
+        <strong>{{ new Date(hoverPoint.timestamp).toLocaleTimeString() }}</strong>
+        <span v-for="item in visible" :key="item.id" :class="`series-${item.id}`">
+          {{ item.symbol }} {{ item.label }} {{ formatRate(hoverPoint[item.id]) }}
+        </span>
+      </div>
     </div>
   </div>
 </template>

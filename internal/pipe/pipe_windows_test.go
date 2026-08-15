@@ -95,6 +95,35 @@ func TestNamedPipeReadTimeoutCancelsAndConnectionRecovers(t *testing.T) {
 	}
 }
 
+func TestDialWaitsForDelayedListenerCreation(t *testing.T) {
+	name := fmt.Sprintf("Navo.DelayedDial.%d.%d", os.Getpid(), time.Now().UnixNano())
+	listenerReady := make(chan *NamedPipeListener, 1)
+	listenerErr := make(chan error, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		listener, err := NewListener(name)
+		if err != nil {
+			listenerErr <- err
+			return
+		}
+		listenerReady <- listener
+	}()
+
+	client, err := Dial(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	select {
+	case listener := <-listenerReady:
+		defer listener.Close()
+	case err := <-listenerErr:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("delayed listener was not created")
+	}
+}
+
 func TestNamedPipeCloseCancelsPendingRead(t *testing.T) {
 	listener, client, server := connectedPipePair(t)
 	defer listener.Close()

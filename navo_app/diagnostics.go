@@ -87,6 +87,7 @@ type CoreUpdateStatus struct {
 	State                string `json:"state"`
 	InstallSupported     bool   `json:"install_supported"`
 	InstallBlockedReason string `json:"install_blocked_reason,omitempty"`
+	AssetName            string `json:"asset_name,omitempty"`
 }
 
 type CoreUpdateReport struct {
@@ -120,17 +121,32 @@ var coreReleaseSources = []coreReleaseSource{
 }
 
 type coreManifest struct {
-	Cores []struct {
-		Type         string `json:"type"`
-		Version      string `json:"version"`
-		RelativePath string `json:"relative_path"`
-		SHA256       string `json:"sha256"`
-	} `json:"cores"`
+	SchemaVersion int                 `json:"schema_version"`
+	Cores         []coreManifestEntry `json:"cores"`
+}
+
+type coreManifestEntry struct {
+	Type           string   `json:"type"`
+	Version        string   `json:"version"`
+	RelativePath   string   `json:"relative_path"`
+	SHA256         string   `json:"sha256"`
+	ConfigFormat   string   `json:"config_format,omitempty"`
+	VersionArgs    []string `json:"version_args,omitempty"`
+	ValidationArgs []string `json:"validation_args,omitempty"`
+	RunArgs        []string `json:"run_args,omitempty"`
 }
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
+	TagName string        `json:"tag_name"`
+	HTMLURL string        `json:"html_url"`
+	Assets  []githubAsset `json:"assets"`
+}
+
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"`
+	Size               int64  `json:"size"`
 }
 
 func (a *App) GetHostStatus() HostStatus {
@@ -611,6 +627,17 @@ func checkCoreUpdates(
 					status.ReleaseURL = releaseURL
 				}
 				status.UpdateAvailable = status.IntegrityOK && versionGreater(latest, status.CurrentVersion)
+				if status.UpdateAvailable {
+					installCandidate, installErr := fetchInstallCandidate(ctx, client, source)
+					if installErr != nil {
+						status.InstallSupported = false
+						status.InstallBlockedReason = installErr.Error()
+					} else {
+						status.InstallSupported = true
+						status.InstallBlockedReason = ""
+						status.AssetName = installCandidate.asset.Name
+					}
+				}
 			}
 			switch {
 			case status.Error != "":

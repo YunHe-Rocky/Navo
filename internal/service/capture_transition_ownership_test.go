@@ -8,18 +8,16 @@ import (
 	"testing"
 )
 
-func TestPrepareTUNLetsCoreOwnAdapterLifecycle(t *testing.T) {
+func TestPrepareTUNOrdersOwnershipActivationVerificationAndCommit(t *testing.T) {
 	path := filepath.Join("capture_transition.go")
 	files := token.NewFileSet()
 	parsed, err := parser.ParseFile(files, path, nil, 0)
 	if err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+		t.Fatal(err)
 	}
-
 	var function *ast.FuncDecl
 	for _, declaration := range parsed.Decls {
-		candidate, ok := declaration.(*ast.FuncDecl)
-		if ok && candidate.Name.Name == "prepareTUNLocked" {
+		if candidate, ok := declaration.(*ast.FuncDecl); ok && candidate.Name.Name == "prepareTUNLocked" {
 			function = candidate
 			break
 		}
@@ -28,40 +26,74 @@ func TestPrepareTUNLetsCoreOwnAdapterLifecycle(t *testing.T) {
 		t.Fatal("prepareTUNLocked was not found")
 	}
 
-	var startPosition, waitPosition token.Pos
+	var ownerPosition, startPosition, activatePosition, verifyPosition, commitPosition token.Pos
 	ast.Inspect(function.Body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		if selector.Sel.Name == "startCoreForCapture" {
-			startPosition = selector.Pos()
-		}
-		if selector.Sel.Name == "WaitForAdapterState" {
-			waitPosition = selector.Pos()
-		}
-		owner, ok := selector.X.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		receiver, ok := owner.X.(*ast.Ident)
-		if receiver != nil && ok &&
-			receiver.Name == "s" &&
-			owner.Sel.Name == "tunManager" &&
-			(selector.Sel.Name == "Create" || selector.Sel.Name == "Configure") {
-			t.Errorf("prepareTUNLocked must not call tunManager.%s before sing-tun starts", selector.Sel.Name)
+		switch value := node.(type) {
+		case *ast.AssignStmt:
+			for index, left := range value.Lhs {
+				selector, ok := left.(*ast.SelectorExpr)
+				if !ok || selector.Sel.Name != "networkManager" {
+					continue
+				}
+				receiver, _ := selector.X.(*ast.Ident)
+				if receiver == nil || receiver.Name != "s" || index >= len(value.Rhs) {
+					continue
+				}
+				if identifier, ok := value.Rhs[index].(*ast.Ident); ok && identifier.Name == "manager" {
+					ownerPosition = value.Pos()
+				}
+			}
+		case *ast.CallExpr:
+			selector, ok := value.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "startCoreForCapture":
+				startPosition = selector.Pos()
+			case "Activate":
+				activatePosition = selector.Pos()
+			case "Verify":
+				verifyPosition = selector.Pos()
+			case "commitHealthyRuntime":
+				commitPosition = selector.Pos()
+			}
 		}
 		return true
 	})
+	for name, position := range map[string]token.Pos{"owner": ownerPosition, "start": startPosition, "activate": activatePosition, "verify": verifyPosition, "commit": commitPosition} {
+		if position == token.NoPos {
+			t.Fatalf("%s step is missing", name)
+		}
+	}
+	if !(ownerPosition < startPosition && startPosition < activatePosition && activatePosition < verifyPosition && verifyPosition < commitPosition) {
+		t.Fatalf("invalid TUN order: owner=%d start=%d activate=%d verify=%d commit=%d", ownerPosition, startPosition, activatePosition, verifyPosition, commitPosition)
+	}
+}
 
-	if startPosition == token.NoPos || waitPosition == token.NoPos {
-		t.Fatalf("startup order is incomplete: start=%v wait=%v", startPosition, waitPosition)
+func TestStartCoreForCaptureDoesNotCommitHealth(t *testing.T) {
+	files := token.NewFileSet()
+	parsed, err := parser.ParseFile(files, "capture_transition.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if startPosition >= waitPosition {
-		t.Fatal("sing-box must start and create the adapter before readiness is checked")
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "startCoreForCapture" {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == "commitHealthyRuntime" {
+				t.Error("startCoreForCapture still commits health before TUN verification")
+			}
+			return true
+		})
+		return
 	}
+	t.Fatal("startCoreForCapture was not found")
 }

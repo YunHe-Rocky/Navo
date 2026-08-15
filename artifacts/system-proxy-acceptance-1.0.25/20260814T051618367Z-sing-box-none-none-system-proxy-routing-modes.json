@@ -1,0 +1,59 @@
+﻿{
+    "executed_at":  "2026-08-14T05:16:21.6587661+00:00",
+    "windows":  "Microsoft Windows NT 10.0.26200.0",
+    "core":  "sing-box",
+    "core_version":  "1.13.14",
+    "core_sha256":  "db0d779948214cf761011d154c3a5da36df20394fa01a9fc798f1dc39fe9d183",
+    "wintun_sha256":  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+    "failure_point":  "none",
+    "crash_point":  "none",
+    "scenario":  "system-proxy-routing-modes",
+    "runtime_mode":  "bypass_mainland",
+    "profile_mode":  "generated-upstream",
+    "upstream":  "socks5://127.0.0.1:10808",
+    "selected_outbound":  null,
+    "direct_ip_before":  null,
+    "direct_ip_after":  null,
+    "host_environment":  {
+                             "adapters":  [
+
+                                          ],
+                             "optional_features":  {
+                                                       "Microsoft-Hyper-V-All":  "unavailable",
+                                                       "Microsoft-Windows-Subsystem-Linux":  "unavailable"
+                                                   }
+                         },
+    "status":  "failed",
+    "activation":  null,
+    "tun_status":  null,
+    "no_proxy_https":  null,
+    "external_sites":  null,
+    "stability_seconds":  0,
+    "tun_status_delayed":  null,
+    "external_sites_delayed":  null,
+    "reenabled_tun_status":  null,
+    "external_sites_reenabled":  null,
+    "routing_modes":  null,
+    "routing_rules":  null,
+    "wininet_before":  {
+                           "proxy_enable":  0,
+                           "proxy_server":  "",
+                           "proxy_override":  "",
+                           "auto_config_url":  "",
+                           "auto_detect":  null
+                       },
+    "wininet_owned":  null,
+    "wininet_after":  {
+                          "proxy_enable":  0,
+                          "proxy_server":  "",
+                          "proxy_override":  "",
+                          "auto_config_url":  "",
+                          "auto_detect":  null
+                      },
+    "capture_after":  null,
+    "core_log":  null,
+    "rollback":  "passed_after_failure",
+    "before":  null,
+    "after":  null,
+    "error":  "Navo exited during startup with code 1\r\nAt D:\\WorkSpace\\Navo\\scripts\\test-tun-elevated.ps1:124 char:35\r\n+ ... asExited) { throw \"Navo exited during startup with code $($Process.Ex ...\r\n+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Navo exited during startup with code 1:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Navo exited during startup with code 1"
+}

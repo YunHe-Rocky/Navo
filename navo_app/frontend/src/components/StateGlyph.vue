@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { IconState } from "../types";
+import trayIcon from "../assets/tray_icon.ico";
 
 defineProps<{ state: IconState; size?: "sm" | "md" | "lg"; label?: string }>();
 </script>
@@ -11,9 +12,6 @@ defineProps<{ state: IconState; size?: "sm" | "md" | "lg"; label?: string }>();
     role="img"
     :aria-label="label ?? `Navo ${state} 状态`"
   >
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M8 24V8l16 16V8" />
-      <circle cx="24" cy="8" r="3.25" />
-    </svg>
+    <img :src="trayIcon" alt="" aria-hidden="true" />
   </span>
 </template>

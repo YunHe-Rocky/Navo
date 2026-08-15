@@ -453,7 +453,8 @@ func DialPath(path string) (*Channel, error) {
 	}
 
 	var h syscall.Handle
-	for i := 0; i < 20; i++ {
+	deadline := time.Now().Add(4 * time.Second)
+	for {
 		ret, _, callErr := procCreateFileW.Call(
 			uintptr(unsafe.Pointer(namePtr)),
 			uintptr(genericRead|genericWrite),
@@ -481,7 +482,21 @@ func DialPath(path string) (*Channel, error) {
 		if errno != syscall.Errno(errorPipeBusy) && errno != syscall.ERROR_FILE_NOT_FOUND {
 			return nil, fmt.Errorf("CreateFile(%s): errno=%d", path, errno)
 		}
-		procWaitNamedPipeW.Call(uintptr(unsafe.Pointer(namePtr)), uintptr(200))
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		if errno == syscall.Errno(errorPipeBusy) {
+			wait := min(remaining, 200*time.Millisecond)
+			procWaitNamedPipeW.Call(
+				uintptr(unsafe.Pointer(namePtr)),
+				uintptr(max(1, wait.Milliseconds())),
+			)
+			continue
+		}
+		// WaitNamedPipe returns immediately while no server instance exists.
+		// Give a concurrently starting listener time to create its first instance.
+		time.Sleep(min(remaining, 25*time.Millisecond))
 	}
 
 	if h == 0 {

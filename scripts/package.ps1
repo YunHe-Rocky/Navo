@@ -12,6 +12,7 @@ $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseParent $OutputNa
 $UIRoot = Join-Path $ProjectRoot "navo_app"
 $UICache = Join-Path $ProjectRoot ".cache\npm"
 $ToolsRoot = Join-Path $ProjectRoot ".cache\tools"
+$BuildTemp = Join-Path $ProjectRoot ".cache\tmp"
 $Wails = Join-Path $ToolsRoot "wails.exe"
 $GoWinResCommand = Get-Command go-winres.exe -ErrorAction SilentlyContinue
 $GoWinRes = if ($null -ne $GoWinResCommand) {
@@ -33,9 +34,11 @@ $Npm = (Get-Command npm.cmd -ErrorAction Stop).Source
 $env:GOPATH = Join-Path $ProjectRoot ".cache\go-path"
 $env:GOMODCACHE = Join-Path $env:GOPATH "pkg\mod"
 $env:GOCACHE = Join-Path $ProjectRoot ".cache\go-build"
+$env:TEMP = $BuildTemp
+$env:TMP = $BuildTemp
 $env:GOOS = "windows"
 $env:GOARCH = $Architecture
-New-Item -ItemType Directory -Force $env:GOMODCACHE, $env:GOCACHE, $UICache, $ToolsRoot | Out-Null
+New-Item -ItemType Directory -Force $env:GOMODCACHE, $env:GOCACHE, $UICache, $ToolsRoot, $BuildTemp | Out-Null
 $WailsSource = Join-Path $env:GOMODCACHE "github.com\wailsapp\wails\v2@v2.12.0"
 
 $RequiredThirdPartyFiles = @(

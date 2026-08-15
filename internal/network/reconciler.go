@@ -17,8 +17,8 @@ import (
 	"navo/internal/network/tun"
 )
 
-// Reconciler checks and repairs network state before proxy startup.
-// It handles dirty shutdown recovery, TUN adapter cleanup, route cleanup, and DNS restoration.
+// Reconciler coordinates recovery state before proxy startup. Exact route,
+// NRPT, and firewall mutations belong exclusively to Manager's V2 journal.
 type Reconciler struct {
 	stateFilePath string
 	tunManager    tun.Manager
@@ -137,32 +137,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, cfg *ReconcileConfig) (*host
 		}
 	}
 
-	// Step 2: Clean up orphaned routes
-	if r.routeManager != nil {
-		cleaned, err := r.routeManager.CleanupAll(ctx)
-		if err != nil {
-			result.IssuesUnfixed = append(result.IssuesUnfixed,
-				fmt.Sprintf("route cleanup failed: %v", err))
-		} else if cleaned > 0 {
-			result.IssuesFixed = append(result.IssuesFixed,
-				fmt.Sprintf("removed %d stale routes", cleaned))
-		}
-	}
+	// Routes, NRPT and firewall state were already recovered by Manager before
+	// Supervisor startup. Without a V2 journal, guessing ownership is unsafe.
 
-	// Step 3: Reset DNS if previously configured
-	if r.dnsManager != nil && state.LastTUNAdapter != "" {
-		if r.dnsManager.IsConfigured(ctx, state.LastTUNAdapter) {
-			result.IssuesFound = append(result.IssuesFound, "stale DNS configuration detected")
-			if err := r.dnsManager.Reset(ctx, state.LastTUNAdapter); err != nil {
-				result.IssuesUnfixed = append(result.IssuesUnfixed,
-					fmt.Sprintf("DNS reset failed: %v", err))
-			} else {
-				result.IssuesFixed = append(result.IssuesFixed, "DNS settings restored")
-			}
-		}
-	}
-
-	// Step 4: Check if the last known port is free
+	// Check if the last known port is free.
 	checkPort := state.LastListenPort
 	if checkPort == 0 && cfg != nil {
 		checkPort = cfg.ListenPort

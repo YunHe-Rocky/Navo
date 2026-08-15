@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,9 +42,10 @@ func (m *mockTun) Cleanup(ctx context.Context) (*tun.CleanupResult, error) {
 }
 
 type mockRoute struct {
-	routes   []tun.Route
-	cleanErr error
-	cleanedN int
+	routes       []tun.Route
+	cleanErr     error
+	cleanedN     int
+	cleanupCalls int
 }
 
 func (r *mockRoute) AddRoutes(ctx context.Context, n string, routes []tun.Route) error {
@@ -58,6 +60,7 @@ func (r *mockRoute) ListTUNRoutes(ctx context.Context, n string) ([]tun.Route, e
 	return r.routes, nil
 }
 func (r *mockRoute) CleanupAll(ctx context.Context) (int, error) {
+	r.cleanupCalls++
 	if r.cleanErr != nil {
 		return 0, r.cleanErr
 	}
@@ -130,9 +133,10 @@ func TestReconciler_DirtyShutdown_PortCheck(t *testing.T) {
 	r.SetStateFilePath(stateFile)
 
 	// Mark dirty shutdown
-	r.MarkDirtyShutdown(12345, 12080, "", nil)
+	port := unusedTestPort(t)
+	r.MarkDirtyShutdown(12345, port, "", nil)
 
-	result, err := r.Reconcile(context.Background(), &ReconcileConfig{ListenPort: 12080})
+	result, err := r.Reconcile(context.Background(), &ReconcileConfig{ListenPort: port})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +159,7 @@ func TestReconciler_DirtyShutdown_TUNCleanup(t *testing.T) {
 	r := NewReconciler(tunMgr, routeMgr, dnsMgr)
 	r.SetStateFilePath(stateFile)
 
-	r.MarkDirtyShutdown(12345, 12080, "Navo-TUN", []string{"1.1.1.1"})
+	r.MarkDirtyShutdown(12345, unusedTestPort(t), "Navo-TUN", []string{"1.1.1.1"})
 
 	result, err := r.Reconcile(context.Background(), nil)
 	if err != nil {
@@ -173,7 +177,7 @@ func TestReconciler_DirtyShutdown_TUNCleanup(t *testing.T) {
 	}
 }
 
-func TestReconciler_DirtyShutdown_RouteCleanup(t *testing.T) {
+func TestReconciler_DirtyShutdown_DoesNotGuessRouteOwnership(t *testing.T) {
 	dir := t.TempDir()
 	stateFile := filepath.Join(dir, "recovery.json")
 
@@ -194,9 +198,12 @@ func TestReconciler_DirtyShutdown_RouteCleanup(t *testing.T) {
 	if result.RecoveryState != host.RecoveryReady {
 		t.Errorf("expected Ready, got %s", result.RecoveryState)
 	}
+	if routeMgr.cleanupCalls != 0 || len(routeMgr.routes) != 1 {
+		t.Fatal("Reconciler invoked the forbidden bulk route cleanup path")
+	}
 }
 
-func TestReconciler_DirtyShutdown_DNSCleanup(t *testing.T) {
+func TestReconciler_DirtyShutdown_DoesNotGuessDNSOwnership(t *testing.T) {
 	dir := t.TempDir()
 	stateFile := filepath.Join(dir, "recovery.json")
 
@@ -205,7 +212,7 @@ func TestReconciler_DirtyShutdown_DNSCleanup(t *testing.T) {
 	r := NewReconciler(&mockTun{installed: true}, &mockRoute{}, dnsMgr)
 	r.SetStateFilePath(stateFile)
 
-	r.MarkDirtyShutdown(12345, 12080, "Navo-TUN", []string{"8.8.8.8"})
+	r.MarkDirtyShutdown(12345, unusedTestPort(t), "Navo-TUN", []string{"8.8.8.8"})
 
 	result, err := r.Reconcile(context.Background(), nil)
 	if err != nil {
@@ -214,8 +221,8 @@ func TestReconciler_DirtyShutdown_DNSCleanup(t *testing.T) {
 	if result.RecoveryState != host.RecoveryReady {
 		t.Errorf("expected Ready, got %s", result.RecoveryState)
 	}
-	if dnsMgr.configured {
-		t.Error("expected DNS to be reset after reconcile")
+	if !dnsMgr.configured {
+		t.Error("Reconciler modified DNS without Journal V2 ownership")
 	}
 }
 
@@ -330,4 +337,17 @@ func TestReconciler_MarkDirtyShutdown(t *testing.T) {
 
 func contains(data []byte, substr string) bool {
 	return strings.Contains(string(data), substr)
+}
+
+func unusedTestPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
 }

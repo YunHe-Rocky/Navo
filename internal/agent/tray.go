@@ -40,9 +40,8 @@ func (a *Agent) handleConnectionEnable(requestID string) map[string]interface{} 
 		return runtimeStatus
 	}
 	runtimePayload, _ := runtimeStatus["payload"].(map[string]interface{})
-	mode, _ := runtimePayload["mode"].(string)
 	activeID, _ := runtimePayload["active_id"].(string)
-	if mode != "direct" && activeID == "" {
+	if activeID == "" {
 		return agentError(
 			requestID,
 			"ACTIVE_SELECTION_REQUIRED",

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"navo/internal/compiler"
+	"navo/internal/credential"
 )
 
 func TestAdd_EmptyName(t *testing.T) {
@@ -85,6 +88,48 @@ func TestRemove_Nonexistent(t *testing.T) {
 	ok, err := manager.Remove("nonexistent")
 	if err != nil || ok {
 		t.Fatalf("Remove() = %v, %v, want false, nil", ok, err)
+	}
+}
+
+func TestDetachAndRestoreRemovalPreservesExactSource(t *testing.T) {
+	identity := func(value []byte) ([]byte, error) { return append([]byte(nil), value...), nil }
+	manager, err := newManagerWithProtector(
+		filepath.Join(t.TempDir(), "subscriptions.json"),
+		credential.NewMemoryStore(),
+		identity,
+		identity,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := manager.Add("Rollback source", "https://example.com/subscription")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbound := compiler.Outbound{
+		ID: "rollback-node", Name: "Rollback node", ProviderID: sub.ID, Enabled: true,
+	}
+	if err := manager.AddOutbound(outbound); err != nil {
+		t.Fatal(err)
+	}
+
+	removal, found, err := manager.Detach(sub.ID)
+	if err != nil || !found {
+		t.Fatalf("Detach() found=%v err=%v", found, err)
+	}
+	if len(manager.List()) != 0 || len(manager.Outbounds()) != 0 {
+		t.Fatal("detached source remains visible")
+	}
+	if err := manager.RestoreRemoval(removal); err != nil {
+		t.Fatal(err)
+	}
+	restored := manager.List()
+	outs := manager.Outbounds()
+	if len(restored) != 1 || restored[0].ID != sub.ID || restored[0].URLCredentialRef != sub.URLCredentialRef {
+		t.Fatalf("restored subscription = %#v", restored)
+	}
+	if len(outs) != 1 || outs[0].ID != outbound.ID || outs[0].ProviderID != sub.ID {
+		t.Fatalf("restored outbounds = %#v", outs)
 	}
 }
 

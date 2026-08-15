@@ -24,13 +24,16 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"navo/internal/agent"
+	"navo/internal/agent/systemproxy"
 	"navo/internal/coreadapter"
 	"navo/internal/coremanifest"
+	"navo/internal/domain/capture"
 	"navo/internal/domain/core"
 	"navo/internal/fsatomic"
 	runtimeconfig "navo/internal/infrastructure/config"
@@ -47,7 +50,30 @@ var (
 	silent    = flag.Bool("silent", false, "start minimized to system tray")
 )
 
-const uiPipeName = "Navo.UI.Agent.v1"
+const (
+	uiPipeName            = "Navo.UI.Agent.v1"
+	serviceStartupTimeout = 45 * time.Second
+)
+
+func waitForServiceStartup(
+	ready <-chan struct{},
+	exited <-chan error,
+	timeout time.Duration,
+) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ready:
+		return nil
+	case err := <-exited:
+		if err == nil {
+			return fmt.Errorf("service exited before startup completed")
+		}
+		return fmt.Errorf("service startup failed: %w", err)
+	case <-timer.C:
+		return fmt.Errorf("service startup timed out after %s", timeout)
+	}
+}
 
 type managedProcess struct {
 	cmd  *exec.Cmd
@@ -68,6 +94,9 @@ func main() {
 	dataDir := localDataDir(executableDir)
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		fatal("create data directory: %v", err)
+	}
+	if err := fsatomic.RepairTree(dataDir); err != nil {
+		fatal("repair local profile access: %v", err)
 	}
 	initializationResult, err := initialization.Run(dataDir)
 	if err != nil || !initializationResult.Ready {
@@ -168,23 +197,38 @@ func main() {
 		serviceExit <- service.RunStandalone(svc)
 	}()
 
-	select {
-	case <-svc.Ready():
-		log.Printf("[navo] service ready")
-	case err := <-serviceExit:
-		fatal("service startup failed: %v", err)
-	case <-time.After(10 * time.Second):
-		fatal("service startup timed out")
+	if err := waitForServiceStartup(svc.Ready(), serviceExit, serviceStartupTimeout); err != nil {
+		fatal("%v", err)
 	}
+	log.Printf("[navo] service ready")
 
 	// Agent owns the user-scoped UI pipe and system proxy integration.
+	trayExit := make(chan struct{})
+	var requestTrayExit sync.Once
+	var trayRef atomic.Pointer[trayController]
 	ag, err := agent.New(agent.Config{
-		UIPipeName: uiPipeName,
-		ProxyPort:  singboxPort,
-		SendToServiceFn: func(msg map[string]interface{}) (map[string]interface{}, error) {
-			return svc.Dispatch(context.Background(), msg), nil
+		UIPipeName:         uiPipeName,
+		ProxyPort:          singboxPort,
+		ProxyManager:       systemproxy.NewManagerWithDirectory(filepath.Join(dataDir, "agent")),
+		CaptureJournalPath: filepath.Join(dataDir, "agent", "capture_transition.json"),
+		CaptureProbeFn: func(ctx context.Context, mode capture.Mode) error {
+			if mode != capture.ModeSystemProxy {
+				return nil
+			}
+			return systemproxy.ProbeDefaultProxy(ctx)
+		},
+		SendToServiceContextFn: func(ctx context.Context, msg map[string]interface{}) (map[string]interface{}, error) {
+			return svc.Dispatch(ctx, msg), nil
 		},
 		ShowUIFn: uiManager.Show,
+		MinimizeToTrayFn: func() error {
+			tray := trayRef.Load()
+			if tray == nil {
+				return fmt.Errorf("native tray is not ready")
+			}
+			return tray.EnsureVisible()
+		},
+		RequestExitFn: func() { requestTrayExit.Do(func() { close(trayExit) }) },
 	})
 	if err != nil {
 		fatal("create agent: %v", err)
@@ -211,8 +255,6 @@ func main() {
 	// Runs a tray icon in the launcher itself, independent of the desktop UI.
 	// Provides reliable left-click (show window) and right-click menu (show/exit).
 	iconPath := filepath.Join(executableDir, "app_ui", "tray_icon.ico")
-	trayExit := make(chan struct{})
-	var requestTrayExit sync.Once
 	trayBackend := newAgentTrayBackend(ag.Dispatch)
 	tray, trayErr := startTray(iconPath,
 		func() {
@@ -223,6 +265,9 @@ func main() {
 		func() { requestTrayExit.Do(func() { close(trayExit) }) }, // menu Exit -> trigger shutdown
 		trayBackend,
 	)
+	if trayErr == nil {
+		trayRef.Store(tray)
+	}
 	if trayErr != nil {
 		log.Printf("[navo] WARNING: tray icon failed: %v", trayErr)
 		if err := uiManager.Show(); err != nil {

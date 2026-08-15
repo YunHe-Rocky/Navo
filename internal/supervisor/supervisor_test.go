@@ -2,10 +2,15 @@ package supervisor
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"navo/internal/host"
+	"navo/internal/network"
 )
 
 // mockCoreHost is a minimal CoreHost for testing the supervisor state machine.
@@ -16,11 +21,13 @@ type mockCoreHost struct {
 	healthResult *host.HealthResult
 	lastForce    bool
 	startCtx     context.Context
+	startCalls   int
 }
 
 func (m *mockCoreHost) ID() string { return "mock" }
 
 func (m *mockCoreHost) Start(ctx context.Context, configPath string) (int, error) {
+	m.startCalls++
 	m.startCtx = ctx
 	if m.startErr != nil {
 		return 0, m.startErr
@@ -103,6 +110,31 @@ func TestSupervisor_Start(t *testing.T) {
 	status := s.Status()
 	if status.PID != 12345 {
 		t.Errorf("PID = %d, want 12345", status.PID)
+	}
+}
+
+func TestSupervisorStartFailsClosedWhenReconciliationFails(t *testing.T) {
+	mock := &mockCoreHost{}
+	reconciler := network.NewReconciler(nil, nil, nil)
+	statePath := filepath.Join(t.TempDir(), "recovery_state.json")
+	if err := os.WriteFile(statePath, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reconciler.SetStateFilePath(statePath)
+
+	s := NewSupervisor(mock, reconciler)
+	err := s.Start(context.Background(), "config.json")
+	if err == nil || !strings.Contains(err.Error(), "network reconciliation failed") {
+		t.Fatalf("unexpected reconciliation result: %v", err)
+	}
+	if mock.startCalls != 0 {
+		t.Fatalf("core started on dirty network state: calls=%d", mock.startCalls)
+	}
+	if s.State() != StateFailed {
+		t.Fatalf("supervisor state=%s, want %s", s.State(), StateFailed)
+	}
+	if status := s.Status(); status.LastError == "" {
+		t.Fatal("reconciliation failure was not retained")
 	}
 }
 
@@ -271,6 +303,21 @@ func TestSupervisor_Restart(t *testing.T) {
 	}
 }
 
+func TestRestartDoesNotStartWhenCoreCannotBeForceStopped(t *testing.T) {
+	mock := &mockCoreHost{stopErr: errors.New("process refuses to stop")}
+	s := NewSupervisor(mock, nil)
+	if err := s.Start(context.Background(), "config.json"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Restart(context.Background(), "config.json"); err == nil {
+		t.Fatal("Restart succeeded after graceful and force stop both failed")
+	}
+	if mock.startCalls != 1 {
+		t.Fatalf("restart launched a second core: starts=%d", mock.startCalls)
+	}
+}
+
 func TestSupervisor_StatusReflectsState(t *testing.T) {
 	mock := &mockCoreHost{}
 	s := NewSupervisor(mock, nil)
@@ -313,6 +360,22 @@ func TestSwapConfig_NotRunning(t *testing.T) {
 	err := s.SwapConfig(context.Background(), "config.json")
 	if err == nil {
 		t.Error("SwapConfig() expected error when not running")
+	}
+}
+
+func TestSwapConfigDoesNotStartReplacementWhenOldCoreCannotStop(t *testing.T) {
+	mock := &mockCoreHost{stopErr: errors.New("core process is still alive")}
+	s := NewSupervisor(mock, nil)
+	if err := s.Start(context.Background(), "config.json"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.SwapConfig(context.Background(), "new_config.json")
+	if err == nil {
+		t.Fatal("SwapConfig succeeded after the old core failed to stop")
+	}
+	if mock.startCalls != 1 {
+		t.Fatalf("replacement start count = %d, want 1 initial start only", mock.startCalls)
 	}
 }
 

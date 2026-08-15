@@ -7,6 +7,8 @@ export type Page =
   | "ip"
   | "settings";
 export type CaptureMode = "off" | "system_proxy" | "tun";
+export type RuntimeMode = "bypass_mainland" | "global" | "direct";
+export type RoutingListMode = "off" | "blacklist" | "whitelist";
 export type CaptureLifecycleState =
   | "stopped"
   | "starting_system_proxy"
@@ -73,7 +75,14 @@ export interface Dashboard {
   core: CoreStatus;
   cores: CoreOption[];
   proxy: { enabled: boolean; server: string; port: number };
-  runtime: { mode: string; active_id: string; tun_enabled: boolean };
+  runtime: {
+    mode: RuntimeMode;
+    list_mode: RoutingListMode;
+    active_id: string;
+    tun_enabled: boolean;
+    blacklist: string[];
+    whitelist: string[];
+  };
   tun: {
     installed: boolean;
     created: boolean;
@@ -108,6 +117,8 @@ export interface Dashboard {
 }
 
 export interface IPDetectionResult {
+  available?: boolean;
+  state?: "available" | "inactive" | "unavailable";
   ip: string;
   country: string;
   city: string;
@@ -261,6 +272,7 @@ export interface CoreUpdateStatus {
 	state: "checking" | "update_available" | "up_to_date" | "failed";
 	install_supported: boolean;
 	install_blocked_reason?: string;
+	asset_name?: string;
 }
 
 export interface CoreUpdateReport {

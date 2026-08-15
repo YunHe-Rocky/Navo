@@ -92,7 +92,23 @@ func (b *budgetStore) begin(event ErrorEvent, budget Budget) (attempt int, state
 		}
 		return record.Attempts, "opened", false, nil
 	}
+	// Keep the active window in memory so complete() cannot recreate a record
+	// with a zero WindowStart and silently reset the circuit on the next event.
+	b.records[key] = record
 	return record.Attempts + 1, "closed", true, nil
+}
+
+func (b *budgetStore) cancelHalfOpen(event ErrorEvent) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key, _ := eventKey(event)
+	record, ok := b.records[key]
+	if !ok || !record.HalfOpen {
+		return nil
+	}
+	record.HalfOpen = false
+	b.records[key] = record
+	return b.persistLocked()
 }
 
 func (b *budgetStore) complete(event ErrorEvent, budget Budget, success bool) (string, error) {
