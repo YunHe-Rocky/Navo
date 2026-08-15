@@ -1,763 +1,188 @@
 # Navo
 
-### AI 驱动的 Windows 智能网络出口管理器
-
-统一管理订阅节点、独立代理、多代理内核、系统代理与 TUN 网络接管。
-
-**Navo 不只是传统的订阅客户端，而是一个面向 Windows 的网络出口控制平台。**
-
-</div>
-
----
-
-## 项目简介
-
-Navo 是一款面向 Windows 平台开发的多内核代理管理工具。
-
-项目将代理来源、代理内核和网络接管模式进行分层管理，让用户能够在同一个桌面客户端中完成：
-
-- 订阅节点管理
-- 独立代理管理
-- sing-box、Mihomo、Xray 内核切换
-- Windows 系统代理接管
-- TUN 虚拟网卡接管
-- 入口 IP 与出口 IP 检测
-- 实时流量和网络质量监控
-- AI 辅助规则生成与网络诊断
-- 异常退出后的网络状态恢复
-
-Navo 的核心目标是：
-
-```text
-用户意图
-    ↓
-代理来源选择
-    ↓
-内核配置编译
-    ↓
-流量接管
-    ↓
-出口选择
-    ↓
-运行状态监控
-    ↓
-异常恢复与 AI 辅助诊断
-```
-
-> [!IMPORTANT]
-> Navo 当前仍处于持续开发和验证阶段。
->
-> 系统代理模式已经具备较完整的运行链路，TUN 模式仍在针对不同 Windows 网络环境进行兼容性验证。
-
----
-
-## 核心特性
-
-### 多代理内核
-
-Navo 保留三种代理内核，并采用运行时三选一的方式进行管理：
-
-| 内核 | 系统代理 | TUN 模式 | 说明 |
-|---|:---:|:---:|---|
-| sing-box | ✅ | ✅ | 默认数据面内核 |
-| Mihomo | ✅ | ✅ | 支持 Clash 生态配置 |
-| Xray | ✅ | 暂不支持 | 当前 TUN 模式会返回明确的不支持提示 |
-
-每个内核拥有独立的：
-
-- 配置编译器
-- 版本检测
-- 启动参数
-- 原生配置校验
-- 健康检查
-- 能力声明
-- 运行状态管理
-
-同一时间只允许运行一个代理内核，避免端口、路由、DNS 和虚拟网卡发生冲突。
-
----
-
-### 两种代理来源
-
-Navo 将代理来源划分为两类：
-
-#### 机场订阅
-
-用于导入和管理订阅节点。
-
-支持订阅下载、节点解析、标准化、去重、刷新和节点选择。
-
-#### 独立代理
-
-用于管理单独购买的代理服务，例如：
-
-- HTTP 代理
-- SOCKS5 代理
-- 静态住宅代理
-- 独享代理
-- 全链路代理
-
-机场订阅和独立代理在运行时二选一，避免多个代理来源同时控制出口。
-
----
-
-### 三种网络接管模式
-
-| 模式 | 说明 |
-|---|---|
-| 不托管 | 停止代理内核，不修改 Windows 系统网络设置 |
-| 系统代理 | 设置当前用户的 WinINet 系统代理 |
-| TUN 模式 | 使用虚拟网卡接管系统网络流量 |
-
-#### 系统代理模式
-
-适用于：
-
-- 浏览器
-- 支持 Windows 系统代理的软件
-- 常规 HTTP 和 HTTPS 流量
-
-Navo 不会仅根据进程启动状态判断连接成功。
-
-系统代理启用前会进行真实的代理出口请求，只有数据链路验证通过后，才会写入 Windows 系统代理设置。
-
-#### TUN 模式
-
-适用于：
-
-- 不支持系统代理的软件
-- 需要接管 UDP 流量的应用
-- 需要全局网络接管的场景
-- 需要应用或域名分流的场景
-
-TUN 模式涉及：
-
-- Wintun 虚拟网卡
-- Windows 路由表
-- DNS 配置
-- 防火墙规则
-- IPv4 和 IPv6 策略
-- DNS 防泄漏
-- 崩溃恢复日志
-
----
-
-## 网络安全与恢复
-
-Navo 会修改 Windows 系统代理、路由、DNS 和虚拟网卡状态，因此项目重点设计了网络事务和恢复机制。
-
-### 事务化模式切换
-
-模式切换不是简单地停止一个内核再启动另一个内核。
-
-完整流程包括：
-
-1. 锁定当前模式切换事务
-2. 保存当前网络状态
-3. 停止旧的流量接管
-4. 清理旧路由、DNS 和系统代理
-5. 编译目标内核配置
-6. 执行内核原生配置校验
-7. 启动代理内核
-8. 检查本地监听端口
-9. 执行真实出口连接检测
-10. 应用新的系统代理或 TUN 状态
-11. 失败时自动回滚
-
-### Network Journal
-
-Navo 使用网络操作日志记录路由、DNS、防火墙和虚拟网卡变更。
-
-每一项网络操作都会记录对应的撤销动作。
-
-发生以下情况时，Navo 可以根据日志执行恢复：
-
-- 程序崩溃
-- 代理内核异常退出
-- Windows 强制关机
-- 模式切换失败
-- TUN 虚拟网卡异常
-- 路由或 DNS 配置残留
-
-### 虚拟网卡保护
-
-- 只在 TUN 模式下创建和使用虚拟网卡
-- 不依赖用户可修改的网卡显示名称识别设备
-- 监控虚拟网卡是否被禁用或删除
-- 网卡异常时停止代理内核
-- 再次启动时重新检查并恢复运行环境
-- 离开 TUN 模式时清理 Navo 创建的网络状态
-
-### 网络修复工具
-
-项目包含独立的：
-
-```text
-repair.exe
-```
-
-建议先执行只读检查：
-
-```powershell
-.\repair.exe check
-```
-
-确认问题后，再使用对应的修复操作。
-
-不要在不了解影响的情况下直接修改系统路由或 DNS。
-
----
-
-## AI 辅助能力
-
-Navo 支持兼容 OpenAI API 格式的 AI 服务。
-
-AI 功能不会直接替代代理内核，而是作为网络控制面的辅助能力。
-
-目前主要用于：
-
-- 自然语言生成分流规则
-- 网络异常诊断
-- 配置和规则解释
-- 节点选择建议
-- 错误日志分析
-- 网络状态说明
-
-AI 服务地址、模型和密钥由用户自行配置。
-
-未配置 AI 服务时，不影响基础代理功能运行。
-
----
-
-## IP 与流量监控
-
-Navo 提供网络出口和运行状态监控能力，包括：
-
-- 当前入口 IP
-- 当前出口 IP
-- IP 国家或地区
-- 当前代理内核
-- 当前代理来源
-- 当前接管模式
-- 当前上传速度
-- 当前下载速度
-- 节点延迟
-- DNS 探测
-- TCP 探测
-- HTTPS 探测
-- 规则命中统计
-- 网络错误日志
-
-Dashboard 使用本地运行状态快照，不需要持续高频访问外部接口。
-
----
-
-## 桌面与托盘
-
-Navo 使用 Windows 原生托盘与 Wails 桌面界面组合。
-
-托盘负责提供可靠的后台控制能力，即使桌面界面关闭，代理运行状态也可以继续保持。
-
-托盘计划提供以下分级控制：
-
-- 开启或关闭连接
-- 选择机场订阅或独立代理
-- 选择代理节点
-- 选择 sing-box、Mihomo 或 Xray
-- 选择系统代理或 TUN
-- 选择全局、规则或直连策略
-- 打开主界面
-- 完全退出 Navo
-
-程序还具有单实例保护。
-
-重复启动 Navo 时，不会再启动一套代理服务，而是尝试唤醒已有窗口。
-
----
-
-## 技术栈
-
-| 模块 | 技术 |
-|---|---|
-| 控制面 | Go 1.26 |
-| 桌面框架 | Wails v2 |
-| 前端框架 | Vue 3 |
-| 前端语言 | TypeScript |
-| 构建工具 | Vite |
-| 数据面 | sing-box、Mihomo、Xray |
-| 系统代理 | Windows WinINet |
-| TUN | Wintun |
-| 系统集成 | Win32 API、PowerShell |
-| 本地通信 | Windows Named Pipe |
-| 凭据保护 | Windows DPAPI |
-| 云端数据 | MySQL，可选 |
-| AI | OpenAI 兼容 API |
-| 配置格式 | JSON、YAML |
-| 发布脚本 | PowerShell |
-
----
-
-## 架构概览
-
-```text
-┌─────────────────────────────────────────────┐
-│                  navo.exe                   │
-│                                             │
-│  ┌────────────────┐   ┌─────────────────┐  │
-│  │ User Agent     │   │ Service         │  │
-│  │                │   │                 │  │
-│  │ 系统代理       │──▶│ 配置编译        │  │
-│  │ UI 通信        │   │ 状态机          │  │
-│  │ 托盘控制       │   │ 网络事务        │  │
-│  └───────┬────────┘   └────────┬────────┘  │
-│          │                     │            │
-└──────────┼─────────────────────┼────────────┘
-           │                     │
-   Windows Named Pipe            │
-           │                     ▼
-┌──────────▼─────────┐   ┌───────────────────┐
-│ navo_app.exe       │   │ Proxy Core        │
-│                    │   │                   │
-│ Wails + Vue 3      │   │ sing-box          │
-│ TypeScript + Vite  │   │ Mihomo            │
-│ WebView2           │   │ Xray              │
-└────────────────────┘   └───────────────────┘
-```
-
-Navo 的正式发布入口为：
-
-```text
-navo.exe
-```
-
-桌面界面作为独立的 Wails 子进程运行：
-
-```text
-app_ui/navo_app.exe
-```
-
-代理内核同样作为受控子进程运行。
-
-Windows Job Object 用于管理子进程生命周期，降低主程序异常退出后遗留代理内核或 WebView2 进程的风险。
-
----
-
-## 项目结构
-
-```text
-Navo/
-├── cmd/
-│   ├── navo/                 # 正式桌面启动器
-│   ├── navo-agent/           # 独立 Agent 调试入口
-│   ├── navo-svc/             # 独立 Service 调试入口
-│   └── repair/               # 网络修复工具
-│
-├── internal/
-│   ├── agent/                # 用户会话与系统代理
-│   ├── ai/                   # AI 规则、诊断和解释
-│   ├── compiler/             # 代理内核配置编译
-│   ├── coreadapter/          # 三内核适配器
-│   ├── domain/               # 领域模型
-│   ├── health/               # 内核健康检查
-│   ├── infrastructure/       # MySQL 和运行配置
-│   ├── ipdetect/             # IP 检测
-│   ├── monitor/              # 网络质量和流量监控
-│   ├── network/              # TUN、路由和 DNS
-│   ├── pipe/                 # Windows Named Pipe
-│   ├── recovery/             # 崩溃恢复
-│   ├── securestore/          # DPAPI 凭据保护
-│   ├── service/              # 服务编排
-│   ├── subscription/         # 订阅管理和协议解析
-│   └── supervisor/           # 内核运行状态机
-│
-├── navo_app/                 # Wails + Vue 桌面界面
-├── third_party/              # 三个代理内核及运行依赖
-├── configs/                  # 测试配置
-├── docs/                     # 设计、部署和测试文档
-├── scripts/                  # 构建、测试和发布脚本
-├── CORE_MANIFEST.json        # 内核版本和哈希清单
-├── .env.example              # 环境变量示例
-├── go.mod
-└── progress.md
-```
-
----
+Navo 是面向 Windows 10/11 x64 的本地代理与网络接管桌面应用。Go 负责控制面与恢复逻辑，Wails v2 + Vue 3 提供桌面 UI，可在 sing-box、Mihomo、Xray 三种内核之间切换。
+
+根目录 VERSION 是正式版本号的唯一来源。项目不依赖云端数据库，不包含 AI 服务，订阅和凭据均保存在本机。
+
+## 核心能力
+
+- 订阅与独立代理：订阅拉取、节点解析、测速、选择和运行时应用。
+- 多内核：切换前执行能力检查和配置验证。
+- 网络接管：支持 off、System Proxy、TUN；Xray 当前明确不支持 TUN。
+- 路由策略：支持绕过大陆、全局代理、全局直连与黑白名单。
+- 生命周期保护：模式切换使用事务状态机，失败时回滚并保留 Network Journal。
+- 本地安全：敏感数据使用 Windows DPAPI Current User，拒绝明文降级。
+- 故障恢复：repair.exe 提供只读检查与显式修复，不默认覆盖用户原有网络配置。
+- 桌面体验：原生托盘负责可靠唤醒和退出，Wails UI 展示状态、订阅、路由与诊断。
+
+## 架构
+
+~~~
+navo.exe（管理员进程）
+├── Service：订阅、编译、内核 Supervisor、SelfHeal
+├── Agent：用户会话、System Proxy、TUN、Named Pipe IPC
+├── Native Tray
+└── app_ui/navo_app.exe：Wails v2 + Vue 3
+
+Service / Agent / UI
+        ├── Navo.Service.v1
+        ├── Navo.Agent.v1
+        └── Navo.UI.Agent.v1
+                └── sing-box / Mihomo / Xray + Wintun
+~~~
+
+关键目录：
+
+- cmd/navo：正式桌面 launcher。
+- cmd/repair：网络检查与恢复工具。
+- internal/service：控制面和运行时编排。
+- internal/agent：用户会话、模式切换和系统网络操作。
+- internal/compiler：三内核配置编译。
+- internal/subscription：订阅获取、解析与 SSRF 防护。
+- internal/network：TUN、DNS、Route、Journal 和 rollback。
+- navo_app：Wails v2 + Vue 3 桌面应用。
+- scripts：测试、package、verify、smoke 和 Windows 验收脚本。
+- third_party：代理内核、Wintun 及许可证。
 
 ## 环境要求
 
-### 运行环境
+运行环境：
 
-- Windows 10 或 Windows 11
-- 64 位操作系统
-- Microsoft Edge WebView2 Runtime
-- TUN 模式需要管理员权限
-- 允许 Navo 和代理内核通过 Windows 防火墙
+- Windows 10 22H2 或 Windows 11 x64。
+- Microsoft Edge WebView2 Runtime。
+- 启动 navo.exe 时批准 UAC；拒绝后不会进入半连接状态。
 
-### 开发环境
+开发环境：
 
-- Go 1.26.4 或兼容版本
-- Node.js 与 npm
-- PowerShell
-- Microsoft Edge WebView2 Runtime
-- `go-winres` v0.3.3
-- sing-box
-- Mihomo
-- Xray
+- Go 版本与 go.mod 一致。
+- Node.js 20+ 与 npm。
+- PowerShell 5.1+。
+- Visual Studio Build Tools，包含“使用 C++ 的桌面开发”。
+- go-winres v0.3.3，仅正式打包需要。
 
-安装 `go-winres`：
+## 第三方内核
 
-```powershell
-go install github.com/tc-hib/go-winres@v0.3.3
-```
+构建脚本不会联网下载内核。必须从官方 Release 准备：
 
----
-
-## 获取源码
-
-```powershell
-git clone https://github.com/YunHe-Rocky/Navo.git
-cd Navo
-```
-
-下载 Go 依赖：
-
-```powershell
-go mod download
-```
-
----
-
-## 准备代理内核
-
-完整发布构建需要以下文件：
-
-```text
+~~~
 third_party/
-├── sing-box/
-│   └── sing-box.exe
-├── mihomo/
-│   └── mihomo.exe
-└── xray/
-    └── xray.exe
-```
+├── sing-box/sing-box.exe
+├── mihomo/mihomo.exe
+├── xray/xray.exe
+└── wintun/wintun.dll
+~~~
 
-内核版本和 SHA-256 必须与以下文件中的声明一致：
+CORE_MANIFEST.json 固定已接受的版本和 SHA-256。发布前必须核对官方校验值、文件 hash 与许可证，来源和许可证见 THIRD_PARTY_NOTICES.md。
 
-```text
-CORE_MANIFEST.json
-```
+## 开发与验证
 
-如果内核版本或哈希不一致，Navo 会拒绝启动，防止运行未知或被替换的核心文件。
+Go：
 
----
-
-## 构建项目
-
-使用项目提供的 PowerShell 构建脚本：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
-```
-
-构建脚本会完成：
-
-1. 编译 `navo.exe`
-2. 编译 `repair.exe`
-3. 安装前端依赖
-4. 执行 Vue TypeScript 检查
-5. 执行 Vite 生产构建
-6. 构建 Wails 桌面程序
-7. 复制三种代理内核
-8. 复制配置示例和部署文档
-9. 生成 SHA-256 文件清单
-
-默认输出目录：
-
-```text
-release/Navo/
-```
-
-启动程序：
-
-```powershell
-.\release\Navo\navo.exe
-```
-
-Windows 会显示 UAC 提权窗口，这是因为当前完整版本需要管理 TUN、路由、DNS 和代理内核。
-
----
-
-## 运行测试
-
-执行完整测试：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
-```
-
-也可以单独执行 Go 测试：
-
-```powershell
+~~~powershell
+go mod verify
 go test ./...
 go vet ./...
-```
+~~~
 
-前端检查：
+前端：
 
-```powershell
-cd navo_app
-npm.cmd ci
-npm.cmd run typecheck
-npm.cmd run build
-```
+~~~powershell
+Set-Location .\navo_app
+npm ci
+npm test
+npm run typecheck
+npm run build
+Set-Location ..
+~~~
 
-测试通过不仅要求配置能够生成，还需要验证：
+Go 本地门禁：
 
-- 内核原生配置校验
-- 内核进程启动
-- 本地端口监听
-- HTTP 数据面请求
-- 系统代理写入与恢复
-- 模式切换
-- 三内核切换
-- 程序正常退出
-- 无残留代理进程
-- 无残留网络状态
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
+~~~
 
----
+CI 额外执行 50% Go 总覆盖率回归线、Linux race detector、govulncheck、npm high 级别依赖审计和 PowerShell parser。覆盖率不等于真实 Windows 网络验收。
 
-## 配置文件
+## 发布
 
-发布版本从以下位置读取配置：
+Navo 只交付绿色目录和 ZIP，不以 MSI/Setup 作为当前发布物：
 
-```text
-%LOCALAPPDATA%\Navo\.env
-```
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
+~~~
 
-首先复制示例配置：
+默认输出：
 
-```powershell
-Copy-Item .\release\Navo\.env.example "$env:LOCALAPPDATA\Navo\.env"
-```
+~~~
+release/Navo-<VERSION>-portable-amd64/
+release/Navo-<VERSION>-portable-amd64.zip
+~~~
 
-### MySQL
+打包入口先执行 Go 与前端门禁，再完成：
 
-MySQL 默认关闭：
+- 从 VERSION 注入 diagnostics、Go build metadata 和三个 PE 版本。
+- 核对 CORE_MANIFEST.json 与三内核/Wintun hash。
+- 要求第三方组件携带许可证。
+- 生成 SHA256SUMS.txt。
+- 拒绝 manifest 之外的额外文件。
+- 逐文件校验 ZIP 与绿色目录的长度和 SHA-256。
 
-```env
-NAVO_MYSQL_ENABLED=false
-NAVO_MYSQL_REQUIRED=false
-```
+单独复验：
 
-启用后可以配置：
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-package.ps1 -PackageRoot .\release\Navo-<VERSION>-portable-amd64 -ArchivePath .\release\Navo-<VERSION>-portable-amd64.zip -ExpectedVersion <VERSION>
+~~~
 
-```env
-NAVO_MYSQL_HOST=mysql.example.com
-NAVO_MYSQL_PORT=3306
-NAVO_MYSQL_DATABASE=navo
-NAVO_MYSQL_USER=navo_app
-NAVO_MYSQL_PASSWORD=
-NAVO_MYSQL_TLS_MODE=verify_identity
-```
+RequireSignature 用于已具备代码签名证书的正式环境。未签名构建不能宣称通过 Authenticode。
 
-MySQL 不可用时：
+## 数据、日志与隐私
 
-- `NAVO_MYSQL_REQUIRED=false`：使用本地 LastKnownGood 状态继续运行
-- `NAVO_MYSQL_REQUIRED=true`：启动失败，不进行明文或不安全降级
+- 主数据目录：%LOCALAPPDATA%\Navo。
+- launcher 日志：优先写 package\log\navo.log；目录不可写时回退到 %LOCALAPPDATA%\Navo\log\navo.log。
+- 状态采用同目录临时文件、flush 和原子替换。
+- 订阅 URL、代理凭据和运行配置不得写入仓库、CI 日志或公开 artifacts。
+- artifacts\ 已忽略；历史诊断产物应在确认留存需求后单独脱敏或清理。
+- 从 UI 或托盘正常退出，不终止用户拥有的其他代理进程。
 
-### AI
+## 发布验收边界
 
-```env
-NAVO_AI_BASE_URL=
-NAVO_AI_API_KEY=
-NAVO_AI_MODEL=
-```
+单元测试、build、监听端口或 UI 状态均不代表端到端网络可用。正式发布还要在独立、可回滚的管理员 Windows 环境验证：
 
-不要将真实 API Key、数据库密码、代理密码或订阅地址提交到 GitHub。
+1. System Proxy 和 TUN 启用、禁用、切换与重复循环。
+2. DNS、TCP、HTTPS 和真实出口 IP。
+3. Google、GitHub、ChatGPT/Codex 的认证、静态资源与流式连接。
+4. 三种路由模式与黑白名单语义。
+5. 内核崩溃、自愈、应用异常退出与网络回滚。
+6. 睡眠唤醒、物理重启和旧版本升级。
+7. 实际进程 path、hash、VERSION 与 PE metadata。
+8. Authenticode 和最终 ZIP SHA-256。
 
----
-
-## 数据与日志
-
-默认数据目录：
-
-```text
-%LOCALAPPDATA%\Navo\
-```
-
-默认日志：
-
-```text
-%LOCALAPPDATA%\Navo\log\navo.log
-```
-
-运行状态、网络恢复日志和本地 LastKnownGood 数据也会保存在 Navo 数据目录中。
-
----
-
-## 安全设计
-
-Navo 包含以下安全措施：
-
-- 订阅仅允许 HTTPS 下载
-- 阻止访问 localhost 和内网地址，降低 SSRF 风险
-- 限制订阅响应大小和重定向次数
-- 代理凭据使用 Windows DPAPI 保护
-- Named Pipe 限制为当前用户、管理员和 SYSTEM
-- MySQL 支持 TLS 身份验证
-- 不允许数据库 TLS 失败后自动降级为明文
-- 三个代理内核进行版本和 SHA-256 校验
-- 网络操作支持日志、回滚和崩溃恢复
-- 发布包不会包含开发环境中的真实 `.env`
-
----
-
-## 当前开发重点
-
-- [x] Wails + Vue 桌面界面
-- [x] sing-box、Mihomo、Xray 三内核适配
-- [x] 系统代理真实数据面验证
-- [x] 内核切换和状态恢复
-- [x] Windows 原生托盘
-- [x] 可选 MySQL 状态存储
-- [x] AI 配置、规则和诊断接口
-- [x] 独立网络修复工具
-- [x] 内核版本与哈希验证
-- [x] 打包脚本和 SHA-256 清单
-- [ ] 完成更多真实 Windows 环境下的 TUN 验收
-- [ ] 完善虚拟网卡禁用和删除后的自动恢复
-- [ ] 完善模式切换期间的零丢包处理
-- [ ] 完善节点质量与 IP 纯净度展示
-- [ ] 完善流量折线图和历史统计
-- [ ] 发布稳定安装包
-- [ ] Android 客户端与云端同步
-
----
+未完成的外部验收必须标为 pending，不能由本地测试替代。
 
 ## 常见问题
 
-### 为什么启动时需要管理员权限？
+### 为什么需要管理员权限？
 
-Navo 的完整版本需要管理：
+TUN、Route、DNS 和故障恢复涉及系统级网络状态。当前 launcher 在同一管理员进程内托管控制面，因此启动时需要 UAC。
 
-- TUN 虚拟网卡
-- Windows 路由
-- DNS
-- 防火墙规则
-- 代理内核进程
+### 为什么 Xray 不能启用 TUN？
 
-因此发布版本会请求管理员权限。
+当前 Xray adapter 未实现并验证 TUN。系统会显式拒绝该组合，避免生成表面成功但数据面不可用的配置。
 
-### 为什么提示缺少 WebView2？
+### UI 无法启动怎么办？
 
-Wails 桌面界面依赖 Microsoft Edge WebView2 Runtime。
+确认 app_ui\navo_app.exe 存在，并安装或修复 WebView2 Runtime。不要绕过 navo.exe 单独启动 UI。
 
-请安装或修复 WebView2 Runtime 后重新启动 Navo。
+### 退出后无法联网怎么办？
 
-### 为什么切换到 Xray 后无法启用 TUN？
+先以管理员身份执行只读检查：
 
-当前 Xray 适配器暂不提供 TUN 模式。
-
-可以使用：
-
-- Xray + 系统代理
-- sing-box + TUN
-- Mihomo + TUN
-
-Navo 会明确返回不支持错误，不会生成一个看似成功但实际无法工作的 Xray TUN 配置。
-
-### 为什么程序显示启动成功，但网络仍不可用？
-
-请查看：
-
-```text
-%LOCALAPPDATA%\Navo\log\navo.log
-```
-
-重点检查：
-
-- 代理节点是否有效
-- 当前核心是否支持所选协议
-- 本地端口是否被占用
-- Windows 防火墙是否拦截
-- DNS 是否正常
-- TUN 是否获得管理员权限
-- 内核文件哈希是否正确
-- 上游代理用户名和密码是否正确
-
-### 程序异常退出后网络不正常怎么办？
-
-首先执行：
-
-```powershell
+~~~powershell
 .\repair.exe check
-```
+~~~
 
-根据检查结果再执行修复操作。
+确认问题后再选择具体修复，避免覆盖原有代理、DNS 或 Route。
 
-不要直接删除未知路由、虚拟网卡或 DNS 配置。
+## 许可证
 
----
-
-## 参与贡献
-
-欢迎通过 Issue 和 Pull Request 参与项目。
-
-提交前请确保：
-
-- 不包含订阅地址、密码、Token 或 API Key
-- `go test ./...` 通过
-- `go vet ./...` 通过
-- Vue 类型检查通过
-- Vite 生产构建通过
-- 不破坏系统代理和 TUN 状态恢复
-- 新增内核功能时补充真实数据面测试
-- 涉及 Windows 网络状态时提供回滚逻辑
-
-建议使用清晰的提交信息：
-
-```text
-feat: add ...
-fix: resolve ...
-refactor: improve ...
-test: add ...
-docs: update ...
-```
-
----
-
-## 开源许可证
-
-当前仓库尚未提供 `LICENSE` 文件。
-
-在正式添加开源许可证之前，项目代码默认保留全部权利，不代表允许任意复制、修改、重新发布或商业使用。
-
----
-
-## 免责声明
-
-Navo 仅用于合法的网络管理、软件开发、技术研究和个人网络环境配置。
-
-使用者应遵守所在国家或地区的法律法规，以及网络服务提供商和相关平台的使用条款。
-
-本项目不提供：
-
-- 代理节点
-- 机场订阅
-- 静态住宅 IP
-- 网络访问账号
-- 第三方服务凭据
-
-因代理服务质量、错误配置、网络环境变化、第三方内核、节点安全问题或不当使用造成的损失，由使用者自行承担。
-
----
-
-<div align="center">
-
-**Navo**
-
-让代理来源、网络出口、运行模式和系统状态更加清晰、可控、可恢复。
-
-</div>
-
-把这段保存为仓库根目录的 `README.md` 即可。当前仓库里还没有 `README.md` 和 `LICENSE`，所以不会覆盖已有文件。
+仓库当前未声明统一的项目开源许可证。第三方组件仍受各自许可证约束，详见 THIRD_PARTY_NOTICES.md；未获得明确授权前，不应将 Navo 源码视为可自由再分发。

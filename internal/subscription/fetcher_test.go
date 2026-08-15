@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+type staticIPResolver []net.IPAddr
+
+func (r staticIPResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	return append([]net.IPAddr(nil), r...), nil
+}
+
 func TestWithoutRequestURLRemovesSubscriptionSecret(t *testing.T) {
 	const secret = "credential-token"
 	err := withoutRequestURL(&url.Error{
@@ -195,4 +201,60 @@ func TestForbiddenIPIncludesRebindingAndReservedRanges(t *testing.T) {
 
 func parseIP(s string) net.IP {
 	return net.ParseIP(s)
+}
+
+func TestValidatedDialerFallsBackAcrossPublicAddresses(t *testing.T) {
+	resolver := staticIPResolver{
+		{IP: net.ParseIP("1.1.1.1")},
+		{IP: net.ParseIP("8.8.8.8")},
+	}
+	var attempts []string
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	dial := newValidatedDialer(resolver, func(
+		_ context.Context,
+		_, address string,
+	) (net.Conn, error) {
+		attempts = append(attempts, address)
+		if len(attempts) == 1 {
+			return nil, errors.New("first address unavailable")
+		}
+		return client, nil
+	})
+	connection, err := dial(context.Background(), "tcp", "subscription.example:443")
+	if err != nil {
+		t.Fatalf("dial fallback: %v", err)
+	}
+	if connection != client {
+		t.Fatal("dial fallback returned an unexpected connection")
+	}
+	if got, want := strings.Join(attempts, ","), "1.1.1.1:443,8.8.8.8:443"; got != want {
+		t.Fatalf("attempts = %q, want %q", got, want)
+	}
+}
+
+func TestValidatedDialerRejectsMixedForbiddenAnswersBeforeDial(t *testing.T) {
+	resolver := staticIPResolver{
+		{IP: net.ParseIP("1.1.1.1")},
+		{IP: net.ParseIP("127.0.0.1")},
+	}
+	dialCalled := false
+	dial := newValidatedDialer(resolver, func(
+		context.Context,
+		string,
+		string,
+	) (net.Conn, error) {
+		dialCalled = true
+		return nil, errors.New("must not dial")
+	})
+	if _, err := dial(context.Background(), "tcp", "subscription.example:443"); err == nil {
+		t.Fatal("mixed forbidden DNS answers were accepted")
+	}
+	if dialCalled {
+		t.Fatal("dial was attempted before all DNS answers passed SSRF validation")
+	}
 }

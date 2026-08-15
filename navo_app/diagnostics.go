@@ -25,13 +25,16 @@ import (
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"navo/internal/buildinfo"
 )
 
 const (
-	diagnosticsAppVersion = "1.0.0"
-	downloadSampleBytes   = 4 * 1024 * 1024
-	uploadSampleBytes     = 1024 * 1024
+	downloadSampleBytes = 4 * 1024 * 1024
+	uploadSampleBytes   = 1024 * 1024
 )
+
+var diagnosticsAppVersion = buildinfo.NormalizedVersion()
 
 type HostStatus struct {
 	OS                 string  `json:"os"`

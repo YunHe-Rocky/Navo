@@ -9,30 +9,92 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  windows-verify:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26
           cache: npm
           cache-dependency-path: navo_app/package-lock.json
-      - name: Go tests
-        run: go test ./...
+
+      - name: Verify Go modules
+        run: go mod verify
+
+      - name: Parse PowerShell release scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($script in @('scripts/package.ps1', 'scripts/verify-package.ps1', 'scripts/smoke.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$script`: $($_.Message)" }
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Go tests and coverage gate
+        shell: pwsh
+        run: |
+          $coverageProfile = Join-Path $env:RUNNER_TEMP 'navo-coverage.out'
+          go test ./... -coverprofile $coverageProfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $totalLine = go tool cover -func $coverageProfile | Select-Object -Last 1
+          if ($totalLine -notmatch '([0-9]+(?:\.[0-9]+)?)%$') {
+            throw "Unable to parse total coverage: $totalLine"
+          }
+          $coverage = [double]$Matches[1]
+          if ($coverage -lt 50.0) {
+            throw "Total Go coverage $coverage% is below the 50% regression floor"
+          }
+
       - name: Go vet
         run: go vet ./...
+
       - name: Frontend dependencies
         working-directory: navo_app
         run: npm ci
+
+      - name: Frontend dependency audit
+        working-directory: navo_app
+        run: npm audit --audit-level=high
+
       - name: Frontend tests
         working-directory: navo_app
         run: npm test
+
       - name: Frontend typecheck and build
         working-directory: navo_app
         run: npm run typecheck && npm run build
+
+  linux-race-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify Go modules
+        run: go mod verify
+
+      - name: Race detector
+        run: go test -race ./...
+
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...

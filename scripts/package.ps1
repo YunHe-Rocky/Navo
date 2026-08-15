@@ -1,19 +1,43 @@
 param(
     [ValidateSet("amd64")]
     [string]$Architecture = "amd64",
-    [ValidatePattern("^Navo(?:-[A-Za-z0-9._-]+)?$")]
-    [string]$OutputName = "Navo"
+    [string]$OutputName = "",
+    [switch]$AllowCustomOutputName
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$VersionPath = Join-Path $ProjectRoot "VERSION"
+if (-not (Test-Path -LiteralPath $VersionPath -PathType Leaf)) {
+    throw "VERSION file is missing: $VersionPath"
+}
+$Version = (Get-Content -LiteralPath $VersionPath -Raw).Trim()
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "VERSION must use MAJOR.MINOR.PATCH: $Version"
+}
+
+$DefaultOutputName = "Navo-$Version-portable-$Architecture"
+if ([string]::IsNullOrWhiteSpace($OutputName)) {
+    $OutputName = $DefaultOutputName
+}
+elseif (-not $AllowCustomOutputName -and $OutputName -ne $DefaultOutputName) {
+    throw "Custom OutputName requires -AllowCustomOutputName; expected $DefaultOutputName"
+}
+if ($OutputName -notmatch '^Navo(?:-[A-Za-z0-9._-]+)?$') {
+    throw "Invalid OutputName: $OutputName"
+}
+
 $ReleaseParent = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot "release"))
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseParent $OutputName))
+$ArchivePath = Join-Path $ReleaseParent "$OutputName.zip"
 $UIRoot = Join-Path $ProjectRoot "navo_app"
 $UICache = Join-Path $ProjectRoot ".cache\npm"
 $ToolsRoot = Join-Path $ProjectRoot ".cache\tools"
 $BuildTemp = Join-Path $ProjectRoot ".cache\tmp"
 $Wails = Join-Path $ToolsRoot "wails.exe"
+$PackageVerifier = Join-Path $ProjectRoot "scripts\verify-package.ps1"
+$ReleaseLDFlags = "-s -w -X navo/internal/buildinfo.Version=$Version"
+$LauncherLDFlags = "$ReleaseLDFlags -H windowsgui"
 $GoWinResCommand = Get-Command go-winres.exe -ErrorAction SilentlyContinue
 $GoWinRes = if ($null -ne $GoWinResCommand) {
     $GoWinResCommand.Source
@@ -23,6 +47,51 @@ else {
 }
 if (-not (Test-Path -LiteralPath $GoWinRes -PathType Leaf)) {
     throw "go-winres v0.3.3 is required; install it with: go install github.com/tc-hib/go-winres@v0.3.3"
+
+}
+function Set-NavoPEMetadata {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+        [Parameter(Mandatory = $true)]
+        [string]$OriginalFilename
+    )
+
+    $PEVersion = "$Version.0"
+    $ResourceConfig = [ordered]@{
+        RT_VERSION = [ordered]@{
+            "#1" = [ordered]@{
+                "0000" = [ordered]@{
+                    fixed = [ordered]@{
+                        file_version = $PEVersion
+                        product_version = $PEVersion
+                    }
+                    info = [ordered]@{
+                        "0409" = [ordered]@{
+                            FileDescription = $Description
+                            FileVersion = $PEVersion
+                            ProductVersion = $PEVersion
+                            ProductName = "Navo"
+                            CompanyName = "Navo"
+                            LegalCopyright = "Copyright (C) 2026"
+                            OriginalFilename = $OriginalFilename
+                            InternalName = [System.IO.Path]::GetFileNameWithoutExtension($OriginalFilename)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    $ConfigPath = Join-Path $BuildTemp "resource-$OriginalFilename.json"
+    $JSON = $ResourceConfig | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($ConfigPath, $JSON, [System.Text.UTF8Encoding]::new($false))
+    & $GoWinRes patch --no-backup --in $ConfigPath `
+        --file-version $PEVersion --product-version $PEVersion $Path
+    if ($LASTEXITCODE -ne 0) {
+        throw "PE metadata patch failed for $Path with exit code $LASTEXITCODE"
+    }
 }
 
 if (-not $ReleaseRoot.StartsWith($ReleaseParent, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -43,8 +112,12 @@ $WailsSource = Join-Path $env:GOMODCACHE "github.com\wailsapp\wails\v2@v2.12.0"
 
 $RequiredThirdPartyFiles = @(
     (Join-Path $ProjectRoot "third_party\sing-box\sing-box.exe"),
+    (Join-Path $ProjectRoot "third_party\sing-box\LICENSE"),
     (Join-Path $ProjectRoot "third_party\mihomo\mihomo.exe"),
-    (Join-Path $ProjectRoot "third_party\xray\xray.exe")
+    (Join-Path $ProjectRoot "third_party\mihomo\LICENSE"),
+    (Join-Path $ProjectRoot "third_party\xray\xray.exe"),
+    (Join-Path $ProjectRoot "third_party\xray\LICENSE"),
+    (Join-Path $ProjectRoot "third_party\wintun\LICENSE.txt")
 )
 foreach ($RequiredFile in $RequiredThirdPartyFiles) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
@@ -94,6 +167,9 @@ finally {
 if (Test-Path -LiteralPath $ReleaseRoot) {
     Remove-Item -LiteralPath $ReleaseRoot -Recurse -Force
 }
+if (Test-Path -LiteralPath $ArchivePath) {
+    Remove-Item -LiteralPath $ArchivePath -Force
+}
 New-Item -ItemType Directory -Force $ReleaseRoot | Out-Null
 
 if (-not (Test-Path -LiteralPath $WailsSource -PathType Container)) {
@@ -114,7 +190,7 @@ if (-not (Test-Path -LiteralPath $Wails -PathType Leaf)) {
 
 Push-Location $ProjectRoot
 try {
-    & $Go build -trimpath -ldflags "-s -w -H windowsgui" `
+    & $Go build -trimpath -ldflags $LauncherLDFlags `
         -o (Join-Path $ReleaseRoot "navo.exe") ./cmd/navo
     if ($LASTEXITCODE -ne 0) {
         throw "Navo launcher build failed with exit code $LASTEXITCODE"
@@ -126,11 +202,19 @@ try {
         throw "Navo launcher manifest patch failed with exit code $LASTEXITCODE"
     }
 
-    & $Go build -trimpath -ldflags "-s -w" `
+    Set-NavoPEMetadata `
+        -Path (Join-Path $ReleaseRoot "navo.exe") `
+        -Description "Navo Network Manager" `
+        -OriginalFilename "navo.exe"
+    & $Go build -trimpath -ldflags $ReleaseLDFlags `
         -o (Join-Path $ReleaseRoot "repair.exe") ./cmd/repair
     if ($LASTEXITCODE -ne 0) {
         throw "Repair tool build failed with exit code $LASTEXITCODE"
     }
+    Set-NavoPEMetadata `
+        -Path (Join-Path $ReleaseRoot "repair.exe") `
+        -Description "Navo Repair Tool" `
+        -OriginalFilename "repair.exe"
 }
 finally {
     Pop-Location
@@ -138,7 +222,8 @@ finally {
 
 Push-Location $UIRoot
 try {
-    & $Wails build -clean -platform "windows/$Architecture" -o navo_app.exe
+    & $Wails build -clean -platform "windows/$Architecture" -o navo_app.exe `
+        -ldflags $ReleaseLDFlags
     if ($LASTEXITCODE -ne 0) {
         throw "Wails desktop build failed with exit code $LASTEXITCODE"
     }
@@ -157,6 +242,10 @@ New-Item -ItemType Directory -Force $PackagedUI | Out-Null
 Copy-Item -LiteralPath $UIOutput -Destination (Join-Path $PackagedUI "navo_app.exe")
 Copy-Item -LiteralPath (Join-Path $UIRoot "assets\tray_icon.ico") `
     -Destination (Join-Path $PackagedUI "tray_icon.ico")
+Set-NavoPEMetadata `
+    -Path (Join-Path $PackagedUI "navo_app.exe") `
+    -Description "Navo Desktop UI" `
+    -OriginalFilename "navo_app.exe"
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "third_party") `
     -Destination (Join-Path $ReleaseRoot "third_party") -Recurse
 Copy-Item -LiteralPath (Join-Path $ProjectRoot ".env.example") `
@@ -166,14 +255,19 @@ Copy-Item -LiteralPath (Join-Path $ProjectRoot "CORE_MANIFEST.json") `
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\INSTALL_DEPLOY.md") `
     -Destination (Join-Path $ReleaseRoot "INSTALL_DEPLOY.md")
 
+Copy-Item -LiteralPath $VersionPath `
+    -Destination (Join-Path $ReleaseRoot "VERSION")
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "THIRD_PARTY_NOTICES.md") `
+    -Destination (Join-Path $ReleaseRoot "THIRD_PARTY_NOTICES.md")
+
 $Readme = @(
-    "Navo",
+    "Navo $Version",
     "",
     "Start: double-click navo.exe and approve the Windows UAC prompt.",
     "Administrator access is required because this package runs the TUN/core host in-process.",
     "Requirement: Microsoft Edge WebView2 Runtime.",
     "Configuration and runtime state are stored locally under %LOCALAPPDATA%\Navo.",
-    "Logs: %LOCALAPPDATA%\Navo\log\navo.log",
+    "Logs: <package>\log\navo.log; fallback: %LOCALAPPDATA%\Navo\log\navo.log",
     "Data: %LOCALAPPDATA%\Navo\",
     "Repair: run repair.exe check before applying any repair action."
 )
@@ -197,4 +291,36 @@ $HashLines = Get-ChildItem -LiteralPath $ReleaseRoot -File -Recurse |
     [System.Text.UTF8Encoding]::new($false)
 )
 
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PackageVerifier `
+    -PackageRoot $ReleaseRoot `
+    -ExpectedVersion $Version
+if ($LASTEXITCODE -ne 0) {
+    throw "Package verification failed with exit code $LASTEXITCODE"
+}
+
+Push-Location $ReleaseParent
+try {
+    Compress-Archive `
+        -LiteralPath $ReleaseRoot `
+        -DestinationPath $ArchivePath `
+        -CompressionLevel Optimal
+    if ($LASTEXITCODE -ne 0) {
+        throw "ZIP creation failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
+
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PackageVerifier `
+    -PackageRoot $ReleaseRoot `
+    -ArchivePath $ArchivePath `
+    -ExpectedVersion $Version
+if ($LASTEXITCODE -ne 0) {
+    throw "ZIP verification failed with exit code $LASTEXITCODE"
+}
+
+$ArchiveHash = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash
 Write-Host "Package ready: $ReleaseRoot"
+Write-Host "Archive ready: $ArchivePath"
+Write-Host "Archive SHA-256: $ArchiveHash"

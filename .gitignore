@@ -9,6 +9,7 @@ navo_app/frontend/dist/
 navo_app/node_modules/
 navo_app/wailsjs/
 release/
+artifacts/
 .env
 .env.*
 !.env.example

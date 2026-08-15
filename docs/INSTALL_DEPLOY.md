@@ -78,15 +78,19 @@ Test-Path .\third_party
 ```text
 third_party/
 ├── sing-box/
-│   └── sing-box.exe
+│   ├── sing-box.exe
+│   └── LICENSE
 ├── mihomo/
-│   └── mihomo.exe
+│   ├── mihomo.exe
+│   └── LICENSE
 ├── xray/
 │   ├── xray.exe
 │   ├── geoip.dat
-│   └── geosite.dat
+│   ├── geosite.dat
+│   └── LICENSE
 └── wintun/
-    └── wintun.dll
+    ├── wintun.dll
+    └── LICENSE.txt
 ```
 
 内核应从官方 Release 下载：
@@ -180,9 +184,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
 目标产物：
 
 ```text
-release/Navo/
+release/Navo-<VERSION>-portable-amd64/
 ├── navo.exe
 ├── repair.exe
+├── VERSION
+├── CORE_MANIFEST.json
+├── THIRD_PARTY_NOTICES.md
+├── SHA256SUMS.txt
 ├── app_ui/
 │   └── navo_app.exe
 ├── third_party/
@@ -191,33 +199,25 @@ release/Navo/
 │   ├── xray/
 │   └── wintun/
 └── README.txt
+release/Navo-<VERSION>-portable-amd64.zip
 ```
 
-确认关键文件：
+严格复验目录和 ZIP：
 
 ```powershell
-$required = @(
-    ".\release\Navo\navo.exe",
-    ".\release\Navo\repair.exe",
-    ".\release\Navo\app_ui\navo_app.exe",
-    ".\release\Navo\third_party\sing-box\sing-box.exe",
-    ".\release\Navo\third_party\mihomo\mihomo.exe",
-    ".\release\Navo\third_party\xray\xray.exe"
-)
-
-$required | ForEach-Object {
-    if (-not (Test-Path -LiteralPath $_ -PathType Leaf)) {
-        throw "Missing release file: $_"
-    }
-}
+$version = (Get-Content .\VERSION -Raw).Trim()
+$packageRoot = ".\release\Navo-$version-portable-amd64"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-package.ps1 -PackageRoot $packageRoot -ArchivePath "$packageRoot.zip" -ExpectedVersion $version
 ```
 
 ## 8. 发布前冒烟测试
 
-安装 Python 3 后执行：
+在管理员 PowerShell 中，安装 Python 3 后执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke.ps1
+$version = (Get-Content .\VERSION -Raw).Trim()
+$packageRoot = ".\release\Navo-$version-portable-amd64"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke.ps1 -PackageRoot $packageRoot
 ```
 
 冒烟测试必须覆盖：
@@ -234,7 +234,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke.ps1
 检查恢复工具：
 
 ```powershell
-.\release\Navo\repair.exe check
+.\release\Navo-<VERSION>-portable-amd64\repair.exe check
 ```
 
 `issues_found` 必须为 `0`。
@@ -249,7 +249,7 @@ TUN 会修改系统路由，自动冒烟测试默认不启用。正式发布前�
 
 ## 9. 本地部署
 
-不要只复制单个 `navo.exe`。必须部署整个 `release\Navo` 目录。
+不要只复制单个 `navo.exe`。必须部署完整的版本化绿色目录或解压完整 ZIP。
 
 建议安装目录：
 
@@ -267,7 +267,7 @@ D:\Apps\Navo\
 
 1. 退出已有 Navo。
 2. 确认 sing-box、Mihomo、Xray 和 `navo_app.exe` 均已退出。
-3. 将完整 `release\Navo` 目录复制到目标位置。
+3. 将完整 `release\Navo-<VERSION>-portable-amd64` 目录复制到目标位置。
 4. 双击 `navo.exe` 并批准 Windows UAC。
 5. 检查 UI、托盘菜单和三个内核状态。
 
@@ -282,6 +282,8 @@ Navo 的可写数据不应放在安装目录：
 ```text
 <安装目录>\log\navo.log
 ```
+
+安装目录不可写时回退到 `%LOCALAPPDATA%\Navo\log\navo.log`。
 
 ## 10. 升级
 
@@ -374,10 +376,14 @@ Xray 的待校验配置文件必须以 `.json` 结尾，否则 Xray 无法识别
 - [ ] Go 测试全部通过。
 - [ ] `go vet` 通过。
 - [ ] 前端 typecheck、test、build 全部通过。
-- [ ] 三个内核来自官方 Release，SHA-256 已核对。
-- [ ] 完整发布包构建成功。
+- [ ] npm high 级别依赖审计、race detector、govulncheck 通过。
+- [ ] 三个内核来自官方 Release，SHA-256 和许可证已核对。
+- [ ] VERSION、diagnostics、三个 PE metadata 与发布名一致。
+- [ ] 绿色目录、ZIP、SHA256SUMS 和闭合文件集合验证通过。
 - [ ] 三内核切换和真实代理数据面通过。
 - [ ] 正常退出后没有新增残留进程。
 - [ ] `repair.exe check` 返回零问题。
 - [ ] 独立虚拟机完成 TUN 和异常恢复测试。
-- [ ] 安装、升级、回滚和卸载流程均已验证。
+- [ ] 物理重启、升级、回滚和卸载流程均已验证。
+- [ ] Authenticode 签名和最终 ZIP SHA-256 已验证。
+- [ ] 实际运行 binary 的 path、hash 与发布版本一致。

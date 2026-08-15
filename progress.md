@@ -1261,3 +1261,42 @@
 - WinINet changed only while owned by Navo (`127.0.0.1:12080`) and returned byte-for-byte to v2rayN `127.0.0.1:10808`. Final live residue was zero Navo process/adapter/split route/NRPT/firewall; physical DNS remained DHCP `223.5.5.5`; v2rayN PID 5000 remained running.
 - Removed only two runtime files created by validation inside the package (`data/navo.ico`, `log/navo.log`) before delivery. Final repair reports 0 issues, `SHA256SUMS.txt` verifies 24/24, directory/ZIP match 25/25, both PE files are amd64 `0x8664`, and ZIP SHA-256 is `32632EE5D390625D88FA575B025BAFFD02A6EF75A7275F4D5F1D95723CAE7410`.
 - A physical Windows reboot after installing this source was not performed; acceptance covers a fresh process/isolated profile on the current boot plus a real forced process crash and restart.
+
+# 2026-08-15 Phase 58: project hardening and release closure
+
+- Restored the persistent plan and audit evidence. The worktree started clean on `main` aligned with `origin/main`.
+- Began local-only hardening for version identity, sealed package verification, subscription reliability, CI/security gates, documentation, licenses, and artifact hygiene. No live network state or user process has been changed.
+# 2026-08-15 Phase 58 completion
+
+## Implemented
+
+- Added VERSION 1.0.29 and internal/buildinfo injection.
+- Added subscription multi-IP fallback regressions and asynchronous apply error logging.
+- Added THIRD_PARTY_NOTICES, the upstream sing-box license, strict verify-package.ps1, sealed versioned directory/ZIP output, and PE metadata checks.
+- Hardened CI with pinned Actions, coverage, race, govulncheck, npm audit, module verification, and PowerShell parsing.
+- Replaced stale architecture/deployment documentation and ignored new artifacts output.
+
+## Validation
+
+- Go full test: PASS.
+- go vet: PASS.
+- Go total coverage: 51.9%, threshold 50% PASS.
+- Frontend tests: 6/6 PASS.
+- Frontend typecheck/build: PASS.
+- npm audit: 0 vulnerabilities.
+- PowerShell parser: package.ps1 and verify-package.ps1 PASS.
+- Negative verifier: old package, unexpected file, and tampered ZIP content all rejected.
+- Final package verifier: 28 files, 27 manifest entries, directory and ZIP PASS.
+- PE versions: navo.exe, repair.exe, app_ui/navo_app.exe all 1.0.29.0.
+- Final archive SHA-256: E3C1356F9BA01B9F908AD78EFD3874470C8111317E30D98C2F5719FAFF7B2CFA.
+- git diff --check and documentation control-character scan: PASS.
+- Normal-user runtime smoke: FAIL at elevated Named Pipe ACL; zero Navo residue and v2rayN preserved.
+- All-elevated runtime smoke: NOT RUN because UAC was canceled.
+- Post-smoke sealing: removed only generated data\navo.ico and log\navo.log; final directory/ZIP verifier passed again.
+
+## Pending external acceptance
+
+- Current sing-box/Mihomo elevated TUN routing and crash/recovery matrix.
+- Physical reboot/cold-start and upgrade rollback.
+- Authenticode signing with a supplied certificate.
+- All-elevated package runtime smoke.

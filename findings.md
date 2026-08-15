@@ -1289,3 +1289,26 @@
 - Fresh elevated System Proxy activation on the current boot proved core readiness and application data plane, not just listener/UI state. Proxy/direct exit separation and Google/GitHub/ChatGPT/OpenAI/Baidu/Xiaomi responses matched the selected runtime mode.
 - Final live state preserved v2rayN PID 5000 and exact WinINet `127.0.0.1:10808`; Navo-owned process, adapter, split-route, NRPT, and firewall counts were all zero.
 - A real OS reboot after the repaired build remains unperformed; evidence is a fresh isolated application start on the already-running current boot plus a real process crash/restart cycle.
+
+# 2026-08-15 Phase 58: project hardening audit findings
+
+- Current source gates pass, but total Go statement coverage is 51.9%; critical Windows-facing packages are materially lower (`internal/network/tun` 10.9%, `internal/agent/systemproxy` 22.6%, `internal/service` 40.6%).
+- The final 1.0.26 sing-box TUN routing-mode artifact is failed; 1.0.28 proves only the sing-box `after-nrpt` crash path and current-boot System Proxy flow, not the complete sing-box/Mihomo TUN matrix or a physical reboot.
+- Release identity is split: the directory/ZIP name is 1.0.28 while Wails and diagnostics still report 1.0.0, and the produced PE files expose no FileVersion/ProductVersion.
+- The sealed ZIP contains 25 files, but the already-run portable directory contains two additional runtime files outside `SHA256SUMS.txt`; `repair.exe check` still reports zero issues, so package-set verification must be separate and exact.
+- README and CLAUDE documentation still describe removed AI/MySQL/Flutter/installer behavior. `.env.example` correctly states AI/MySQL were removed.
+- The package includes Mihomo, Xray, and Wintun license files but no sing-box license/notice or aggregate third-party notice.
+- The repository tracks 245 acceptance artifacts (about 16.8 MB); many expose network-shaped fields. New raw artifacts should be ignored and published through private/CI retention after sanitization.
+- Subscription fetching validates every DNS answer but dials only the first address, losing safe public-address fallback. The asynchronous initial-refresh branch also drops `applyRuntimeConfig` errors.
+- Official sing-box v1.13.14 `LICENSE` at `https://github.com/SagerNet/sing-box/blob/v1.13.14/LICENSE` states GPL v3-or-later plus a project-name association restriction. Add the exact upstream text to `third_party/sing-box/LICENSE` and include it in package verification.
+# 2026-08-15 Phase 58: project hardening
+
+- VERSION 1.0.29 is now the release source for diagnostics, Go ldflags, package naming, and all three PE file/product versions.
+- The package verifier enforces a closed directory set, SHA256SUMS, core manifest hashes, required licenses, PE versions, optional Authenticode, ZIP root ownership, and per-entry length/SHA-256 equality.
+- The previous 1.0.28 package is correctly rejected because it lacks VERSION. Controlled extra-file and ZIP-content tamper tests are also rejected.
+- Subscription dialing validates the complete DNS answer set before any connection and then falls back across every validated public address. Mixed public/private answers still fail closed.
+- Initial asynchronous subscription apply failures are now logged instead of silently discarded.
+- CI actions are immutable SHA references. Windows CI adds module verification, 50% coverage, npm audit, and PowerShell parsing; Linux CI adds race and govulncheck.
+- README, CLAUDE, and INSTALL_DEPLOY now describe the implemented Wails/Vue, local-only, portable workflow; stale AI, MySQL, Flutter, Android, and installer claims were removed.
+- artifacts is ignored for new output, but existing tracked historical artifacts were intentionally not deleted or untracked without an explicit retention decision.
+- Local automated gates pass, but elevated TUN routing, physical reboot/cold start, Authenticode, and the all-elevated package runtime smoke remain external acceptance work.

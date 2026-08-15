@@ -38,9 +38,21 @@ type ipResolver interface {
 	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
 }
 
+type dialContextFunc func(context.Context, string, string) (net.Conn, error)
+
 func newSafeHTTPClient(skipTLSVerify bool, resolver ipResolver) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	secureDial := func(ctx context.Context, network, address string) (net.Conn, error) {
+	return newClientWithDialer(
+		skipTLSVerify,
+		newValidatedDialer(resolver, dialer.DialContext),
+	)
+}
+
+func newValidatedDialer(
+	resolver ipResolver,
+	dial dialContextFunc,
+) dialContextFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, fmt.Errorf("invalid destination: %w", err)
@@ -62,16 +74,34 @@ func newSafeHTTPClient(skipTLSVerify bool, resolver ipResolver) *http.Client {
 				return nil, fmt.Errorf("subscription host resolved to forbidden address")
 			}
 		}
-		// Dial the already-validated address; never hand the hostname back to a
-		// resolver where DNS rebinding could change the destination.
-		return dialer.DialContext(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
+
+		// Try only the already-validated snapshot. Never hand the hostname back to
+		// a resolver where DNS rebinding could change the destination.
+		dialErrors := make([]error, 0, len(addresses))
+		for _, candidate := range addresses {
+			connection, dialErr := dial(
+				ctx,
+				network,
+				net.JoinHostPort(candidate.IP.String(), port),
+			)
+			if dialErr == nil {
+				return connection, nil
+			}
+			dialErrors = append(dialErrors, dialErr)
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		return nil, fmt.Errorf(
+			"dial validated subscription addresses: %w",
+			errors.Join(dialErrors...),
+		)
 	}
-	return newClientWithDialer(skipTLSVerify, secureDial)
 }
 
 func newClientWithDialer(
 	skipTLSVerify bool,
-	dialContext func(context.Context, string, string) (net.Conn, error),
+	dialContext dialContextFunc,
 ) *http.Client {
 	return &http.Client{
 		Timeout: 30 * time.Second,

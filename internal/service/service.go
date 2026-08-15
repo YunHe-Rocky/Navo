@@ -1113,7 +1113,9 @@ func (s *Service) handleSubAdd(parent context.Context, requestID string, msg map
 			return
 		}
 		if len(outbounds) > 0 {
-			s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", "")
+			if err := s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
+				log.Printf("[service] apply after initial subscription refresh failed: %v", err)
+			}
 		}
 	}()
 	return response(requestID, map[string]interface{}{"id": sub.ID, "status": "added"})

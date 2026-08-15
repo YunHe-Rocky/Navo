@@ -681,3 +681,41 @@ Prevent an abrupt Navo/Windows crash from leaving system DNS unusable, and make 
 | Non-elevated System Proxy wrappers lacked `Get-FileHash` or were rejected by the requireAdministrator launcher | 3 | Reran through the same elevated Windows PowerShell context used by the real portable launcher; every preflight failure restored WinINet. |
 | A prior detached validation process was still finishing graceful shutdown | 1 | Safety gate refused the next run; waited for verified Navo PIDs to exit and confirmed v2rayN PID 5000 remained before retrying. |
 | The first ZIP included two runtime-generated files and the first manifest check used a nonexistent filename | 1 | Removed only `data/navo.ico`, `log/navo.log`, and the just-created ZIP; verified the real `SHA256SUMS.txt` 24/24 and rebuilt a clean 25-file ZIP. |
+
+# Phase 58: project hardening and release closure (2026-08-15)
+
+## Goal
+
+Close the locally actionable gaps found by the objective project audit: one authoritative version, sealed portable verification, subscription reliability, CI/security gates, accurate documentation, third-party notices, and regression coverage. Preserve live networking and unrelated user processes until the separate elevated acceptance step.
+
+## Phases
+
+- [x] **58.1 Version and package integrity** - Add one version source, inject it into Go/Wails/PE/package metadata, reject manifest drift and unexpected portable files, and validate the clean ZIP from a sealed staging directory.
+- [x] **58.2 Subscription reliability** - Preserve SSRF fail-closed behavior while trying all validated public DNS addresses, propagate asynchronous apply failures, and add regressions.
+- [x] **58.3 CI and supply-chain gates** - Add coverage, race, dependency/security, PowerShell parser, package/version/license checks, and immutable GitHub Action references where feasible.
+- [x] **58.4 Documentation and repository hygiene** - Remove stale AI/MySQL/Flutter/installer claims, document the current Wails/Vue architecture and portable workflow, add third-party notices, and prevent new sensitive acceptance artifacts from being committed.
+- [x] **58.5 Automated validation and portable rebuild** - Run focused/full Go tests and vet, frontend tests/typecheck/build/audit, PowerShell parser checks, package verifier, manifest/ZIP/PE checks, and `git diff --check`.
+- [ ] **58.6 External Windows acceptance** - Re-run the current sing-box/Mihomo elevated TUN matrix, perform a physical reboot/cold-start acceptance, and add Authenticode signing when a certificate is supplied.
+
+## Constraints
+
+- Do not mutate live TUN, routes, DNS, NRPT, firewall, or WinINet during local hardening.
+- Do not stop or modify unrelated v2rayN/user processes.
+- Keep portable green directory plus ZIP as the delivery model; do not add MSI/installer work.
+- A build, listener, manifest subset, or UI state is not end-to-end acceptance.
+- Do not claim signing or physical reboot acceptance without the external certificate/action and resulting evidence.
+
+## Phase 58 errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| Native `apply_patch` tool could not read the workspace because the Windows sandbox ACL helper failed | 1 | Tried the local `apply_patch.bat` helper through an approved elevated shell. |
+| Local `apply_patch.bat` helper was blocked with `Access is denied` | 2 | Use repository-scoped `git apply --recount` with reviewed unified diffs; do not use ad-hoc file writes. |
+| Initial `git apply` rejected the append diff because its manual hunk line count was wrong | 1 | Re-run the same reviewed content with `--recount`; no file was changed by the rejected patch. |
+| Combined `--recount` patch used stale `findings.md` and then `progress.md` context | 2 | Read the real EOF, split the files, and use exact per-file anchors; no file was changed by either rejected patch. |
+| Zero-context package edits initially landed inside adjacent PowerShell blocks | 1 | Re-read the exact command boundaries, moved each statement, and required parser plus full package execution. |
+| Go 1.26 rejected the legacy equals-form cover arguments and the default module cache could not reach proxy.golang.org | 1 | Use separate cover arguments and the repository-local module/build cache; total coverage gate passed at 51.9%. |
+| PowerShell enumerated an empty HashSet return into null | 1 | Return the HashSet as one object; old-package rejection and final directory verification passed. |
+| Wails existing RT_VERSION remained 0.0.0 after a JSON resource merge | 1 | Pass explicit go-winres file/product version flags; all three release PE versions are 1.0.29.0. |
+| Initial README/CLAUDE generation interpreted Windows backslashes as control escapes | 1 | Backed up both files, restored the baseline, regenerated exact UTF-8 diffs, scanned control bytes, and passed git diff --check. |
+| Normal-user package smoke could not access the elevated UI Agent pipe | 1 | Verified zero Navo residue and preserved v2rayN; an all-elevated retry was canceled at UAC, so runtime smoke remains pending. |

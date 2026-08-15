@@ -4,6 +4,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+    $Principal = [System.Security.Principal.WindowsPrincipal]::new($Identity)
+    $IsAdministrator = $Principal.IsInRole(
+        [System.Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+finally {
+    $Identity.Dispose()
+}
+if (-not $IsAdministrator) {
+    throw "Smoke harness must run from an elevated PowerShell session"
+}
 Add-Type -AssemblyName System.Net.Http
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
