@@ -2,7 +2,8 @@
 // It integrates with the Windows Service Control Manager (SCM) and wraps
 // the Supervisor to manage sing-box lifecycle.
 //
-// Architecture: Service (Session 0) → Supervisor → CoreHost → sing-box
+// Architecture: Agent Coordinator → Service domain gate → Supervisor → selected CoreHost.
+// Service executes privileged domain actions; it does not choose cross-domain order.
 package service
 
 import (
@@ -532,6 +533,7 @@ func serviceIPCRequestTimeout(msg map[string]interface{}) time.Duration {
 		return coreServiceIPCRequestTimeout
 	case "capture.prepare", "network.recover", "outbound.select", "outbound.create", "outbound.delete",
 		"subscription.add", "subscription.remove", "subscription.refresh",
+		"runtime.verify",
 		"runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set":
 		return captureServiceIPCRequestTimeout
 	default:
@@ -624,8 +626,12 @@ func (s *Service) dispatchUncached(ctx context.Context, msg map[string]interface
 		return s.handleOutboundTest(requestID, msg)
 	case "outbound.testAll":
 		return s.handleOutboundTestAll(requestID)
+	case "outbound.failover_candidates":
+		return s.handleOutboundFailoverCandidates(ctx, requestID, msg)
 	case "runtime.status":
 		return s.handleRuntimeStatus(requestID)
+	case "runtime.verify":
+		return s.handleRuntimeVerify(ctx, requestID)
 	case "runtime.mode.set":
 		return s.handleRuntimeModeSet(ctx, requestID, msg)
 	case "runtime.rules.set":
@@ -1097,28 +1103,12 @@ func (s *Service) handleSubAdd(parent context.Context, requestID string, msg map
 			"id": sub.ID, "status": "added", "node_count": len(outbounds),
 		})
 	}
-	// Auto-refresh is bounded and joins the same connection transaction before
-	// it can replace the active core configuration.
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), captureServiceIPCRequestTimeout)
-		defer cancel()
-		if err := s.lockCapture(ctx); err != nil {
-			log.Printf("[service] initial refresh for %q canceled: %v", name, err)
-			return
-		}
-		defer s.captureMu.Unlock()
-		outbounds, err := s.subMgr.Refresh(ctx)
-		if err != nil {
-			log.Printf("[service] initial refresh for %q failed: %v", name, err)
-			return
-		}
-		if len(outbounds) > 0 {
-			if err := s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
-				log.Printf("[service] apply after initial subscription refresh failed: %v", err)
-			}
-		}
-	}()
-	return response(requestID, map[string]interface{}{"id": sub.ID, "status": "added"})
+	// Persist-only is intentionally side-effect free. A refresh that may replace
+	// the active core configuration must remain inside an Agent-owned connection
+	// transaction and therefore has to be requested with wait=true.
+	return response(requestID, map[string]interface{}{
+		"id": sub.ID, "status": "added_pending_refresh",
+	})
 }
 
 func (s *Service) handleSubUpdate(requestID string, msg map[string]interface{}) map[string]interface{} {
@@ -1191,53 +1181,39 @@ func (s *Service) handleSubRefresh(
 	requestID string,
 	msg map[string]interface{},
 ) map[string]interface{} {
+	if !boolField(msg, "wait") {
+		return errorResponse(
+			requestID,
+			"SUB_WAIT_REQUIRED",
+			fmt.Errorf("subscription refresh must wait for the Agent connection transaction"),
+		)
+	}
 	ctx, cancel := context.WithTimeout(ctx, captureServiceIPCRequestTimeout)
 	defer cancel()
-	if boolField(msg, "wait") {
-		if err := s.lockCapture(ctx); err != nil {
-			return errorResponse(requestID, "SUB_BUSY", err)
-		}
-		defer s.captureMu.Unlock()
-		outbounds, err := s.subMgr.Refresh(ctx)
-		if err != nil {
-			return errorResponse(requestID, "SUB_004", err)
-		}
-		if len(outbounds) > 0 {
-			if err := s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
-				return errorResponse(requestID, "SUB_005", err)
-			}
-		}
-		return response(requestID, map[string]interface{}{
-			"status": "updated", "node_count": len(outbounds),
-		})
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "SUB_BUSY", err)
 	}
-	// Respond immediately; fetch and apply in background.
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), captureServiceIPCRequestTimeout)
-		defer cancel()
-		if err := s.lockCapture(ctx); err != nil {
-			log.Printf("[service] subscription refresh canceled: %v", err)
-			return
+	defer s.captureMu.Unlock()
+	outbounds, err := s.subMgr.Refresh(ctx)
+	if err != nil {
+		return errorResponse(requestID, "SUB_004", err)
+	}
+	if len(outbounds) > 0 {
+		if err := s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
+			return errorResponse(requestID, "SUB_005", err)
 		}
-		defer s.captureMu.Unlock()
-		outbounds, err := s.subMgr.Refresh(ctx)
-		if err != nil {
-			log.Printf("[service] subscription refresh failed: %v", err)
-			return
-		}
-		if len(outbounds) > 0 {
-			if err := s.applyRuntimeConfig(ctx, s.currentOutbounds(ctx), "", ""); err != nil {
-				log.Printf("[service] apply after refresh failed: %v", err)
-			}
-		}
-	}()
-	return response(requestID, map[string]interface{}{"status": "refreshing"})
+	}
+	return response(requestID, map[string]interface{}{
+		"status": "updated", "node_count": len(outbounds),
+	})
 }
 
 func (s *Service) handleOutboundList(requestID string) map[string]interface{} {
 	outbounds := s.currentOutbounds(context.Background())
 	s.runtimeMu.Lock()
-	active := s.runtime.SelectedOutbound
+	selected := s.runtime.SelectedOutbound
+	active := activeOutboundID(s.runtime)
+	candidate := candidateOutboundID(s.runtime)
 	mode := s.runtime.Mode
 	s.runtimeMu.Unlock()
 	list := make([]map[string]interface{}, 0, len(outbounds))
@@ -1252,6 +1228,7 @@ func (s *Service) handleOutboundList(requestID string) map[string]interface{} {
 			"server": outbound.Server, "port": outbound.Port,
 			"enabled": outbound.Enabled, "provider_id": outbound.ProviderID,
 			"country": outbound.Country, "active": outbound.ID == active,
+			"candidate": outbound.ID == candidate, "selected": outbound.ID == selected,
 			"source_type": sourceType,
 			"available":   status.Available, "color": status.Color,
 			"reason": status.Reason, "checked_at": status.CheckedAt,
@@ -1260,9 +1237,11 @@ func (s *Service) handleOutboundList(requestID string) map[string]interface{} {
 		list = append(list, item)
 	}
 	return response(requestID, map[string]interface{}{
-		"outbounds": list,
-		"active_id": active,
-		"mode":      mode,
+		"outbounds":    list,
+		"selected_id":  selected,
+		"active_id":    active,
+		"candidate_id": candidate,
+		"mode":         mode,
 	})
 }
 

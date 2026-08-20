@@ -11,13 +11,30 @@ import (
 )
 
 func TestRuntimeRoutingVerificationSitesMatchRouteSemantics(t *testing.T) {
-	direct := runtimeRoutingVerificationSites(runtimeModeDirect)
-	if len(direct) != 2 || direct[0].Name != "baidu" || direct[1].Name != "xiaomi" {
-		t.Fatalf("direct-mode probes = %#v", direct)
+	proxiedSites := []string{
+		"google", "github", "chatgpt-web", "chatgpt-auth", "openai-api",
+		"chatgpt-assets", "chatgpt-stream",
 	}
-	proxied := runtimeRoutingVerificationSites(runtimeModeGlobal)
-	if len(proxied) != 2 || proxied[0].Name != "google" || proxied[1].Name != "github" {
-		t.Fatalf("proxied-mode probes = %#v", proxied)
+	for _, test := range []struct {
+		name string
+		mode string
+		want []string
+	}{
+		{name: "direct", mode: runtimeModeDirect, want: []string{"baidu", "xiaomi"}},
+		{name: "global", mode: runtimeModeGlobal, want: proxiedSites},
+		{name: "bypass mainland", mode: runtimeModeBypassMainland, want: proxiedSites},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			probes := runtimeRoutingVerificationSites(test.mode)
+			if len(probes) != len(test.want) {
+				t.Fatalf("routing probe count = %d, want %d: %#v", len(probes), len(test.want), probes)
+			}
+			for index, want := range test.want {
+				if probes[index].Name != want {
+					t.Fatalf("routing probe %d = %q, want %q", index, probes[index].Name, want)
+				}
+			}
+		})
 	}
 }
 

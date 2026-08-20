@@ -29,6 +29,7 @@ export const api = {
   setMode: (mode: string) => app().SetRuntimeMode(mode),
   setRoutingListMode: (mode: string) => app().SetRoutingListMode(mode),
   setRoutingRules: (blacklist: string[], whitelist: string[]) => app().SetRoutingRules(blacklist, whitelist),
+	verifyCapture: () => app().VerifyCapture(),
   selectRoute: (id: string) => app().SelectRoute(id),
   testRoute: (id: string) => app().TestRoute(id),
   createUpstream: (request: UpstreamRequest) => app().CreateUpstream(request),

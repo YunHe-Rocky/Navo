@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -74,16 +75,27 @@ func TestVerifyUDPDNSRequiresMatchingResponse(t *testing.T) {
 	}
 }
 
-func TestRequiredExternalSitesCoverGenericDataPlaneOnly(t *testing.T) {
+func TestRequiredExternalSitesCoverChatGPTApplicationFlow(t *testing.T) {
 	got := make(map[string]string, len(requiredExternalSites))
 	for _, probe := range requiredExternalSites {
 		got[probe.Name] = probe.URL
 	}
-	if got["google"] != "https://www.google.com/generate_204" || got["github"] != "https://github.com/" {
-		t.Fatalf("external TUN probes are incomplete: %#v", got)
+	expected := map[string]string{
+		"google":         "https://www.google.com/generate_204",
+		"github":         "https://github.com/",
+		"chatgpt-web":    "https://chatgpt.com/",
+		"chatgpt-auth":   "https://auth.openai.com/",
+		"openai-api":     "https://api.openai.com/v1/models",
+		"chatgpt-assets": "https://persistent.oaistatic.com/",
+		"chatgpt-stream": "https://ws.chatgpt.com/",
 	}
-	if len(got) != 2 {
-		t.Fatalf("product health must not gate proxy activation on application-specific services: %#v", got)
+	if len(got) != len(expected) {
+		t.Fatalf("external TUN probes = %#v", got)
+	}
+	for name, wantURL := range expected {
+		if got[name] != wantURL {
+			t.Fatalf("probe %s URL = %q, want %q", name, got[name], wantURL)
+		}
 	}
 }
 
@@ -100,6 +112,42 @@ func TestVerifyExternalSiteUsesDNSTCPAndHTTP(t *testing.T) {
 	}
 	if !result.DNS || !result.TCP || !result.HTTPS || result.StatusCode != http.StatusNoContent {
 		t.Fatalf("incomplete site verification: %#v", result)
+	}
+}
+
+func TestVerifyExternalSitesDoesNotBurstConcurrentUpstreamRequests(t *testing.T) {
+	var active atomic.Int32
+	var maximum atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for {
+			observed := maximum.Load()
+			if current <= observed || maximum.CompareAndSwap(observed, current) {
+				break
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	probes := []externalSiteProbe{
+		{Name: "first", URL: server.URL, ExpectedStatus: []int{http.StatusNoContent}},
+		{Name: "second", URL: server.URL, ExpectedStatus: []int{http.StatusNoContent}},
+		{Name: "third", URL: server.URL, ExpectedStatus: []int{http.StatusNoContent}},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := verifyExternalSites(ctx, probes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != len(probes) {
+		t.Fatalf("verified sites = %d, want %d", len(result), len(probes))
+	}
+	if maximum.Load() != 1 {
+		t.Fatalf("maximum concurrent site probes = %d, want 1", maximum.Load())
 	}
 }
 

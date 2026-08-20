@@ -31,3 +31,9 @@ func notifyProxyChange() error {
 }
 
 func ProbeDefaultProxy(context.Context) error { return nil }
+
+func ProbeDefaultDirectRouting(context.Context) error { return nil }
+
+func ProbeDirect(context.Context) error { return nil }
+
+func ProbeDirectRouting(context.Context) error { return nil }

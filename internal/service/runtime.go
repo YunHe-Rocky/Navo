@@ -55,8 +55,9 @@ var whitelistDirectDomainSuffixes = []string{
 	"jd.com", "bilibili.com", "douyin.com", "zhihu.com", "163.com", "126.com",
 }
 
-// openAIServiceDomainSuffixes follows OpenAI's published ChatGPT/Codex network
-// requirements. These are defaults only; users retain ownership of both lists.
+// openAIServiceDomainSuffixes is Navo's compatibility set for ChatGPT/Codex
+// application flows. It is not presented as an official complete allowlist;
+// users retain ownership of both editable routing lists.
 var openAIServiceDomainSuffixes = []string{
 	"auth.openai.com", "chatgpt.com", "ct.sendgrid.net", "intercom.io",
 	"intercomcdn.com", "oaistatic.com", "oaiusercontent.com", "openai.com",
@@ -77,6 +78,8 @@ var blacklistProxyDomainSuffixes = append([]string{
 type runtimeState struct {
 	CoreID                 string   `json:"core_id"`
 	SelectedOutbound       string   `json:"selected_outbound"`
+	ActiveOutbound         string   `json:"active_outbound,omitempty"`
+	CandidateOutbound      string   `json:"candidate_outbound,omitempty"`
 	Mode                   string   `json:"mode"`
 	RoutingModeConfigured  bool     `json:"routing_mode_configured"`
 	RoutingRulesConfigured bool     `json:"routing_rules_configured"`
@@ -157,6 +160,16 @@ func loadRuntimeState(configDir string) runtimeState {
 	}
 	if state.CoreID == "" {
 		state.CoreID = "sing-box"
+	}
+	// Migrate the pre-V1 runtime format without promoting an unverified
+	// candidate. Only an explicitly active revision may seed ActiveOutbound.
+	if state.ActiveOutbound == "" && state.RevisionStatus == "active" {
+		state.ActiveOutbound = state.SelectedOutbound
+	}
+	if state.CandidateOutbound == "" &&
+		state.RevisionStatus == "candidate" &&
+		state.SelectedOutbound != state.ActiveOutbound {
+		state.CandidateOutbound = state.SelectedOutbound
 	}
 	// Remove stale generated configs from previous runs.
 	cleanupGeneratedRuntimeFiles(configDir, state.LastKnownGood)
@@ -478,7 +491,7 @@ func (s *Service) handleOutboundSelect(parent context.Context, requestID string,
 	s.sup.SetRestartSuppressed(true)
 	defer s.sup.SetRestartSuppressed(false)
 	s.runtimeMu.Lock()
-	previousID := s.runtime.SelectedOutbound
+	previousID := activeOutboundID(s.runtime)
 	tunEnabled := s.runtime.TUNEnabled
 	s.runtimeMu.Unlock()
 	if wasRunning && tunEnabled && previousID != id {
@@ -514,11 +527,22 @@ func (s *Service) handleOutboundSelect(parent context.Context, requestID string,
 				errors.Join(verifyErr, rollbackErr),
 			)
 		}
+		s.runtimeMu.Lock()
+		activeID := activeOutboundID(s.runtime)
+		candidateID := candidateOutboundID(s.runtime)
+		s.runtimeMu.Unlock()
 		return response(requestID, map[string]interface{}{
-			"active_id": id, "verified": verification.Verified, "sites": verification.Sites,
+			"active_id": activeID, "candidate_id": candidateID,
+			"verified": verification.Verified, "sites": verification.Sites,
 		})
 	}
-	return response(requestID, map[string]interface{}{"active_id": id})
+	s.runtimeMu.Lock()
+	activeID := activeOutboundID(s.runtime)
+	candidateID := candidateOutboundID(s.runtime)
+	s.runtimeMu.Unlock()
+	return response(requestID, map[string]interface{}{
+		"active_id": activeID, "candidate_id": candidateID,
+	})
 }
 
 func (s *Service) handleRuntimeModeSet(parent context.Context, requestID string, msg map[string]interface{}) map[string]interface{} {
@@ -670,6 +694,14 @@ func (s *Service) handleRuntimeListModeSet(parent context.Context, requestID str
 		return errorResponse(requestID, "INVALID", fmt.Errorf("list mode must be off, blacklist, or whitelist"))
 	}
 
+	s.runtimeMu.Lock()
+	currentMode := s.runtime.RoutingListMode
+	s.runtimeMu.Unlock()
+	if currentMode == mode {
+		return response(requestID, map[string]interface{}{
+			"mode": mode, "verified": true, "changed": false,
+		})
+	}
 	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
 	if err := s.lockCapture(ctx); err != nil {
@@ -723,7 +755,7 @@ func (s *Service) handleRuntimeListModeSet(parent context.Context, requestID str
 		}
 	}
 	return response(requestID, map[string]interface{}{
-		"mode": mode, "verified": verification.Verified, "sites": verification.Sites,
+		"mode": mode, "verified": verification.Verified, "sites": verification.Sites, "changed": true,
 	})
 }
 
@@ -787,7 +819,7 @@ func (s *Service) verifyActiveRuntimeRouting(ctx context.Context) (RuntimeRoutin
 		ProxyPort: s.cfg.ProxyPort, TUNDNSIPv4: plan.TUNDNSIPv4,
 		UDPRequired: directMode || outboundRequiresUDP(selected),
 	})
-	result := RuntimeRoutingVerification{Verified: err == nil, Sites: verification.Sites}
+	result := RuntimeRoutingVerification{Verified: err == nil, Sites: verification.Sites, VerifiedAt: verification.VerifiedAt}
 	if err != nil {
 		return result, err
 	}
@@ -795,10 +827,27 @@ func (s *Service) verifyActiveRuntimeRouting(ctx context.Context) (RuntimeRoutin
 	return result, nil
 }
 
+func (s *Service) handleRuntimeVerify(ctx context.Context, requestID string) map[string]interface{} {
+	verification, err := s.verifyActiveRuntimeRouting(ctx)
+	if err != nil {
+		return errorResponse(requestID, "APPLICATION_READINESS_FAILED", err)
+	}
+	s.runtimeMu.Lock()
+	mode, listMode := s.runtime.Mode, s.runtime.RoutingListMode
+	s.runtimeMu.Unlock()
+	return response(requestID, map[string]interface{}{
+		"verification": verification,
+		"mode":         mode,
+		"list_mode":    listMode,
+	})
+}
+
 func (s *Service) handleRuntimeStatus(requestID string) map[string]interface{} {
 	s.runtimeMu.Lock()
 	mode := s.runtime.Mode
-	activeID := s.runtime.SelectedOutbound
+	selectedID := s.runtime.SelectedOutbound
+	activeID := activeOutboundID(s.runtime)
+	candidateID := candidateOutboundID(s.runtime)
 	tunEnabled := s.runtime.TUNEnabled
 	blacklist := cloneStrings(s.runtime.BlacklistRules)
 	whitelist := cloneStrings(s.runtime.WhitelistRules)
@@ -810,7 +859,9 @@ func (s *Service) handleRuntimeStatus(requestID string) map[string]interface{} {
 	s.diagnosticMu.RUnlock()
 	return response(requestID, map[string]interface{}{
 		"mode":         mode,
+		"selected_id":  selectedID,
 		"active_id":    activeID,
+		"candidate_id": candidateID,
 		"tun_enabled":  tunEnabled,
 		"blacklist":    blacklist,
 		"whitelist":    whitelist,
@@ -1087,6 +1138,11 @@ func (s *Service) applyRuntimeConfigLocked(
 	next.RevisionID = compiled.RevisionID
 	next.ConfigHash = compiled.ContentHash
 	next.RevisionStatus = "candidate"
+	next.ActiveOutbound = activeOutboundID(previousRuntime)
+	next.CandidateOutbound = ""
+	if next.SelectedOutbound != next.ActiveOutbound {
+		next.CandidateOutbound = next.SelectedOutbound
+	}
 	next.LastKnownGood = previousRuntime.LastKnownGood
 	s.cfg.ConfigPath = candidatePath
 	s.runtime = next
@@ -1280,6 +1336,28 @@ func (s *Service) commitHealthyRuntime(ctx context.Context) error {
 	return s.commitHealthyRuntimeLocked(ctx)
 }
 
+func activeOutboundID(state runtimeState) string {
+	if state.ActiveOutbound != "" {
+		return state.ActiveOutbound
+	}
+	// Empty status is the pre-V1 persisted/in-memory format and represents the
+	// last selected runtime. Only an explicit candidate is uncommitted.
+	if state.RevisionStatus != "candidate" {
+		return state.SelectedOutbound
+	}
+	return ""
+}
+
+func candidateOutboundID(state runtimeState) string {
+	if state.CandidateOutbound != "" && state.CandidateOutbound != activeOutboundID(state) {
+		return state.CandidateOutbound
+	}
+	if state.RevisionStatus == "candidate" && state.SelectedOutbound != activeOutboundID(state) {
+		return state.SelectedOutbound
+	}
+	return ""
+}
+
 func (s *Service) commitHealthyRuntimeLocked(ctx context.Context) error {
 	var selected *compiler.Outbound
 	for _, outbound := range s.currentOutbounds(ctx) {
@@ -1302,6 +1380,8 @@ func (s *Service) commitHealthyRuntimeLocked(ctx context.Context) error {
 	}
 	previous := s.runtime
 	s.runtime.RevisionStatus = "active"
+	s.runtime.ActiveOutbound = s.runtime.SelectedOutbound
+	s.runtime.CandidateOutbound = ""
 	s.runtime.LastKnownGood = s.cfg.ConfigPath
 	if err := s.saveRuntimeStateLocked(s.cfg.ConfigDir); err != nil {
 		s.runtime = previous

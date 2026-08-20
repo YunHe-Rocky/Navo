@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"navo/internal/connection"
 	"navo/internal/domain/capture"
 )
 
@@ -34,14 +35,20 @@ func (a *Agent) handleTraySnapshot(requestID string) map[string]interface{} {
 	}
 }
 
-func (a *Agent) handleConnectionEnable(requestID string) map[string]interface{} {
-	runtimeStatus := a.callService(requestID, "runtime.status")
+func (a *Agent) handleConnectionEnable(ctx context.Context, requestID string) map[string]interface{} {
+	runtimeStatus := a.callServiceContext(ctx, requestID, "runtime.status")
 	if isErrorResponse(runtimeStatus) {
 		return runtimeStatus
 	}
 	runtimePayload, _ := runtimeStatus["payload"].(map[string]interface{})
-	activeID, _ := runtimePayload["active_id"].(string)
-	if activeID == "" {
+	selectedID, _ := runtimePayload["selected_id"].(string)
+	if selectedID == "" {
+		selectedID, _ = runtimePayload["candidate_id"].(string)
+	}
+	if selectedID == "" {
+		selectedID, _ = runtimePayload["active_id"].(string)
+	}
+	if selectedID == "" {
 		return agentError(
 			requestID,
 			"ACTIVE_SELECTION_REQUIRED",
@@ -52,11 +59,14 @@ func (a *Agent) handleConnectionEnable(requestID string) map[string]interface{} 
 	if status.CommittedMode != "off" {
 		return agentResponse(requestID, map[string]interface{}{"status": "connected"})
 	}
-	return a.setCaptureMode(requestID, map[string]interface{}{"mode": "system_proxy"})
+	// Generic connect promises application-wide capture, matching the main UI.
+	// System Proxy remains an explicit advanced choice for proxy-aware apps.
+	return a.setCaptureModeContext(ctx, requestID, map[string]interface{}{"mode": "tun"})
 }
 
-func (a *Agent) handleConnectionDisable(requestID string) map[string]interface{} {
-	if resp := a.setCaptureMode(
+func (a *Agent) handleConnectionDisable(ctx context.Context, requestID string) map[string]interface{} {
+	if resp := a.setCaptureModeContext(
+		ctx,
 		requestID,
 		map[string]interface{}{"mode": "off"},
 	); isErrorResponse(resp) {
@@ -65,28 +75,61 @@ func (a *Agent) handleConnectionDisable(requestID string) map[string]interface{}
 	return agentResponse(requestID, map[string]interface{}{"status": "disconnected"})
 }
 
-func (a *Agent) handleConnectionRestart(ctx context.Context, requestID string) map[string]interface{} {
+func (a *Agent) handleConnectionRestart(
+	ctx context.Context,
+	requestID string,
+) (result map[string]interface{}) {
+	transaction, err := a.beginConnection(
+		ctx, requestID, connection.OperationRecovery, connection.OriginUser, "capture",
+	)
+	if err != nil {
+		return agentError(requestID, "CONNECTION_BUSY", err)
+	}
+	defer func() { finishConnectionResponse(transaction, result) }()
+	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
+		return agentError(requestID, "CONNECTION_STATE_FAILED", err)
+	}
+
 	target := a.captureSnapshot().CommittedMode
 	if target == capture.ModeOff {
 		return agentResponse(requestID, map[string]interface{}{"status": "disconnected"})
 	}
-	if err := a.transitionCaptureMode(ctx, capture.ModeOff); err != nil {
+	if err := a.transitionCaptureModeLocked(ctx, capture.ModeOff); err != nil {
 		return agentError(requestID, "CAPTURE_RESTART_FAILED", err)
 	}
-	if err := a.transitionCaptureMode(ctx, target); err != nil {
+	_ = transaction.SetPhase(connection.PhaseVerifying)
+	if err := a.transitionCaptureModeLocked(ctx, target); err != nil {
 		return agentError(requestID, "CAPTURE_RESTART_FAILED", err)
 	}
 	return agentResponse(requestID, map[string]interface{}{"status": "connected"})
 }
 
-func (a *Agent) handleNetworkRecover(requestID string) map[string]interface{} {
-	if resp := a.setCaptureMode(
-		requestID,
-		map[string]interface{}{"mode": "off"},
-	); isErrorResponse(resp) {
-		return resp
+func (a *Agent) handleNetworkRecover(
+	ctx context.Context,
+	requestID string,
+) (result map[string]interface{}) {
+	transaction, err := a.beginConnection(
+		ctx, requestID, connection.OperationRecovery, connection.OriginUser, "network",
+	)
+	if err != nil {
+		return agentError(requestID, "CONNECTION_BUSY", err)
 	}
-	return a.callService(requestID, "network.recover")
+	defer func() { finishConnectionResponse(transaction, result) }()
+	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
+		return agentError(requestID, "CONNECTION_STATE_FAILED", err)
+	}
+
+	if err := a.transitionCaptureModeLocked(ctx, capture.ModeOff); err != nil {
+		return agentError(requestID, "NETWORK_RECOVERY_STOP_FAILED", err)
+	}
+	response, err := a.SendToServiceContext(ctx, map[string]interface{}{
+		"request_id": requestID,
+		"method":     "network.recover",
+	})
+	if err != nil {
+		return agentError(requestID, "AGENT_001", fmt.Errorf("service unreachable: %w", err))
+	}
+	return response
 }
 
 func agentResponse(requestID string, payload map[string]interface{}) map[string]interface{} {

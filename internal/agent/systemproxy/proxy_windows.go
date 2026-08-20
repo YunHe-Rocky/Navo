@@ -28,6 +28,7 @@ var (
 
 const (
 	internetOpenTypePreconfig = 0
+	internetOpenTypeDirect    = 1
 	internetFlagReload        = 0x80000000
 	internetFlagNoCacheWrite  = 0x04000000
 	internetOptionConnectMS   = 2
@@ -328,10 +329,60 @@ func notifyProxyChange() error {
 	return nil
 }
 
+type winINetApplicationProbe struct {
+	name     string
+	endpoint string
+	expected []uint32
+}
+
+var winINetChatGPTProbes = []winINetApplicationProbe{
+	{name: "chatgpt-web", endpoint: "https://chatgpt.com/", expected: []uint32{200, 403}},
+	{name: "chatgpt-auth", endpoint: "https://auth.openai.com/", expected: []uint32{200, 302, 303, 307, 308, 403}},
+	{name: "openai-api", endpoint: "https://api.openai.com/v1/models", expected: []uint32{401}},
+	{name: "chatgpt-assets", endpoint: "https://persistent.oaistatic.com/", expected: []uint32{200, 403, 404}},
+	{name: "chatgpt-stream", endpoint: "https://ws.chatgpt.com/", expected: []uint32{200, 400, 401, 403, 404}},
+}
+
+var winINetProxyConnectivityEndpoints = []string{
+	"https://connectivitycheck.gstatic.com/generate_204",
+	"https://cp.cloudflare.com/generate_204",
+	"https://www.msftconnecttest.com/connecttest.txt",
+}
+
+var winINetDirectConnectivityEndpoints = []string{
+	"https://www.baidu.com/",
+	"https://connect.rom.miui.com/generate_204",
+}
+
+const winINetApplicationProbeAttempts = 2
+
 // ProbeDefaultProxy performs a real WinINet request with PRECONFIG settings.
 // This proves that a normal current-user Windows application consumes the
 // proxy Navo just committed, rather than only proving the explicit endpoint.
 func ProbeDefaultProxy(ctx context.Context) error {
+	return probeWinINet(ctx, internetOpenTypePreconfig, "default proxy", winINetProxyConnectivityEndpoints, true)
+}
+
+// ProbeDefaultDirectRouting proves that a PRECONFIG WinINet application still
+// enters Navo while the active runtime policy intentionally routes direct.
+func ProbeDefaultDirectRouting(ctx context.Context) error {
+	return probeWinINet(ctx, internetOpenTypePreconfig, "default proxy/direct routing", winINetDirectConnectivityEndpoints, false)
+}
+
+// ProbeDirect performs a current-user WinINet request without an explicit or
+// configured proxy. In TUN mode this exercises the Windows host routing path
+// independently from the Service process verifier.
+func ProbeDirect(ctx context.Context) error {
+	return probeWinINet(ctx, internetOpenTypeDirect, "direct/TUN", winINetProxyConnectivityEndpoints, true)
+}
+
+// ProbeDirectRouting verifies an intentionally direct TUN policy without
+// requiring resources that are expected to need a proxy in the current region.
+func ProbeDirectRouting(ctx context.Context) error {
+	return probeWinINet(ctx, internetOpenTypeDirect, "direct/TUN routing", winINetDirectConnectivityEndpoints, false)
+}
+
+func probeWinINet(ctx context.Context, accessType uintptr, pathName string, connectivityEndpoints []string, requireChatGPT bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -341,17 +392,17 @@ func ProbeDefaultProxy(ctx context.Context) error {
 	}
 	session, _, callErr := procInternetOpenW.Call(
 		uintptr(unsafe.Pointer(agent)),
-		internetOpenTypePreconfig,
+		accessType,
 		0,
 		0,
 		0,
 	)
 	if session == 0 {
-		return fmt.Errorf("InternetOpenW(PRECONFIG): %w", callErr)
+		return fmt.Errorf("InternetOpenW(%s): %w", pathName, callErr)
 	}
 	defer procInternetClose.Call(session)
 
-	timeout := uint32(1500)
+	timeout := uint32(2500)
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -374,41 +425,103 @@ func ProbeDefaultProxy(ctx context.Context) error {
 	}
 
 	var lastErr error
-	for _, endpoint := range []string{
-		"https://connectivitycheck.gstatic.com/generate_204",
-		"https://cp.cloudflare.com/generate_204",
-		"https://www.msftconnecttest.com/connecttest.txt",
-	} {
+	genericReady := false
+	for _, endpoint := range connectivityEndpoints {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		url, _ := syscall.UTF16PtrFromString(endpoint)
-		request, _, requestErr := procInternetOpenURLW.Call(
-			session,
-			uintptr(unsafe.Pointer(url)),
-			0,
-			0,
-			internetFlagReload|internetFlagNoCacheWrite,
-			0,
-		)
-		if request == 0 {
-			lastErr = fmt.Errorf("InternetOpenUrlW(%s): %w", endpoint, requestErr)
-			continue
+		status, probeErr := winINetStatus(session, endpoint)
+		if probeErr == nil && status >= 200 && status < 400 {
+			genericReady = true
+			break
 		}
-		var status uint32
-		size := uint32(unsafe.Sizeof(status))
-		ok, _, statusErr := procHTTPQueryInfoW.Call(
-			request,
-			httpQueryStatusCode|httpQueryFlagNumber,
-			uintptr(unsafe.Pointer(&status)),
-			uintptr(unsafe.Pointer(&size)),
-			0,
-		)
-		procInternetClose.Call(request)
-		if ok != 0 && status >= 200 && status < 400 {
-			return nil
-		}
-		lastErr = fmt.Errorf("WinINet status for %s: status=%d error=%v", endpoint, status, statusErr)
+		lastErr = fmt.Errorf("WinINet status for %s: status=%d error=%v", endpoint, status, probeErr)
 	}
-	return fmt.Errorf("current-user default proxy data plane failed: %w", lastErr)
+	if !genericReady {
+		return fmt.Errorf("current-user %s data plane failed: %w", pathName, lastErr)
+	}
+	if !requireChatGPT {
+		return nil
+	}
+
+	for _, probe := range winINetChatGPTProbes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		status, probeErr := winINetApplicationStatus(ctx, session, probe)
+		if probeErr != nil {
+			return fmt.Errorf("current-user %s ChatGPT route %s failed: %w", pathName, probe.name, probeErr)
+		}
+		if !winINetStatusAccepted(status, probe.expected) {
+			return fmt.Errorf(
+				"current-user %s ChatGPT route %s returned unexpected status %d (expected %v)",
+				pathName, probe.name, status, probe.expected,
+			)
+		}
+	}
+	return nil
+}
+
+func winINetApplicationStatus(ctx context.Context, session uintptr, probe winINetApplicationProbe) (uint32, error) {
+	var status uint32
+	var lastErr error
+	for attempt := 0; attempt < winINetApplicationProbeAttempts; attempt++ {
+		status, lastErr = winINetStatus(session, probe.endpoint)
+		if lastErr == nil && winINetStatusAccepted(status, probe.expected) {
+			return status, nil
+		}
+		if attempt+1 == winINetApplicationProbeAttempts {
+			break
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return status, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return status, lastErr
+}
+
+func winINetStatus(session uintptr, endpoint string) (uint32, error) {
+	url, err := syscall.UTF16PtrFromString(endpoint)
+	if err != nil {
+		return 0, err
+	}
+	request, _, requestErr := procInternetOpenURLW.Call(
+		session,
+		uintptr(unsafe.Pointer(url)),
+		0,
+		0,
+		internetFlagReload|internetFlagNoCacheWrite,
+		0,
+	)
+	if request == 0 {
+		return 0, fmt.Errorf("InternetOpenUrlW(%s): %w", endpoint, requestErr)
+	}
+	defer procInternetClose.Call(request)
+
+	var status uint32
+	size := uint32(unsafe.Sizeof(status))
+	ok, _, statusErr := procHTTPQueryInfoW.Call(
+		request,
+		httpQueryStatusCode|httpQueryFlagNumber,
+		uintptr(unsafe.Pointer(&status)),
+		uintptr(unsafe.Pointer(&size)),
+		0,
+	)
+	if ok == 0 {
+		return status, fmt.Errorf("HttpQueryInfoW(%s): %w", endpoint, statusErr)
+	}
+	return status, nil
+}
+
+func winINetStatusAccepted(status uint32, expected []uint32) bool {
+	for _, candidate := range expected {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
 }

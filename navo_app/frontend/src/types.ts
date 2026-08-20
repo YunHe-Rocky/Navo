@@ -24,6 +24,59 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "rec
 export type NetworkHealthState = "unknown" | "checking" | "healthy" | "degraded" | "unavailable";
 export type IconState = "default" | "airport" | "proxy" | "error";
 
+export type RecoveryState = "idle" | "detected" | "repairing" | "verifying" | "failover" | "recovered" | "failed";
+
+export interface RecoveryEvidence {
+  code: string;
+  domain: string;
+  severity: string;
+  summary: string;
+  symptom: string;
+  impact: string;
+  source_service: string;
+  core_id?: string;
+  outbound_id?: string;
+  capture_mode?: string;
+  observed_at: string;
+  details?: Record<string, unknown>;
+}
+
+export interface RecoveryRound {
+  round: number;
+  action: string;
+  started_at: string;
+  completed_at: string;
+  recovered: boolean;
+  evidence?: string;
+  error?: string;
+  rollback?: string;
+}
+
+export interface RecoveryCandidate {
+  outbound_id: string;
+  source_type: string;
+  latency_ms?: number;
+  reachable: boolean;
+  selected: boolean;
+  verified: boolean;
+  error?: string;
+  completed_at: string;
+}
+
+export interface RecoveryReport {
+  id: string;
+  state: RecoveryState;
+  evidence: RecoveryEvidence;
+  rounds: RecoveryRound[];
+  candidates?: RecoveryCandidate[];
+  recovered: boolean;
+  exhausted: boolean;
+  failover: boolean;
+  final_error?: string;
+  final_impact?: string;
+  started_at: string;
+  updated_at: string;
+}
 export interface CoreStatus {
   core_id: string;
   state: string;
@@ -78,7 +131,9 @@ export interface Dashboard {
   runtime: {
     mode: RuntimeMode;
     list_mode: RoutingListMode;
+    selected_id: string;
     active_id: string;
+    candidate_id: string;
     tun_enabled: boolean;
     blacklist: string[];
     whitelist: string[];
@@ -104,6 +159,36 @@ export interface Dashboard {
     fault_id: string;
     last_error: string;
     can_retry_tun: boolean;
+    updated_at: string;
+    readiness: {
+      state: "unverified" | "checking" | "ready" | "failed" | string;
+      scope: string;
+      sites: Record<string, {
+        dns: boolean;
+        tcp: boolean;
+        https: boolean;
+        status_code?: number;
+      }>;
+      default_proxy: boolean;
+      checked_at: string;
+      error?: string;
+    };
+    recovery?: RecoveryReport;
+    transaction?: {
+      busy: boolean;
+      id: string;
+      operation: string;
+      origin: string;
+      phase: string;
+      fault_domain: string;
+      started_at: string;
+      queued: number;
+      last_id: string;
+      last_operation: string;
+      last_phase: string;
+      last_error: string;
+      completed_at: string;
+    };
   };
   metrics: MetricsStatus;
   ip: {
@@ -173,11 +258,15 @@ export interface RouteInfo {
   source_type: SourceType;
   country: string;
   active: boolean;
+  candidate: boolean;
+  selected: boolean;
 }
 
 export interface Routes {
   outbounds: RouteInfo[];
+  selected_id: string;
   active_id: string;
+  candidate_id: string;
   mode: string;
 }
 

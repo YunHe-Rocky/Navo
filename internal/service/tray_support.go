@@ -131,11 +131,13 @@ func (s *Service) handleDiagnosticsExport(
 			"restart_count": coreStatus.RestartCount,
 		},
 		"runtime": map[string]interface{}{
-			"mode":              runtimeSnapshot.Mode,
-			"selected_outbound": runtimeSnapshot.SelectedOutbound,
-			"tun_enabled":       runtimeSnapshot.TUNEnabled,
-			"revision_id":       runtimeSnapshot.RevisionID,
-			"revision_status":   runtimeSnapshot.RevisionStatus,
+			"mode":               runtimeSnapshot.Mode,
+			"selected_outbound":  runtimeSnapshot.SelectedOutbound,
+			"active_outbound":    activeOutboundID(runtimeSnapshot),
+			"candidate_outbound": candidateOutboundID(runtimeSnapshot),
+			"tun_enabled":        runtimeSnapshot.TUNEnabled,
+			"revision_id":        runtimeSnapshot.RevisionID,
+			"revision_status":    runtimeSnapshot.RevisionStatus,
 		},
 		"counts": map[string]interface{}{
 			"subscriptions": len(s.subMgr.List()),

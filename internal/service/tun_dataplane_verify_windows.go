@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"navo/internal/network"
@@ -26,10 +25,20 @@ type externalSiteProbe struct {
 	ExpectedStatus []int
 }
 
-var requiredExternalSites = []externalSiteProbe{
+var genericProxySites = []externalSiteProbe{
 	{Name: "google", URL: "https://www.google.com/generate_204", ExpectedStatus: []int{http.StatusNoContent}},
 	{Name: "github", URL: "https://github.com/", ExpectedStatus: []int{http.StatusOK}},
 }
+
+var chatGPTApplicationSites = []externalSiteProbe{
+	{Name: "chatgpt-web", URL: "https://chatgpt.com/", ExpectedStatus: []int{http.StatusOK, http.StatusForbidden}},
+	{Name: "chatgpt-auth", URL: "https://auth.openai.com/", ExpectedStatus: []int{http.StatusOK, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusForbidden}},
+	{Name: "openai-api", URL: "https://api.openai.com/v1/models", ExpectedStatus: []int{http.StatusUnauthorized}},
+	{Name: "chatgpt-assets", URL: "https://persistent.oaistatic.com/", ExpectedStatus: []int{http.StatusOK, http.StatusForbidden, http.StatusNotFound}},
+	{Name: "chatgpt-stream", URL: "https://ws.chatgpt.com/", ExpectedStatus: []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound}},
+}
+
+var requiredExternalSites = append(append([]externalSiteProbe{}, genericProxySites...), chatGPTApplicationSites...)
 
 func newTUNDataPlaneVerifier() TUNDataPlaneVerifier {
 	return &windowsTUNDataPlaneVerifier{}
@@ -73,10 +82,12 @@ func (*windowsTUNDataPlaneVerifier) Verify(ctx context.Context, request VerifyRe
 		return result, &network.TUNError{Code: network.ErrTUNHTTPSVerifyFailed, Stage: network.TUNStageDataPlaneVerified, Resource: "www.cloudflare.com", Expected: "TLS and HTTP response after bounded retries", Actual: "failed", Cause: err}
 	}
 	result.HTTPS = true
+	probes := requiredExternalSites
 	if request.DirectMode {
 		if result.ExitIP != request.DirectIP {
 			return result, &network.TUNError{Code: network.ErrTUNExitIPMismatch, Stage: network.TUNStageDataPlaneVerified, Resource: "direct_mode_exit", Expected: request.DirectIP, Actual: result.ExitIP}
 		}
+		probes = runtimeRoutingVerificationSites(runtimeModeDirect)
 	} else {
 		proxyURL, parseErr := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", request.ProxyPort))
 		if parseErr != nil {
@@ -90,10 +101,10 @@ func (*windowsTUNDataPlaneVerifier) Verify(ctx context.Context, request VerifyRe
 		if err != nil || result.ExitIP == request.DirectIP || result.ExitIP != result.ProxyExitIP {
 			return result, &network.TUNError{Code: network.ErrTUNExitIPMismatch, Stage: network.TUNStageDataPlaneVerified, Resource: "proxy_exit_ip", Expected: fmt.Sprintf("TUN != %s and TUN == local-proxy", request.DirectIP), Actual: fmt.Sprintf("tun=%s proxy=%s", result.ExitIP, result.ProxyExitIP), Cause: err}
 		}
-		result.Sites, err = verifyExternalSites(ctx, requiredExternalSites)
-		if err != nil {
-			return result, err
-		}
+	}
+	result.Sites, err = verifyExternalSites(ctx, probes)
+	if err != nil {
+		return result, err
 	}
 
 	if !request.UDPRequired {
@@ -137,31 +148,17 @@ func lookupSystemResolverWithRetry(
 }
 
 func verifyExternalSites(ctx context.Context, probes []externalSiteProbe) (map[string]SiteVerification, error) {
-	type probeResult struct {
-		verification SiteVerification
-		err          error
-	}
-	results := make([]probeResult, len(probes))
-	var wait sync.WaitGroup
-	for index, probe := range probes {
-		index, probe := index, probe
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			results[index].verification, results[index].err = retryTUNProbe(
-				ctx, 3, 10*time.Second, 500*time.Millisecond,
-				func(probeCtx context.Context) (SiteVerification, error) {
-					return verifyExternalSite(probeCtx, probe)
-				},
-			)
-		}()
-	}
-	wait.Wait()
 	verified := make(map[string]SiteVerification, len(probes))
-	for index, probe := range probes {
-		verified[probe.Name] = results[index].verification
-		if results[index].err != nil {
-			return verified, results[index].err
+	for _, probe := range probes {
+		verification, err := retryTUNProbe(
+			ctx, 3, 10*time.Second, 500*time.Millisecond,
+			func(probeCtx context.Context) (SiteVerification, error) {
+				return verifyExternalSite(probeCtx, probe)
+			},
+		)
+		verified[probe.Name] = verification
+		if err != nil {
+			return verified, err
 		}
 	}
 	return verified, nil

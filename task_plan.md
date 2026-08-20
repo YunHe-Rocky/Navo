@@ -47,6 +47,37 @@ core switching, data plane and shutdown recovery.
 - [ ] Phase 55: Diagnose repeated `Agent / UIIPC request failed`, preserve actionable IPC error context, harden Agent readiness/reconnect behavior, and verify cold-start/restart/timeout paths.
 - [ ] Phase 56: Prove every supported capture and routing mode with real traffic and correct data on the current portable build; repair failures and rerun until the full matrix passes.
 - [x] Phase 57: Repair crash-safe DNS recovery and cold-boot proxy activation; prove startup reconciliation, deferred activation, actionable failure handling, and exact DNS/WinINet rollback.
+- [x] Phase 59: Implement docs/Navo_架构边界_调度与自愈设计规范_V1.md: establish one Connection Coordinator, enforce observation/control ownership boundaries, serialize all network mutations, constrain Scheduler to triggers, add two-round domain-scoped SelfHeal, preserve capture/policy on node changes, and verify transactional rollback/failover behavior.
+
+### Phase 59 execution
+
+- [x] 59.1 Map the V1 architectural rules to current packages, call paths, state owners, and test coverage.
+- [x] 59.2 Introduce or consolidate typed domain contracts and the single cross-domain Connection Coordinator.
+- [x] 59.3 Route Scheduler and SelfHeal mutations through the coordinator with bounded two-round, fault-domain-scoped policy.
+- [x] 59.4 Enforce Active/Candidate node commit, capture/policy preservation, rollback to the prior node, and same-source failover boundaries.
+- [x] 59.5 Add focused regression coverage, run repository gates, and document remaining elevated Windows acceptance.
+
+### Phase 61: complete all deferred V1 behavior and acceptance
+
+- [x] 61.1 Reconcile the dirty worktree and Phase 60, inventory current health probes, SelfHeal policies, source-channel metadata, failover paths, UI state, and elevated acceptance scripts.
+- [x] 61.2 Define and implement the fault-evidence matrix, stable attributed error report, and round-1/round-2 minimal repair actions for every controllable fault domain.
+- [x] 61.3 Implement Coordinator-owned active-node recovery and on-demand same-channel candidate discovery, ranking, real validation, commit, rollback, and terminal reporting.
+- [x] 61.4 Finalize BLACKLIST/WHITELIST semantics in the canonical rule model and expose complete transaction, recovery, failover, evidence, and impact state in Wails/Vue UI.
+- [in_progress] 61.5 Add regression/integration coverage, run all source/package gates, then execute elevated System Proxy/TUN DNS/TCP/HTTPS/exit-IP/stability/crash/recovery/rollback/residue acceptance without touching unrelated processes.
+
+### Phase 62: reported enabled-but-no-traffic proxy incident
+
+- [x] 62.1 Capture the current process, listener, WinINet, adapter, route, DNS, runtime-log, and no-proxy traffic evidence without mutating networking or stopping unrelated processes.
+- [x] 62.2 Reproduce the failing System Proxy/TUN path and identify the first divergence between committed control-plane state and actual application traffic.
+- [x] 62.3 Implement the narrowest production repair plus regression coverage, preserving Coordinator ownership and fail-closed readiness semantics.
+- [ ] 62.4 Run focused/full source gates, build the portable green directory and ZIP, then prove real DNS/TCP/HTTPS/exit-IP/stability/rollback behavior on the repaired build.
+
+### Phase 63: wire failed activation into bounded SelfHeal
+
+- [x] 63.1 Prove whether the missing trigger is health-monitor startup, fault observation, debounce, or recovery scheduling.
+- [x] 63.2 Release the failed user capture transaction, then enter Coordinator-owned bounded SelfHeal for a faulted requested mode without recursive mutation ownership.
+- [x] 63.3 Correct fault attribution so host-path timeouts use node repair/failover while adapter faults use TUN recovery; add activation-recovery and classification regressions.
+- [in_progress] 63.4 Run full gates, rebuild the portable package, and execute elevated TUN failure/recovery/rollback acceptance when UAC is approved.
 
 ### Phase 34 execution
 
@@ -87,6 +118,11 @@ core switching, data plane and shutdown recovery.
 - [x] 37.5 Verify real foreign-site HTTP/HTTPS and exit-IP traffic through the selected proxy, then verify disable rollback.
 
 ## Current Phase
+
+Phase 62 is in progress. The user reports that capture enables without an error but
+ordinary traffic does not pass. Treat only real no-explicit-proxy DNS/TCP/HTTPS and
+exit-IP evidence as success; preserve unrelated v2rayN/user processes and current
+dirty-worktree changes.
 
 Phase 55 is in progress. Correlate the 2026-08-14 UIIPC failures with launcher,
 Agent, pipe, and UI diagnostics before changing behavior; do not weaken the local-only
@@ -719,3 +755,208 @@ Close the locally actionable gaps found by the objective project audit: one auth
 | Wails existing RT_VERSION remained 0.0.0 after a JSON resource merge | 1 | Pass explicit go-winres file/product version flags; all three release PE versions are 1.0.29.0. |
 | Initial README/CLAUDE generation interpreted Windows backslashes as control escapes | 1 | Backed up both files, restored the baseline, regenerated exact UTF-8 diffs, scanned control bytes, and passed git diff --check. |
 | Normal-user package smoke could not access the elevated UI Agent pipe | 1 | Verified zero Navo residue and preserved v2rayN; an all-elevated retry was canceled at UAC, so runtime smoke remains pending. |
+
+# Phase 60: explainable network risk and ChatGPT usability (2026-08-17)
+
+## Goal
+
+Replace optimistic capture-state reporting with evidence-based, explainable network risk, and make ChatGPT desktop usability an explicit end-to-end acceptance gate covering routing, DNS, TLS/HTTPS, authentication/assets, API, streaming/WebSocket, stability, and exact rollback.
+
+## Phases
+
+- [x] **60.1 Current-state diagnosis** - Correlate UI risk derivation, committed capture state, generated routing, live core/listener ownership, Windows proxy/TUN state, and current ChatGPT application traffic without mutating unrelated processes.
+- [x] **60.2 Risk model repair** - Derive severity and explanations from fresh probe evidence, distinguish enabled/healthy/degraded/unusable/stale states, and provide a concrete recovery action without relying on color alone.
+- [x] **60.3 ChatGPT routing repair** - Fix the narrowest responsible routing, DNS, lifecycle, or policy boundary while preserving blacklist/whitelist/global/bypass semantics and fail-closed rollback.
+- [x] **60.4 Regression and UI verification** - Add focused Go/Vue regressions and verify both themes plus compact layout with browser-visible evidence.
+- [x] **60.5 Real application acceptance** - Prove ChatGPT desktop DNS, auth/assets, API, and streaming/WebSocket behavior through the active Navo path, delayed stability, disable rollback, and zero Navo-owned residue.
+
+## Constraints
+
+- UI “enabled”, a listener, core process, adapter, TCP connect, or Google/GitHub success is not ChatGPT acceptance.
+- Preserve unrelated v2rayN/user processes and do not weaken TLS verification or add broad third-party route suffixes.
+- Do not claim current network state from non-elevated `Access denied`; elevated TUN mutation remains a separately evidenced gate.
+- Keep portable green directory plus ZIP as the delivery model.
+
+## Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| Initial combined skill read was truncated, and the first sandboxed read hit the Windows ACL helper | 1 | Re-read both skill files completely in bounded elevated chunks before project actions. |
+| Native `apply_patch` could not read the workspace because the Windows sandbox ACL helper failed | 1 | Applied the same reviewed EOF-only diff with repository-scoped `git apply --recount`; no unrelated path was edited. |
+| First `git apply --recount` input omitted a valid hunk range and was rejected as garbage | 1 | Counted the exact EOF line and reapplied a standard one-context hunk; the rejected patch changed nothing. |
+
+## Phase 60 completion evidence
+
+- System Proxy and TUN activation now fail closed on named ChatGPT web/auth/API/assets/stream evidence; System Proxy additionally requires the current-user WinINet PRECONFIG path before commit.
+- The capture snapshot persists readiness state, named-site DNS/TCP/TLS/HTTP evidence, default-proxy proof, timestamp, and actionable error. Vue treats readiness as a hard health condition and keeps IP attributes separate.
+- Focused Go suites and the full package gate passed. Frontend behavior tests passed 9/9; TypeScript, Vite production build, and browser-visible ready/stale/failed/IP-attribute branches passed in both themes with zero browser errors.
+- Elevated isolated System Proxy acceptance passed twice at 2026-08-17 10:44:40 and 10:45:19 Asia/Shanghai through the existing v2rayN upstream. All five named ChatGPT edges passed, WinINet PRECONFIG was true, delayed verification passed, rollback was exact, v2rayN PID 12600 remained, and no Navo process/listener remained.
+- Delivered `Navo-1.0.30-portable-amd64` plus ZIP. Package verifier reported 28 files, 27 manifest entries, 0 issues; ZIP SHA-256 is `93A82680D719F56C8588681C7B975DB6439D15EDBE27CCBDAA18DD27F7DB6C2C`.
+
+## Phase 60 errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| Native `apply_patch` could not read workspace files because the Windows sandbox ACL helper failed | 1 | Applied reviewed repository-scoped unified diffs with `git apply`; rejected hunks changed no files. |
+| One manual Agent dispatch hunk omitted the response-map closing line | 1 | `gofmt`/Go tests caught it immediately; inserted the missing close, formatted, and reran the complete suite. |
+| Python Playwright and the bundled Playwright browser were unavailable | 2 | Used bundled Node Playwright with the installed system Chrome; the same DOM, theme, error, and screenshot assertions passed. |
+| First portable build hit `EPERM` unlinking Rolldown after browser testing | 1 | Identified and stopped only the nine test-owned npm/Vite PIDs, confirmed ownership by command line, then reran the full package gate successfully. |
+| Local image-view helper hit the same Windows ACL helper after screenshots were created | 1 | Retained the screenshots and required browser DOM/semantic assertions plus zero console/page errors; no product validation was skipped. |
+
+## Phase 62 errors encountered
+
+- Native `apply_patch` could not read workspace files because the Windows deny-read ACL helper failed; no workspace file changed.
+- The first two reviewed `git apply` fallback patches had incorrect unified-diff hunk counts and were rejected before mutation; the corrected minimal patch applied cleanly.
+- The first startup/log inventory script had an invalid PowerShell empty pipeline element; it was rejected before reading state, then replaced with explicit array collection.
+- The first acceptance-result parser repeated the invalid PowerShell foreach-to-pipeline form and was rejected before reading output; explicit array collection resolved it.
+- Native `apply_patch` was again blocked by the Windows ACL helper for the acceptance diagnostic edit; the reviewed minimal fallback patch applied and passed PowerShell AST/diff checks.
+- Native `apply_patch` was blocked before the production repair; the same reviewed five-file patch was applied with `git apply --recount`, then formatted and whitespace-checked.
+- The address-family diagnostic rerun was not executed because Windows returned `The operation was canceled by the user` at UAC. No network mutation occurred and WinINet remained on v2rayN 10808.
+- The first focused Go test used `.cache\go-mod` with `GOPROXY=off`, but the repository standard cache is `.cache\go\pkg\mod`; dependency setup failed before compile. Rerun uses the existing standard cache without downloading.
+- The standard repository Go cache was also empty, so the second offline focused attempt again stopped before compile.
+- Third attempt downloaded only go.mod/go.sum-locked modules through goproxy.cn into the repository cache; all focused packages passed.
+- The repaired 1.0.31 elevated TUN acceptance did not start because Windows returned `The operation was canceled by the user` at UAC; no product or network mutation occurred.
+- Final package verification initially queried a non-existent root-level `navo-agent.exe`; corrected inventory confirmed the actual launcher, repair, and `app_ui/navo_app.exe` PE versions/hashes without changing the package.
+- The first combined Phase 63 patch was rejected by `git apply --check` because one test hunk had stale context; production code was unchanged, then applied separately.
+- A zero-context test append landed inside the previous composite literal; `gofmt` caught it before compile. The complete test-only patch was reversed, split, anchored at the real EOF, and then formatted successfully.
+
+# Phase 64: core capture and routing closure (2026-08-20)
+
+## Goal
+
+Make System Proxy, TUN, blacklist mode, and whitelist mode real end-to-end product capabilities: each must have an explicit frontend control and truthful state, a canonical backend execution path, core-specific generated routing, behavioral regression coverage, and live Windows data-plane/rollback evidence appropriate to its scope.
+
+## Phases
+
+- [x] **64.1 Inventory and baseline** - Re-establish current process/network ownership, map UI/Wails/Agent/Service/compiler/core paths, and identify missing or contradictory behavior without mutating unrelated processes.
+- [ ] **64.2 System Proxy closure** - Verify and repair explicit UI controls, WinINet ownership, local proxy readiness, named application traffic, mode switching, disable, and exact rollback.
+- [ ] **64.3 TUN closure** - Verify and repair explicit UI controls, privilege/ownership checks, adapter/route/DNS/firewall lifecycle, ordinary no-proxy host traffic, stability, recovery, and exact rollback for supported cores; fail closed for unsupported Xray TUN.
+- [ ] **64.4 Blacklist/whitelist closure** - Preserve independent opt-in list modes, canonical semantics, precedence, persistence, and backend generation; prove matched and unmatched destinations behaviorally across capture modes and supported cores.
+- [x] **64.5 Automated and browser gates** - Run focused/full Go gates, frontend tests/typecheck/build, browser-visible interaction/state checks, PowerShell parser checks, diff checks, and package verification.
+- [ ] **64.6 Elevated live acceptance and delivery** - Run the bounded System Proxy/TUN/routing matrix with DNS/TCP/HTTPS/exit-IP/stability/re-enable evidence, verify exact rollback and zero Navo-owned residue, preserve v2rayN, and produce the portable directory plus ZIP if source changes require a refresh.
+
+## Constraints
+
+- A UI state, listener, adapter, core process, generated config, or `HEALTH_COMMITTED` is not data-plane acceptance.
+- Blacklist and whitelist are independent opt-in routing modes; enabling System Proxy or TUN must not silently enable either list mode.
+- Preserve canonical semantics: blacklist match routes through the selected proxy, whitelist match routes direct, private CIDRs remain direct, and unmatched traffic follows the selected base runtime mode.
+- Xray TUN must remain explicitly unsupported unless the bundled version and owned adapter path can pass the same lifecycle gates.
+- Never overwrite WinINet/DNS/routes/firewall state that Navo does not own; rollback must be exact and idempotent.
+- Preserve unrelated v2rayN/user processes and all existing dirty-worktree changes.
+- Keep portable green directory plus ZIP as the delivery model; do not create MSI/setup output.
+
+## Phase 64 errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| The first full Go gate session was interrupted while downloading pinned modules when a new user message steered the turn; the returned PTY session no longer existed | 1 | Confirm no orphaned test process remains, then rerun the same repository gate once from the warmed repository cache and record only the complete result. |
+| The clean full Go gate reached package setup but `proxy.golang.org` timed out fetching pinned modules; unaffected dependency-free packages passed, but this is not a valid full verdict | 2 | Populate the repository module cache through the previously validated `goproxy.cn` path, then rerun the unchanged full gate offline from that cache. |
+| The required Python Playwright module is not installed and the project has no local Playwright dependency | 1 | Use the already-installed system Chrome with a bounded existing/bundled browser automation runtime if available; do not add a production dependency merely for the smoke test. |
+| First browser smoke reached the theme step but the accessible-name selector `日` also matched `设置与日志` | 1 | Use an exact accessible name for the one-character theme buttons and rerun the same end-to-end interaction script. |
+| A read-only `Select-String -LiteralPath` check incorrectly passed a wildcard path and was rejected | 1 | Enumerate the bounded Agent Go files first, then pipe them to `Select-String`; no source or runtime state changed. |
+| The first 1.0.33 package attempt set `GOPROXY=off`; project gates passed, but the locally rebuilt Wails CLI still lacked its own transitive modules | 1 | The failure occurred before release output creation. Rerun the unchanged package script with the previously validated `goproxy.cn` mirror, then accept only a fully verified directory and ZIP. |
+| Non-elevated packaged System Proxy acceptance could not start because the production launcher correctly requires elevation | 1 | The runner restored the pre-existing v2rayN WinINet snapshot and left zero Navo residue; use one elevated wrapper for all product scenarios. |
+| The bounded 11-case elevated wrapper did not start because Windows reported `The operation was canceled by the user` at UAC | 1 | No Navo/network mutation occurred. Preserve the clean baseline and leave live System Proxy/TUN/list-mode verdicts open until the user explicitly accepts a future UAC prompt. |
+
+# Phase 65: V1 architecture normalization and usable-proxy closure (2026-08-20)
+
+## Goal
+
+Implement the user-requested V1 architecture boundaries instead of stopping at the document's earlier planning-only scope: global observation but Navo-owned control only, one serialized Connection Coordinator for every control mutation, verified Candidate-to-Active promotion, capture/policy independence, request-only scheduling, bounded two-round domain-specific SelfHeal, safe rollback/same-channel failover, and real System Proxy/TUN usability evidence from the delivered package.
+
+## Phases
+
+- [x] **65.1 Specification-to-code ownership map** - Map every UI/Wails/Agent/Service/Scheduler/SelfHeal mutation, state owner, external-observation path, and package/live baseline to each V1 principle; identify remaining direct or duplicated control paths.
+- [x] **65.2 Single control transaction boundary** - Route all node, core, capture, runtime-policy, source, repair, and automatic recovery mutations through one typed Connection Coordinator transaction while keeping observation parallel and preserving independent rollback contexts.
+- [x] **65.3 Candidate/Active and source-channel semantics** - Require real data-plane validation before Active promotion, preserve capture and traffic policy during node changes, restore the previous Active node on user-switch failure, and keep airport versus independent-proxy automatic failover isolated.
+- [x] **65.4 Capture, policy, and SelfHeal truth** - Enforce OFF/System Proxy/TUN mutual exclusion in the backend, keep Global/Blacklist/Whitelist independent of capture, prove Navo-only resource ownership, cap complete SelfHeal rounds at two, expose attributable evidence/actions/impact, and fail closed when recovery cannot be proven.
+- [x] **65.5 Automated/UI/package gates** - Added boundary and regression tests, ran full Go/vet plus frontend/browser/PowerShell gates, updated truthful route-aware verification, and built/re-verified the 1.0.35 portable directory plus ZIP.
+- [ ] **65.6 Elevated packaged data-plane acceptance** - With one explicit Windows elevation approval, run isolated System Proxy and supported TUN scenarios across applicable cores: DNS/TCP/HTTPS, Google/GitHub/application edges, exit-IP differentiation, policy/list behavior, stability, re-enable, recovery, exact rollback, and zero Navo-owned residue while preserving v2rayN.
+
+## Constraints
+
+- Treat the attached V1 document as the product/architecture specification; its historical statement that implementation comes later does not override the user's current request to implement it now.
+- Preserve the already-established exact list semantics: private networks direct; selected blacklist matches proxy; selected whitelist matches direct; unmatched traffic follows the base runtime mode. The V1 document intentionally left this detail open, so do not regress the current canonical product definition.
+- External Clash/v2rayN/core/network resources are observe-only. Never stop, rewrite, repair, or claim an external resource.
+- A candidate, config load, process, listener, WinINet flag, adapter, or internal readiness report is not a successful proxy connection; require independent current-user data-plane evidence before commit.
+- Preserve all unrelated dirty-worktree changes and continue delivering only a portable directory plus ZIP.
+
+## Phase 65 errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| The managed sandbox could not create the initial read process because the ACL helper failed while applying deny-read rules | 1 | Re-ran the bounded read-only specification/skill recovery with explicit approval; no workspace or runtime mutation occurred. |
+| The combined skill/spec/plan recovery output exceeded the tool output budget and was truncated | 1 | Read the 455-line planning skill in bounded sections, then restored Phase 64 state and the V1-specific memory/rollout summary separately. |
+| Native `apply_patch` could not read planning files because the managed ACL helper failed | 1 | Tried the Codex-provided patch wrapper through an approved shell; it also failed before mutation. |
+| The elevated Codex `apply_patch` wrapper returned `Access is denied` | 2 | Switched to one repository-scoped unified diff after resolving an exact file anchor. |
+| The first `git apply --recount` fallback diff omitted a legal hunk line range and was rejected as garbage | 1 | Resolved the exact EOF anchor and replayed a standard numbered hunk; the rejected patch changed nothing. |
+| `rg.exe` is present but Windows denied process launch during the mutation search | 1 | Switched to bounded `Get-ChildItem` plus `Select-String` over Go roots, preserving the same read-only search scope. |
+| The first combined production patch was rejected because capture/tray contexts had drifted from the inspected hunk | 1 | Split production edits into exact minimal hunks; rejected patches made no changes. |
+| The Service subscription patch result was truncated, then inspection showed the target async code was unchanged | 1 | Re-inspected exact source before retrying; no duplicate edit was applied. |
+| Native `apply_patch` remained blocked by the Windows ACL helper during the subscription repair | 3 | Used a reviewed repository-scoped temporary LF patch transported through `.cache`, applied by `git apply`, then deleted immediately. |
+| PowerShell pipeline CRLF and PTY tab expansion caused several reviewed `git apply` attempts to reject exact Go hunks | 3 | Switched patch transport to an explicit LF/no-BOM temporary file; all rejected attempts were atomic and changed nothing. |
+| The first temporary subscription patch omitted its final newline and `git apply` rejected it as corrupt | 1 | Added the required final LF; the corrected patch applied and passed `gofmt` plus `git diff --check`. |
+| The first focused Go test used `.cache\go\pkg\mod` with `GOPROXY=off`, but current `scripts/test.ps1` uses `.cache\go-path\pkg\mod` | 1 | Reused the actual repository cache and reran offline; Agent and Service both passed. |
+| The first core-update Agent patch placed the shutdown recovery call inside `context.WithTimeout` arguments | 1 | `gofmt` caught the syntax error before compile; moved the call directly after the shutdown log and re-ran format/diff checks. |
+| The first core-update test compile used nonexistent `capture.StateOff` | 1 | Replaced it with the canonical `capture.StateStopped`; Agent tests passed. |
+| The first Candidate policy test compile omitted the standard-library `reflect` import | 1 | Added the import and reran the full Service package successfully. |
+| The broad production diff exceeded the output budget during audit | 1 | Re-ran bounded complete reads of the new session file and exact Active/Candidate helpers before making audit fixes. |
+
+## Phase 65 completion evidence
+
+- V1 boundaries are implemented in the product path: one Agent-owned Connection Coordinator transaction for mutations, strict Candidate-to-Active promotion, capture/policy separation, same-channel failover, Navo-only control, and bounded two-round domain-specific SelfHeal.
+- Route verification is now mode-aware: direct mode proves Baidu/Xiaomi through the selected capture while Global/list-proxy modes retain ChatGPT/OpenAI application probes. Re-selecting list mode `off` is idempotent and does not restart a healthy core.
+- Full gates passed: all Go packages plus `go vet`, frontend 11/11 behavior tests, Vue typecheck, Vite production build, browser interaction smoke, PowerShell parse checks, Wails Windows/amd64 build, manifest verification, and ZIP verification.
+- Delivered `release/Navo-1.0.35-portable-amd64` plus ZIP (28 files, 27 manifest entries, 0 issues), ZIP SHA-256 `5F8156F422241110091C5F60E9FDEF2C31E398881EA955B6CD255201D420B1E9`.
+- Real current-user System Proxy acceptance passed for bundled sing-box 1.13.14, Mihomo 1.19.29, and Xray 26.3.27. Direct/whitelist used direct exit `115.227.89.28`; Global/blacklist/list-off used proxy exit `63.124.165.24`; Google returned 204, GitHub 200, ChatGPT 403, OpenAI API 401; WinINet and process ownership rolled back exactly after each case.
+- Phase 65.6 remains open: the formal 11-case elevated package runner did not start because Windows UAC was canceled. No TUN adapter/route/DNS/WinINet mutation occurred, so elevated TUN data-plane usability is not claimed.
+
+## Phase 65 additional errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| The existing elevated acceptance script assumed a selected Candidate was immediately Active | 1 | Updated it to accept staging at creation and require Active only after real System Proxy/TUN verification. |
+| Direct-mode live acceptance exposed Service and Agent probes that always required ChatGPT/OpenAI | 2 | Made both verification layers route-aware and added direct versus Global/bypass regressions. |
+| A temporary validation launcher inherited the host's 386 architecture and failed Job Object startup with `ERROR_BAD_LENGTH` | 1 | Rebuilt the test-only launcher explicitly for Windows/amd64; formal delivery binaries were already amd64. |
+| Re-selecting list mode `off` restarted a healthy core and a transient asset probe timed out | 1 | Made `off` to `off` a verified no-op and added a bounded retry for ChatGPT application probes. |
+| The final formal elevated acceptance launch was canceled at the Windows UAC prompt | 1 | Verified the runner never started and preserved the gate as pending; no network or process mutation occurred. |
+
+# Phase 66: Core updater body-timeout recovery (2026-08-20)
+
+## Goal
+
+Make official core upgrades complete reliably through the active Navo System Proxy or direct fallback without weakening host/asset allowlists, size/hash/version verification, staging, atomic replacement, Coordinator ownership, capture restoration, or rollback.
+
+## Phases
+
+- [x] **66.1 Reproduce and map the timeout** - Traced UI/Wails download context, per-route client timeouts, response-body copy limits, proxy selection, redirect handling, and error attribution; reproduced the total-body deadline defect with controlled slow/stalled responses.
+- [x] **66.2 Repair bounded download semantics** - Separated connection/header deadlines from reset-on-progress body limits, kept each route isolated, rejected stalled or oversized bodies, and preserved cancellation plus integrity validation.
+- [x] **66.3 Regression and lifecycle gates** - Covered slow-progress success, stalled-body timeout, caller cancellation, route fallback, pre-session failure ordering, and unchanged running core/capture on download failure.
+- [x] **66.4 Package and live updater evidence** - Passed focused/full/package gates, built 1.0.36 portable artifacts, and verified an official core asset through the updater's own Go path without disturbing v2rayN or the user's running Navo.
+
+## Constraints
+
+- A failed or incomplete download must never enter the mutable core-update session or stop the active core.
+- Preserve fixed GitHub host/redirect and asset allowlists, bounded size, SHA-256/archive/executable/version validation, atomic replacement, capture restoration, and rollback.
+- Keep Navo loopback, WinINet loopback, environment proxy, and direct attempts isolated with actionable route-specific errors; never recurse through Navo's own proxy endpoint.
+
+## Phase 66 errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| User-visible updater exhausted both `Windows system proxy` and `direct` while reading the response body with `context deadline exceeded` | 1 | Treat as a downloader deadline/progress-control defect until the current implementation and controlled reproduction prove the exact cause; do not mutate the installed core. |
+| Native `apply_patch` again failed before mutation because the Windows ACL helper could not read planning files | 1 | Use a reviewed repository-scoped standard-input `git apply` patch and continue; no product or runtime state changed. |
+| The first combined production patch had invalid hunk counts and all broad replay variants were rejected during `git apply --check` | 4 | Abandoned the broad patch after verbose diagnosis; applied reviewed zero-context minimal hunks incrementally, with no partial target mutation from rejected attempts. |
+| A no-PTY `git apply -` process received immediate EOF before patch input | 1 | Stopped using that transport; the empty invocation changed nothing. |
+| The first zero-context context/routing patch overstated one new hunk line count | 1 | Corrected the count from 8 to 7 and applied the exact minimal patch; the corrupt attempt changed nothing. |
+| The first Base64 helper used unavailable V8 `TextEncoder`, and the first decoded input retained a PTY Ctrl-Z control byte | 2 | Replaced it with explicit UTF-8 byte encoding and filtered non-Base64 control characters before decode; neither failed transport reached a target mutation. |
+| The first atomic-progress refinement patch omitted the old lines for one replacement hunk | 1 | `git apply` rejected it as corrupt; added the exact deletions and applied the corrected minimal patch. |
+
+## Phase 66 completion evidence
+
+- Root cause fixed: the updater no longer applies a 45-second `http.Client.Timeout` to the complete archive body or shares one 2-minute context across all routes.
+- Each metadata route has 45 seconds; each archive route has 10 minutes; a transfer may run longer while bytes progress, but 30 seconds with no data closes the body. Application shutdown/caller cancellation remains authoritative.
+- Regression gates passed: slow-progress success, stalled-body failure, cancellation, fresh fallback budgets, zero whole-body client timeout, 10 consecutive focused runs, complete `navo_app`, full Go/vet, frontend 11/11, typecheck/build, Wails Windows/amd64, and package verification.
+- Read-only official updater-path test passed through preserved `127.0.0.1:10808`: sing-box 1.13.19, 21,046,252 bytes, 203.18 seconds, exact size/SHA-256/ZIP/executable verification, no update session or core mutation.
+- Delivered `release/Navo-1.0.36-portable-amd64` plus ZIP: 28 files, 27 manifest entries, archive 28 files, 0 issues; ZIP SHA-256 `1C1E5C0F4636FC59733FD33E6FE050925943FF0472C8D3196B4AA0D494AB74E4`.
+- Two Explorer-owned Navo processes that were already serving the user remain running and were not terminated; WinINet remains `127.0.0.1:10808`, listener 10808 remains PID 1392, and no 12080 listener was created.

@@ -2,7 +2,7 @@
 // It manages the system tray, system proxy, and communicates with the
 // Windows Service via Named Pipe.
 //
-// Architecture: Flutter UI → Pipe A → User Agent → Pipe B → Windows Service
+// Architecture: Wails/Vue UI → Agent Connection Coordinator → Service domain executors
 package agent
 
 import (
@@ -23,9 +23,11 @@ import (
 	"time"
 
 	"navo/internal/agent/systemproxy"
+	"navo/internal/connection"
 	"navo/internal/domain/capture"
 	"navo/internal/logstore"
 	"navo/internal/pipe"
+	"navo/internal/selfheal"
 )
 
 const (
@@ -45,16 +47,18 @@ type Config struct {
 	// instead of opening a pipe connection.
 	// SendToServiceContextFn is preferred because capture recovery and UI
 	// cancellation must stop the Service mutation itself, not only its waiter.
-	SendToServiceContextFn func(context.Context, map[string]interface{}) (map[string]interface{}, error)
-	SendToServiceFn        func(msg map[string]interface{}) (map[string]interface{}, error)
-	IsElevatedFn           func() bool
-	ProxyProbeFn           func(context.Context, string) error
-	ShowUIFn               func() error
-	MinimizeToTrayFn       func() error
-	RequestExitFn          func()
-	CaptureJournalPath     string
-	CaptureProbeFn         func(context.Context, capture.Mode) error
-	ProxyManager           *systemproxy.Manager
+	SendToServiceContextFn   func(context.Context, map[string]interface{}) (map[string]interface{}, error)
+	SendToServiceFn          func(msg map[string]interface{}) (map[string]interface{}, error)
+	IsElevatedFn             func() bool
+	ProxyProbeFn             func(context.Context, string) error
+	ShowUIFn                 func() error
+	MinimizeToTrayFn         func() error
+	RequestExitFn            func()
+	CaptureJournalPath       string
+	CaptureProbeFn           func(context.Context, capture.Mode) error
+	CaptureRouteProbeFn      func(context.Context, capture.Mode, string) error
+	CoreUpdateSessionTimeout time.Duration // optional bounded mutation window; defaults to four minutes
+	ProxyManager             *systemproxy.Manager
 }
 
 // Agent is the user-session agent.
@@ -63,16 +67,22 @@ type Agent struct {
 	proxy      *systemproxy.Manager
 	proxyProbe func(context.Context, string) error
 
-	serviceCh      *pipe.Channel // connection to service
-	serviceMu      sync.Mutex    // serializes request/response pairs on serviceCh
-	serviceSession string        // isolates Service replay IDs from UI request IDs
-	serviceSeq     atomic.Uint64
-	captureMu      sync.Mutex // serializes cross-layer capture mode transactions
-	captureStateMu sync.RWMutex
-	captureState   capture.Snapshot
-	captureJournal *capture.JournalStore
-	captureProbe   func(context.Context, capture.Mode) error
-	uiListener     pipe.Listener // listener for UI connections
+	serviceCh         *pipe.Channel // connection to service
+	serviceMu         sync.Mutex    // serializes request/response pairs on serviceCh
+	serviceSession    string        // isolates Service replay IDs from UI request IDs
+	serviceSeq        atomic.Uint64
+	captureStateMu    sync.RWMutex
+	captureState      capture.Snapshot
+	captureJournal    *capture.JournalStore
+	captureProbe      func(context.Context, capture.Mode) error
+	captureRouteProbe func(context.Context, capture.Mode, string) error
+	uiListener        pipe.Listener // listener for UI connections
+	coordinator       *connection.Coordinator
+	recoveryMu        sync.RWMutex
+	recoveryReport    selfheal.RecoveryReport
+
+	coreUpdateMu      sync.Mutex
+	coreUpdateSession *coreUpdateSession
 
 	ipProbeMu      sync.Mutex
 	ipProbeRunning bool
@@ -99,6 +109,9 @@ func New(cfg Config) (*Agent, error) {
 		cfg.IsElevatedFn = processIsElevated
 	}
 	serviceSessionBytes := make([]byte, 16)
+	if cfg.CoreUpdateSessionTimeout <= 0 {
+		cfg.CoreUpdateSessionTimeout = coreSwitchIPCRequestTimeout
+	}
 	if _, err := rand.Read(serviceSessionBytes); err != nil {
 		return nil, fmt.Errorf("create Agent Service request session: %w", err)
 	}
@@ -116,6 +129,7 @@ func New(cfg Config) (*Agent, error) {
 		proxy:          proxyManager,
 		proxyProbe:     proxyProbe,
 		serviceSession: hex.EncodeToString(serviceSessionBytes),
+		coordinator:    connection.NewCoordinator(),
 		stopCh:         make(chan struct{}),
 	}
 	agent.initializeCaptureState()
@@ -574,9 +588,10 @@ func (a *Agent) handleUIConnection(ctx context.Context, ch *pipe.Channel) {
 func agentIPCRequestTimeout(msg map[string]interface{}) time.Duration {
 	method, _ := msg["method"].(string)
 	switch method {
-	case "core.select":
+	case "core.select", "core.update.begin", "core.update.commit", "core.update.rollback",
+		"core.update.stop", "core.update.start":
 		return coreSwitchIPCRequestTimeout
-	case "capture.set", "capture.prepare", "tun.enable", "proxy.enable", "proxy.disable", "proxy.toggle", "network.recover",
+	case "capture.set", "capture.verify", "capture.prepare", "tun.enable", "proxy.enable", "proxy.disable", "proxy.toggle", "network.recover",
 		"runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set",
 		"outbound.select", "outbound.create", "outbound.delete",
 		"subscription.add", "subscription.remove", "subscription.refresh":
@@ -626,36 +641,62 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 	case "tray.snapshot":
 		return a.handleTraySnapshot(requestID)
 	case "connection.enable":
-		return a.handleConnectionEnable(requestID)
+		return a.handleConnectionEnable(ctx, requestID)
 	case "connection.disable":
-		return a.handleConnectionDisable(requestID)
+		return a.handleConnectionDisable(ctx, requestID)
 	case "connection.restart":
 		return a.handleConnectionRestart(ctx, requestID)
 	case "network.recover":
-		return a.handleNetworkRecover(requestID)
+		return a.handleNetworkRecover(ctx, requestID)
 	case "capture.set":
 		return a.setCaptureModeContext(ctx, requestID, msg)
 	case "core.select":
 		return a.selectCoreWithCapture(ctx, requestID, msg)
+	case "core.update.begin":
+		return a.handleCoreUpdateBegin(ctx, requestID, msg)
+	case "core.update.commit":
+		return a.handleCoreUpdateCommit(ctx, requestID, msg)
+	case "core.update.rollback":
+		return a.handleCoreUpdateRollback(requestID, msg)
+	case "core.update.stop", "core.update.start":
+		return agentError(requestID, "CORE_UPDATE_SESSION_REQUIRED", fmt.Errorf("raw core update steps are internal; begin a bounded core update session"))
 	case "outbound.select":
 		return a.selectOutboundWithCapture(ctx, requestID, msg)
 	case "outbound.create", "outbound.delete",
 		"subscription.add", "subscription.remove", "subscription.refresh":
 		return a.mutateSourcesWithCapture(ctx, requestID, msg)
+	case "subscription.update", "outbound.update":
+		return a.forwardConnectionMutation(
+			ctx, requestID, msg,
+			connection.OperationSourceMutation,
+		)
+	case "tun.config", "runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set":
+		return a.forwardConnectionMutation(
+			ctx, requestID, msg,
+			connection.OperationPolicyChange,
+		)
 	case "capture.status":
 		return agentResponse(requestID, a.captureStatusPayload())
+	case "capture.verify":
+		readiness, err := a.verifyCaptureReadiness(ctx)
+		if err != nil {
+			return agentError(requestID, "APPLICATION_READINESS_FAILED", err)
+		}
+		return agentResponse(requestID, map[string]interface{}{
+			"readiness": readiness,
+		})
 	case "tun.enable":
-		return a.setCaptureMode(requestID, map[string]interface{}{"mode": "tun"})
+		return a.setCaptureModeContext(ctx, requestID, map[string]interface{}{"mode": "tun"})
 	case "proxy.enable":
-		return a.setCaptureMode(requestID, map[string]interface{}{"mode": "system_proxy"})
+		return a.setCaptureModeContext(ctx, requestID, map[string]interface{}{"mode": "system_proxy"})
 	case "proxy.disable":
-		return a.setCaptureMode(requestID, map[string]interface{}{"mode": "off"})
+		return a.setCaptureModeContext(ctx, requestID, map[string]interface{}{"mode": "off"})
 	case "proxy.toggle":
 		mode := "system_proxy"
 		if a.ProxyStatus().Enabled {
 			mode = "off"
 		}
-		return a.setCaptureMode(requestID, map[string]interface{}{"mode": mode})
+		return a.setCaptureModeContext(ctx, requestID, map[string]interface{}{"mode": mode})
 	case "proxy.status":
 		status := a.ProxyStatus()
 		return map[string]interface{}{
@@ -663,11 +704,11 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 			"type":       "RESPONSE",
 			"payload":    status,
 		}
-	case "core.status", "core.list", "core.update.stop", "core.update.start",
-		"tun.status", "tun.config",
-		"subscription.update", "subscription.list",
-		"outbound.list", "outbound.update", "outbound.test", "outbound.testAll",
-		"runtime.status", "runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set",
+	case "core.status", "core.list",
+		"tun.status",
+		"subscription.list",
+		"outbound.list", "outbound.test", "outbound.testAll", "outbound.failover_candidates",
+		"runtime.status",
 		"metrics.current", "ip.check", "ip.check_all",
 		"diagnostics.export", "log.tail", "core.log.tail",
 		"logs.query", "logs.services", "logs.levels", "logs.clear.persisted":
@@ -704,10 +745,6 @@ func (a *Agent) Dispatch(
 	msg map[string]interface{},
 ) map[string]interface{} {
 	return a.dispatchUI(ctx, msg)
-}
-
-func (a *Agent) setCaptureMode(requestID string, msg map[string]interface{}) map[string]interface{} {
-	return a.setCaptureModeContext(context.Background(), requestID, msg)
 }
 
 func (a *Agent) setCaptureModeContext(
@@ -841,6 +878,20 @@ func (a *Agent) proxyResponse(requestID string, err error) map[string]interface{
 
 func (a *Agent) shutdown() error {
 	log.Printf("[agent] shutting down...")
+
+	a.abortCoreUpdateForShutdown()
+	shutdownCtx, shutdownCancel := context.WithTimeout(
+		context.Background(), captureRecoveryTimeout,
+	)
+	defer shutdownCancel()
+	transaction, transactionErr := a.beginConnection(
+		shutdownCtx, "", connection.OperationRecovery, connection.OriginShutdown, "capture",
+	)
+	if transactionErr != nil {
+		log.Printf("[agent] wait for connection transaction during shutdown: %v", transactionErr)
+	} else {
+		defer transaction.Close()
+	}
 
 	// Disable is ownership-aware and also recovers a record inherited after a
 	// crash; call it even when this process did not set the in-memory flag.

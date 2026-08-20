@@ -494,6 +494,10 @@ func TestService_SubAdd_Success(t *testing.T) {
 	if resp["type"] != "RESPONSE" {
 		t.Errorf("type = %v, want RESPONSE", resp["type"])
 	}
+	addPayload := resp["payload"].(map[string]interface{})
+	if addPayload["status"] != "added_pending_refresh" {
+		t.Fatalf("add payload = %#v", addPayload)
+	}
 
 	// Verify it was added
 	listResp := svc.handleSubList("test")
@@ -538,6 +542,26 @@ func TestService_SubRefreshWaitCompletesBeforeResponse(t *testing.T) {
 	}
 	payload := resp["payload"].(map[string]interface{})
 	if payload["status"] != "updated" || payload["node_count"] != 0 {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestService_SubRefreshRequiresSynchronousAgentTransaction(t *testing.T) {
+	svc, err := New(Config{
+		SingBoxPath: filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe"),
+		ConfigPath:  filepath.Join("..", "..", "configs", "test_direct.json"),
+		ConfigDir:   t.TempDir(),
+		ProxyPort:   12080,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := svc.handleSubRefresh(context.Background(), "test-no-wait", map[string]interface{}{})
+	if resp["type"] != "ERROR" {
+		t.Fatalf("response = %#v", resp)
+	}
+	payload := resp["payload"].(map[string]interface{})
+	if payload["code"] != "SUB_WAIT_REQUIRED" {
 		t.Fatalf("payload = %#v", payload)
 	}
 }

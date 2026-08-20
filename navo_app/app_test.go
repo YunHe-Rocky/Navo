@@ -20,6 +20,9 @@ func TestCaptureUIIPCRequestTimeoutCoversHardVerification(t *testing.T) {
 		t.Fatalf("core.select timeout = %v", got)
 	}
 	if got := uiIPCRequestTimeout("core.status"); got != 45*time.Second {
+		if got := uiIPCRequestTimeout("core.update.commit"); got != 4*time.Minute {
+			t.Fatalf("core.update.commit timeout = %v", got)
+		}
 		t.Fatalf("default timeout = %s", got)
 	}
 }
@@ -31,9 +34,9 @@ func TestDashboardSnapshotDecoding(t *testing.T) {
 		"core":{"core_id":"sing-box","state":"running"},
 		"cores":[{"id":"sing-box","installed":true,"active":true,"capture_modes":["off","system_proxy","tun"],"system_proxy_supported":true,"tun_supported":true}],
 		"proxy":{"enabled":true,"server":"127.0.0.1","port":12080},
-		"runtime":{"mode":"bypass_mainland","active_id":"route-1","tun_enabled":false,"blacklist":["blocked.example"],"whitelist":["direct.example"]},
+		"runtime":{"mode":"bypass_mainland","selected_id":"route-2","active_id":"route-1","candidate_id":"route-2","tun_enabled":false,"blacklist":["blocked.example"],"whitelist":["direct.example"]},
 		"tun":{"installed":true,"created":true,"enabled":false,"name":"Navo","mtu":1500,"state":"disabled","identifier":"{test-guid}","interface_index":42},
-		"capture":{"state":"running_system_proxy","phase":"running","desired_mode":"system_proxy","committed_mode":"system_proxy"},
+		"capture":{"state":"running_system_proxy","phase":"running","desired_mode":"system_proxy","committed_mode":"system_proxy","transaction":{"busy":true,"id":"tx-1","operation":"node_switch","origin":"user","phase":"verifying","fault_domain":"node","queued":1},"recovery":{"id":"recovery-1","state":"failover","evidence":{"code":"NAVO-E2201","domain":"node","summary":"active node unavailable"},"rounds":[{"round":1,"action":"reapply_capture","recovered":false}],"candidates":[{"outbound_id":"node-b","source_type":"airport_subscription","reachable":true,"selected":true,"verified":false}]}},
 		"metrics":{"reachable":true,"latency_ms":12},
 		"ip":{"proxy_ip":"203.0.113.20","proxy_country":"Proxy Country","probe_pending":false}
 	}`)
@@ -50,6 +53,19 @@ func TestDashboardSnapshotDecoding(t *testing.T) {
 	}
 	if got.Capture.CommittedMode != "system_proxy" || got.Capture.State != "running_system_proxy" {
 		t.Fatalf("Capture = %#v", got.Capture)
+	}
+	if !got.Capture.Transaction.Busy || got.Capture.Transaction.Operation != "node_switch" ||
+		got.Capture.Transaction.Phase != "verifying" {
+		t.Fatalf("Capture transaction = %#v", got.Capture.Transaction)
+	}
+	if got.Capture.Recovery.State != "failover" || got.Capture.Recovery.Evidence.Domain != "node" ||
+		len(got.Capture.Recovery.Rounds) != 1 || len(got.Capture.Recovery.Candidates) != 1 ||
+		got.Capture.Recovery.Candidates[0].OutboundID != "node-b" {
+		t.Fatalf("Capture recovery = %#v", got.Capture.Recovery)
+	}
+	if got.Runtime.ActiveID != "route-1" || got.Runtime.CandidateID != "route-2" ||
+		got.Runtime.SelectedID != "route-2" {
+		t.Fatalf("Runtime selection = %#v", got.Runtime)
 	}
 	if len(got.Runtime.Blacklist) != 1 || got.Runtime.Blacklist[0] != "blocked.example" || len(got.Runtime.Whitelist) != 1 {
 		t.Fatalf("Runtime rules = %#v", got.Runtime)

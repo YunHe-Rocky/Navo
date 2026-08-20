@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func TestWithCoreUpdateHTTPRoutesFallsBackWithFreshTransports(t *testing.T) {
 	routes := []coreUpdateHTTPRoute{{name: "first"}, {name: "second"}}
 	transports := make([]*http.Transport, 0, len(routes))
 	attempt := 0
-	result, err := withCoreUpdateHTTPRoutes(context.Background(), routes, func(client *http.Client) (string, error) {
+	result, err := withCoreUpdateHTTPRoutes(context.Background(), routes, time.Second, func(_ context.Context, client *http.Client) (string, error) {
 		transport, ok := client.Transport.(*http.Transport)
 		if !ok {
 			t.Fatalf("transport = %T", client.Transport)
@@ -87,6 +88,83 @@ func TestWithCoreUpdateHTTPRoutesFallsBackWithFreshTransports(t *testing.T) {
 	}
 	if transports[0] == transports[1] {
 		t.Fatal("fallback reused the previous transport")
+	}
+}
+
+func TestWithCoreUpdateHTTPRoutesGivesEachRouteIndependentTimeout(t *testing.T) {
+	t.Parallel()
+	routes := []coreUpdateHTTPRoute{{name: "slow"}, {name: "fallback"}}
+	attempt := 0
+	result, err := withCoreUpdateHTTPRoutes(context.Background(), routes, 25*time.Millisecond, func(attemptCtx context.Context, _ *http.Client) (string, error) {
+		attempt++
+		if attempt == 1 {
+			<-attemptCtx.Done()
+			return "", attemptCtx.Err()
+		}
+		if err := attemptCtx.Err(); err != nil {
+			t.Fatalf("fallback inherited exhausted context: %v", err)
+		}
+		return "fallback-ok", nil
+	})
+	if err != nil || result != "fallback-ok" || attempt != 2 {
+		t.Fatalf("result = %q, attempts = %d, err = %v", result, attempt, err)
+	}
+}
+
+func TestTrustedCoreUpdateClientDoesNotLimitWholeResponseBody(t *testing.T) {
+	t.Parallel()
+	client := trustedCoreUpdateClient(coreUpdateHTTPRoute{name: "direct"})
+	if client.Timeout != 0 {
+		t.Fatalf("client timeout = %s, want 0 so body progress controls the download", client.Timeout)
+	}
+}
+
+func TestDownloadCoreArchiveAllowsContinuousSlowProgress(t *testing.T) {
+	t.Parallel()
+	data := bytes.Repeat([]byte("progress"), 4)
+	asset := testCoreUpdateAsset(data)
+	body := newPacedCoreUpdateBody(data, 10*time.Millisecond, -1)
+	client := testCoreUpdateClient(body)
+	started := time.Now()
+	got, err := downloadCoreArchiveWithIdleTimeout(context.Background(), client, asset, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("archive = %q", got)
+	}
+	if elapsed := time.Since(started); elapsed <= 100*time.Millisecond {
+		t.Fatalf("download completed in %s; test did not exceed the idle window", elapsed)
+	}
+}
+
+func TestDownloadCoreArchiveRejectsStalledBody(t *testing.T) {
+	t.Parallel()
+	data := []byte("stalled-body")
+	asset := testCoreUpdateAsset(data)
+	body := newPacedCoreUpdateBody(data, 0, 1)
+	client := testCoreUpdateClient(body)
+	started := time.Now()
+	_, err := downloadCoreArchiveWithIdleTimeout(context.Background(), client, asset, 30*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "未收到数据") {
+		t.Fatalf("err = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("stalled download took %s", elapsed)
+	}
+}
+
+func TestDownloadCoreArchiveHonorsCallerCancellation(t *testing.T) {
+	t.Parallel()
+	data := []byte("cancel-body")
+	asset := testCoreUpdateAsset(data)
+	body := newPacedCoreUpdateBody(data, 0, 1)
+	client := testCoreUpdateClient(body)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(25*time.Millisecond, cancel)
+	_, err := downloadCoreArchiveWithIdleTimeout(ctx, client, asset, time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context cancellation", err)
 	}
 }
 
@@ -115,17 +193,17 @@ func TestCoreUpdateLiveProxyDownload(t *testing.T) {
 	if !ok {
 		t.Fatal("sing-box release source is missing")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), coreUpdateDownloadAttemptTimeout+coreUpdateMetadataAttemptTimeout+time.Minute)
 	defer cancel()
 	routes := []coreUpdateHTTPRoute{{name: "live proxy", proxyURL: proxyURL}}
-	candidate, err := withCoreUpdateHTTPRoutes(ctx, routes, func(client *http.Client) (releaseCandidate, error) {
-		return fetchInstallCandidate(ctx, client, source)
+	candidate, err := withCoreUpdateHTTPRoutes(ctx, routes, coreUpdateMetadataAttemptTimeout, func(attemptCtx context.Context, client *http.Client) (releaseCandidate, error) {
+		return fetchInstallCandidate(attemptCtx, client, source)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive, err := withCoreUpdateHTTPRoutes(ctx, routes, func(client *http.Client) ([]byte, error) {
-		return downloadCoreArchive(ctx, client, candidate.asset)
+	archive, err := withCoreUpdateHTTPRoutes(ctx, routes, coreUpdateDownloadAttemptTimeout, func(attemptCtx context.Context, client *http.Client) ([]byte, error) {
+		return downloadCoreArchive(attemptCtx, client, candidate.asset)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -223,6 +301,74 @@ func TestCommitCoreUpdateAtomicallyReplacesPayloadFiles(t *testing.T) {
 		if err != nil || string(got) != want {
 			t.Fatalf("%s = %q, %v", path, got, err)
 		}
+	}
+}
+
+type coreUpdateTestRoundTripper func(*http.Request) (*http.Response, error)
+
+func (roundTrip coreUpdateTestRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
+
+type pacedCoreUpdateBody struct {
+	data       []byte
+	delay      time.Duration
+	stallAfter int
+	index      int
+	closed     chan struct{}
+	closeOnce  sync.Once
+}
+
+func newPacedCoreUpdateBody(data []byte, delay time.Duration, stallAfter int) *pacedCoreUpdateBody {
+	return &pacedCoreUpdateBody{
+		data: append([]byte(nil), data...), delay: delay, stallAfter: stallAfter, closed: make(chan struct{}),
+	}
+}
+
+func (body *pacedCoreUpdateBody) Read(buffer []byte) (int, error) {
+	if body.stallAfter >= 0 && body.index >= body.stallAfter {
+		<-body.closed
+		return 0, errors.New("body closed")
+	}
+	if body.index >= len(body.data) {
+		return 0, io.EOF
+	}
+	if body.delay > 0 {
+		timer := time.NewTimer(body.delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-body.closed:
+			return 0, errors.New("body closed")
+		}
+	}
+	buffer[0] = body.data[body.index]
+	body.index++
+	return 1, nil
+}
+
+func (body *pacedCoreUpdateBody) Close() error {
+	body.closeOnce.Do(func() { close(body.closed) })
+	return nil
+}
+
+func testCoreUpdateClient(body io.ReadCloser) *http.Client {
+	return &http.Client{Transport: coreUpdateTestRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       body,
+		}, nil
+	})}
+}
+
+func testCoreUpdateAsset(data []byte) githubAsset {
+	digest := sha256.Sum256(data)
+	return githubAsset{
+		Name:               "core.zip",
+		BrowserDownloadURL: "https://github.com/example/core/releases/download/v1/core.zip",
+		Digest:             "sha256:" + hex.EncodeToString(digest[:]),
+		Size:               int64(len(data)),
 	}
 }
 

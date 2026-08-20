@@ -50,6 +50,7 @@ declare global {
           SetRoutingListMode(mode: string): Promise<void>;
           SetRoutingRules(blacklist: string[], whitelist: string[]): Promise<void>;
           SelectRoute(id: string): Promise<void>;
+          VerifyCapture(): Promise<void>;
           TestRoute(id: string): Promise<TestResult>;
           CreateUpstream(request: UpstreamRequest): Promise<void>;
           DeleteUpstream(id: string): Promise<void>;

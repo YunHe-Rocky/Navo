@@ -211,11 +211,22 @@ func main() {
 		ProxyPort:          singboxPort,
 		ProxyManager:       systemproxy.NewManagerWithDirectory(filepath.Join(dataDir, "agent")),
 		CaptureJournalPath: filepath.Join(dataDir, "agent", "capture_transition.json"),
-		CaptureProbeFn: func(ctx context.Context, mode capture.Mode) error {
-			if mode != capture.ModeSystemProxy {
+		CaptureRouteProbeFn: func(ctx context.Context, mode capture.Mode, runtimeMode string) error {
+			directRouting := strings.EqualFold(strings.TrimSpace(runtimeMode), "direct")
+			switch mode {
+			case capture.ModeSystemProxy:
+				if directRouting {
+					return systemproxy.ProbeDefaultDirectRouting(ctx)
+				}
+				return systemproxy.ProbeDefaultProxy(ctx)
+			case capture.ModeTUN:
+				if directRouting {
+					return systemproxy.ProbeDirectRouting(ctx)
+				}
+				return systemproxy.ProbeDirect(ctx)
+			default:
 				return nil
 			}
-			return systemproxy.ProbeDefaultProxy(ctx)
 		},
 		SendToServiceContextFn: func(ctx context.Context, msg map[string]interface{}) (map[string]interface{}, error) {
 			return svc.Dispatch(ctx, msg), nil

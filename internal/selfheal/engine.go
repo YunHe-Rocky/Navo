@@ -42,8 +42,9 @@ func New(cfg Config, registry *Registry) (*Engine, error) {
 		cfg.VerificationTimeout = 15 * time.Second
 	}
 	if cfg.DefaultMaxAttempts <= 0 {
-		cfg.DefaultMaxAttempts = 3
+		cfg.DefaultMaxAttempts = MaxRepairRounds
 	}
+	cfg.DefaultMaxAttempts = min(cfg.DefaultMaxAttempts, MaxRepairRounds)
 	if cfg.DedupeWindow <= 0 {
 		cfg.DedupeWindow = 5 * time.Second
 	}
@@ -197,6 +198,9 @@ func (e *Engine) process(ctx context.Context, event ErrorEvent) {
 	if budget.MaxAttempts == 0 {
 		budget.MaxAttempts = e.cfg.DefaultMaxAttempts
 	}
+	// V1 is a hard safety boundary: no policy may expand one fault budget
+	// beyond two complete repair attempts.
+	budget.MaxAttempts = min(budget.MaxAttempts, MaxRepairRounds)
 	if budget.Window <= 0 {
 		budget.Window = 5 * time.Minute
 	}

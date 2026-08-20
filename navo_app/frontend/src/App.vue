@@ -5,7 +5,7 @@ import { EventsOn } from "../wailsjs/runtime/runtime";
 import { CLOSE_PREFERENCE_KEY, createClosePreference, resolveClosePreference } from "./close-preference.js";
 import StateGlyph from "./components/StateGlyph.vue";
 import TrafficChart from "./components/TrafficChart.vue";
-import { TrafficRingBuffer, captureModeOf, deriveAppState, riskSummary } from "./state";
+import { TrafficRingBuffer, captureModeOf, connectionRiskSummary, deriveAppState, ipAttributeSummary, nextPrimaryCaptureMode } from "./state";
 import { generateSyntheticTraffic, seriesForCaptureMode, trafficContextForCaptureMode } from "./traffic.js";
 import type {
   CaptureMode,
@@ -32,7 +32,7 @@ const emptyDashboard: Dashboard = {
   core: { core_id: "sing-box", state: "stopped", pid: 0, uptime_seconds: 0, config_hash: "", restart_count: 0, last_error: "" },
   cores: [],
   proxy: { enabled: false, server: "127.0.0.1", port: 12080 },
-  runtime: { mode: "bypass_mainland", list_mode: "off", active_id: "", tun_enabled: false, blacklist: [], whitelist: [] },
+  runtime: { mode: "bypass_mainland", list_mode: "off", selected_id: "", active_id: "", candidate_id: "", tun_enabled: false, blacklist: [], whitelist: [] },
   tun: {
     installed: false, created: false, enabled: false, name: "Navo", mtu: 1500,
     state: "missing", identifier: "", interface_index: 0, fault_id: "", last_error: "",
@@ -40,6 +40,7 @@ const emptyDashboard: Dashboard = {
   capture: {
     state: "stopped", phase: "stopped", desired_mode: "off", committed_mode: "off",
     transition_id: "", fault_id: "", last_error: "", can_retry_tun: false,
+    updated_at: "", readiness: { state: "unverified", scope: "chatgpt", sites: {}, default_proxy: false, checked_at: "" },
   },
   metrics: {
     reachable: false, available: false, unavailable_reason: "", core_name: "", latency_ms: 0,
@@ -144,7 +145,12 @@ const upstream = ref<UpstreamRequest>({
 const subscription = ref({ name: "", url: "", skip_tls_verify: false });
 
 const activeRoute = computed(() => routes.value.find((item) => item.id === dashboard.value.runtime.active_id || item.active));
-const sourceRoute = computed(() => activeRoute.value?.source_type === sourceFilter.value ? activeRoute.value : undefined);
+const selectedRoute = computed(() =>
+  routes.value.find((item) => item.id === dashboard.value.runtime.selected_id)
+  ?? routes.value.find((item) => item.selected || item.candidate)
+  ?? activeRoute.value,
+);
+const sourceRoute = computed(() => selectedRoute.value?.source_type === sourceFilter.value ? selectedRoute.value : undefined);
 const activeCore = computed(() => dashboard.value.cores.find((item) => item.active || item.id === dashboard.value.core.core_id));
 const activeCoreSupportsTUN = computed(() => activeCore.value?.tun_supported !== false);
 const activeRouteLatency = computed(() => {
@@ -195,17 +201,16 @@ const activeTrafficUploadTotal = computed(() => captureMode.value === "off"
   ? dashboard.value.metrics.local_upload_total
   : dashboard.value.metrics.proxy_upload_total);
 const activeRiskResult = computed(() => captureMode.value === "off" ? ipDetection.value?.source : ipDetection.value?.proxy);
-const activeRisk = computed(() => riskSummary(activeRiskResult.value));
-const activeRiskLinkLabel = computed(() => captureMode.value === "off" ? "直连 IP" : "代理出口 IP");
-const proxyRisk = computed(() => riskSummary(ipDetection.value?.proxy));
-const coreUpdates = computed(() => Object.fromEntries(
-  (coreUpdateReport.value?.items ?? []).map((item) => [item.id, item]),
-));
 const directAndProxySame = computed(() => {
   const source = ipDetection.value?.source.ip;
   const proxy = ipDetection.value?.proxy.ip;
   return Boolean(source && proxy && source === proxy);
 });
+const activeRisk = computed(() => connectionRiskSummary(dashboard.value, appState.value.networkHealth, activeRiskResult.value, directAndProxySame.value));
+const proxyRisk = computed(() => ipAttributeSummary(ipDetection.value?.proxy));
+const coreUpdates = computed(() => Object.fromEntries(
+  (coreUpdateReport.value?.items ?? []).map((item) => [item.id, item]),
+));
 const captureTransitioning = computed(() =>
   ["starting_system_proxy", "starting_tun", "stopping", "recovering"].includes(dashboard.value.capture.state),
 );
@@ -235,7 +240,12 @@ function setTheme(mode: ThemeMode) {
   window.runtime.WindowSetBackgroundColour(20, 16, 39, 255);
 }
 
-const changelogText = `2026-07-30
+const changelogText = `2026-08-17
+· 启用前强制验证 ChatGPT 网页、登录、API、静态资源与流式入口
+· 连接可用性风险显示证据时间、失败原因与处置建议
+· IP 属性提示与 ChatGPT 可用性分离，移除无数据来源的推断项
+
+2026-07-30
 · 窗口外框与日夜画风同步，不再固定为黑色
 · 线路来源统一增加批量延迟、单线路延迟与单线路测速
 · 连接管理增加线路类型约束，底部确认区明确显示来源类型
@@ -319,7 +329,11 @@ async function loadDashboard() {
     proxy: { ...emptyDashboard.proxy, ...snapshot?.proxy },
     runtime: { ...emptyDashboard.runtime, ...snapshot?.runtime },
     tun: { ...emptyDashboard.tun, ...snapshot?.tun },
-    capture: { ...emptyDashboard.capture, ...snapshot?.capture },
+    capture: {
+      ...emptyDashboard.capture,
+      ...snapshot?.capture,
+      readiness: { ...emptyDashboard.capture.readiness, ...snapshot?.capture?.readiness },
+    },
     metrics: { ...emptyDashboard.metrics, ...snapshot?.metrics },
     ip: { ...emptyDashboard.ip, ...snapshot?.ip },
     cores: snapshot?.cores ?? [],
@@ -414,6 +428,30 @@ async function checkIP(showProgress = true) {
   }
 }
 
+
+async function checkConnection() {
+  if (captureMode.value === "off") {
+    await checkIP();
+    notice.value = "当前未启用网络接管，已完成直连与 IP 属性检测";
+    return;
+  }
+  ipChecking.value = true;
+  failure.value = "";
+  notice.value = "";
+  beginActivity("正在验证 ChatGPT 应用链路");
+  try {
+    await api.verifyCapture();
+    await Promise.all([loadDashboard(), checkIP(false)]);
+    notice.value = "ChatGPT 网页、登录、API、静态资源和流式入口验证通过";
+  } catch (reason) {
+    updateHealthCounters(false);
+    failure.value = `ChatGPT 链路验证失败：${errorMessage(reason)}`;
+    await loadDashboard().catch(() => undefined);
+  } finally {
+    ipChecking.value = false;
+    finishActivity();
+  }
+}
 async function loadHostStatus() {
   hostStatus.value = await api.hostStatus();
 }
@@ -500,7 +538,7 @@ async function loadPageData(target: Page) {
   if (target === "overview") await Promise.all([loadDashboard(), loadRoutes(), checkIP(false)]);
   if (target === "connection") {
     await Promise.all([loadDashboard(), loadRoutes(), loadSubscriptions()]);
-    if (activeRoute.value?.source_type) sourceFilter.value = activeRoute.value.source_type;
+    if (selectedRoute.value?.source_type) sourceFilter.value = selectedRoute.value.source_type;
   }
   if (target === "sources") await loadRoutes();
   if (target === "cores" || target === "traffic") await loadDashboard();
@@ -521,6 +559,11 @@ async function sampleMetrics() {
     dashboard.value.runtime = snapshot.runtime;
     dashboard.value.proxy = snapshot.proxy;
     dashboard.value.tun = snapshot.tun;
+    dashboard.value.capture = {
+      ...emptyDashboard.capture,
+      ...snapshot.capture,
+      readiness: { ...emptyDashboard.capture.readiness, ...snapshot.capture?.readiness },
+    };
     updateHealthCounters(snapshot.metrics.reachable);
 
     if (previousRouteID && previousRouteID !== snapshot.runtime.active_id) {
@@ -549,8 +592,7 @@ async function sampleMetrics() {
 }
 
 async function toggleConnection() {
-  const disconnect = dashboard.value.capture.committed_mode !== "off";
-  await setCapture(disconnect ? "off" : "system_proxy");
+  await setCapture(nextPrimaryCaptureMode(dashboard.value.capture.committed_mode));
 }
 
 async function setCapture(mode: CaptureMode) {
@@ -680,7 +722,7 @@ async function testFilteredRoutes() {
 
 async function benchmarkRoute(item: RouteInfo) {
   if (benchmarkRunning.value) return;
-  const previous = activeRoute.value;
+  const previous = selectedRoute.value;
   const targetChanged = previous?.id !== item.id;
   if (targetChanged && captureMode.value !== "off") {
     failure.value = "系统代理或 TUN 接管期间只能测速当前线路；请先断开连接，避免临时切线影响正在进行的流量";
@@ -841,6 +883,28 @@ function runtimeModeLabel(mode: RuntimeMode) {
 
 function routingListModeLabel(mode: RoutingListMode) {
   return ({ off: "未启用", blacklist: "黑名单模式", whitelist: "白名单模式" } as const)[mode];
+}
+function recoveryStateLabel(state: string) {
+  return ({
+    idle: "无恢复任务", detected: "已检测故障", repairing: "正在修复",
+    verifying: "正在验证", failover: "正在切换候选", recovered: "已恢复", failed: "恢复失败",
+  } as Record<string, string>)[state] || state;
+}
+
+function faultDomainLabel(domain: string) {
+  return ({
+    node: "活动节点", core: "代理内核", system_proxy: "System Proxy", tun: "TUN",
+    route: "Route", dns: "DNS", nrpt: "NRPT", firewall: "Firewall",
+    traffic_rule: "流量规则", physical_network: "物理网络", detection: "检测链路", unknown: "未知域",
+  } as Record<string, string>)[domain] || domain || "未归因";
+}
+
+function repairActionLabel(action: string) {
+  return ({
+    reapply_capture: "重建接管", restart_owned_core: "重启 Navo 内核",
+    reconcile_owned_capture: "校准 Navo 接管", reconcile_owned_network: "校准 Navo 网络资源",
+    recover_owned_network: "恢复 Navo 网络资源", reapply_traffic_policy: "重载流量策略", none: "仅观察",
+  } as Record<string, string>)[action] || action;
 }
 
 function capturePhaseLabel(phase: string) {
@@ -1071,12 +1135,59 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="hero-actions">
-            <button class="secondary" :disabled="loading" @click="checkIP()">检测链路</button>
+            <button class="secondary" :disabled="loading || ipChecking" @click="checkConnection">{{ ipChecking ? "验证中" : "验证 ChatGPT 链路" }}</button>
             <button class="primary" :disabled="loading" @click="toggleConnection">{{ dashboard.core.state === "running" ? "停止代理" : "启动代理" }}</button>
           </div>
         </article>
 
         <div v-if="directAndProxySame" class="warning-banner" role="status">直连公网 IP 与代理出口 IP 相同，代理可能未生效。</div>
+
+        <article
+          v-if="dashboard.capture.recovery && dashboard.capture.recovery.state !== 'idle'"
+          class="recovery-card"
+          :data-state="dashboard.capture.recovery.state"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="recovery-heading">
+            <div>
+              <span class="card-label">自动恢复报告 · {{ dashboard.capture.recovery.evidence.code || "等待证据" }}</span>
+              <h3>{{ dashboard.capture.recovery.evidence.summary || "正在归因连接故障" }}</h3>
+            </div>
+            <strong class="recovery-state">{{ recoveryStateLabel(dashboard.capture.recovery.state) }}</strong>
+          </div>
+          <div class="recovery-evidence-grid">
+            <span><small>故障域</small><strong>{{ faultDomainLabel(dashboard.capture.recovery.evidence.domain) }}</strong></span>
+            <span><small>影响</small><strong>{{ dashboard.capture.recovery.final_impact || dashboard.capture.recovery.evidence.impact || "正在评估" }}</strong></span>
+            <span><small>活动节点</small><strong class="mono">{{ dashboard.capture.recovery.evidence.outbound_id || "未获取" }}</strong></span>
+            <span><small>接管方式</small><strong>{{ dashboard.capture.recovery.evidence.capture_mode ? captureLabel(dashboard.capture.recovery.evidence.capture_mode as CaptureMode) : "未获取" }}</strong></span>
+          </div>
+          <div class="recovery-progress-grid">
+            <div v-if="dashboard.capture.recovery.rounds.length">
+              <span class="card-label">两轮最小修复</span>
+              <ol class="recovery-list">
+                <li v-for="round in dashboard.capture.recovery.rounds" :key="round.round">
+                  <span>第 {{ round.round }} 轮 · {{ repairActionLabel(round.action) }}</span>
+                  <strong :class="round.recovered ? 'result-ok' : 'result-failed'">{{ round.recovered ? "验证通过" : round.error ? "失败" : "执行中" }}</strong>
+                  <small v-if="round.error">{{ round.error }}</small>
+                  <small v-else-if="round.evidence">{{ round.evidence }}</small>
+                </li>
+              </ol>
+            </div>
+            <div v-if="dashboard.capture.recovery.candidates?.length">
+              <span class="card-label">同通道候选验证</span>
+              <ol class="recovery-list">
+                <li v-for="candidate in dashboard.capture.recovery.candidates" :key="candidate.outbound_id">
+                  <span class="mono">{{ candidate.outbound_id }} · {{ candidate.latency_ms ?? "—" }} ms</span>
+                  <strong :class="candidate.verified ? 'result-ok' : 'result-failed'">{{ candidate.verified ? "验证通过" : candidate.error ? "失败" : candidate.selected ? "验证中" : "已排除" }}</strong>
+                  <small v-if="candidate.error">{{ candidate.error }}</small>
+                </li>
+              </ol>
+            </div>
+          </div>
+          <p v-if="dashboard.capture.recovery.final_error" class="inline-error">{{ dashboard.capture.recovery.final_error }}</p>
+          <small class="recovery-stamp">最后更新：{{ formatTime(dashboard.capture.recovery.updated_at) }}</small>
+        </article>
 
         <div class="overview-grid">
           <article class="ip-card">
@@ -1102,10 +1213,11 @@ onBeforeUnmount(() => {
             <small>{{ ipDetection?.proxy.provider || "无检测源" }} · {{ formatTime(ipDetection?.proxy.checked_at) }}</small>
           </article>
           <article class="risk-card">
-            <span class="card-label">IP 风险摘要</span>
+            <span class="card-label">连接可用性风险</span>
             <strong :class="`risk-${activeRisk.level}`">{{ activeRisk.label }}</strong>
             <ul><li v-for="reason in activeRisk.reasons" :key="reason">{{ reason }}</li></ul>
-            <small>{{ activeRiskLinkLabel }} · 仅基于公开网络属性，不声称判断 IP 是否独享。</small>
+            <p v-if="activeRisk.action" class="risk-action">建议：{{ activeRisk.action }}</p>
+            <small>{{ dashboard.capture.readiness.default_proxy ? "Windows 默认代理已验证" : captureMode === "tun" ? "TUN 数据面已验证" : "尚无默认应用证据" }} · {{ formatTime(dashboard.capture.readiness.checked_at) }}</small>
           </article>
         </div>
 
@@ -1172,7 +1284,7 @@ onBeforeUnmount(() => {
               <div>
                 <span class="card-label">流量控制</span>
                 <strong>{{ captureLabel(captureMode) }} · {{ runtimeModeLabel(runtimeMode) }} · {{ routingListModeLabel(routingListMode) }}</strong>
-                <small>系统代理、TUN、黑名单、白名单是同级入口；只有点击的功能才会启用。</small>
+                <small>接管方式与流量策略相互独立。黑名单内走代理、白名单内走直连、私网始终直连；其他流量服从下方基础策略。</small>
               </div>
               <div class="traffic-control-actions">
                 <button v-if="routingListMode !== 'off'" class="secondary compact" :disabled="loading || captureTransitioning" @click="setRoutingListMode('off')">关闭名单</button>
@@ -1336,7 +1448,7 @@ onBeforeUnmount(() => {
         <div class="data-panel">
           <div class="table-head"><span>线路</span><span>协议</span><span>地址</span><span>延迟 / 速度</span><span>操作</span></div>
           <div v-if="filteredRoutes.length" class="route-list">
-            <div v-for="item in filteredRoutes" :key="item.id" class="route-row" :class="{ active: item.active }">
+            <div v-for="item in filteredRoutes" :key="item.id" class="route-row" :class="{ active: item.active, candidate: item.candidate }">
               <div><strong>{{ item.name }}</strong><small>{{ item.country || sourceLabel(item.source_type) }}</small></div>
               <span class="protocol">{{ item.type }}</span>
               <span class="mono address">{{ item.server }}:{{ item.port }}</span>
@@ -1347,7 +1459,7 @@ onBeforeUnmount(() => {
               <div class="row-actions">
                 <button class="secondary compact" :disabled="routeTestRunning[item.id]" @click="testRoute(item)">{{ routeTestRunning[item.id] ? "测试中" : "延迟" }}</button>
                 <button class="secondary compact" :disabled="benchmarkRunning" @click="benchmarkRoute(item)">测速</button>
-                <button class="primary compact" :disabled="item.active" @click="selectRoute(item)">{{ item.active ? "当前" : "使用" }}</button>
+                <button class="primary compact" :disabled="item.active || item.candidate" @click="selectRoute(item)">{{ item.active ? "当前" : item.candidate ? "待验证" : "使用" }}</button>
                 <button v-if="item.source_type === 'upstream_proxy'" class="danger compact" @click="deleteUpstream(item)">删除</button>
               </div>
             </div>
@@ -1501,14 +1613,12 @@ onBeforeUnmount(() => {
           </article>
         </div>
         <article class="risk-panel">
-          <div><span class="card-label">可解释风险指标</span><h3>{{ proxyRisk.label }}</h3><p>不静默平均多个来源，不声称能够判断真实共享人数。</p></div>
+          <div><span class="card-label">IP 属性提示</span><h3>{{ proxyRisk.label }}</h3><p>仅展示检测来源直接返回的网络属性；它不代表 ChatGPT 可用性，也不推断独享、Fraud 或 Abuse。</p></div>
           <div class="risk-signals">
             <span :class="{ flagged: ipDetection?.proxy.proxy }"><b>Proxy</b>{{ ipDetection ? (ipDetection.proxy.proxy ? "是" : "否") : "未知" }}</span>
             <span :class="{ flagged: ipDetection?.proxy.hosting }"><b>Hosting</b>{{ ipDetection ? (ipDetection.proxy.hosting ? "是" : "否") : "未知" }}</span>
             <span><b>Mobile</b>{{ ipDetection ? (ipDetection.proxy.mobile ? "是" : "否") : "未知" }}</span>
-            <span><b>Fraud / Abuse</b>未配置第三方服务</span>
-            <span><b>Blacklist</b>未配置第三方服务</span>
-            <span><b>VPN / Tor</b>当前来源不提供</span>
+            <span><b>证据来源</b>{{ ipDetection?.proxy.provider || "未知" }} · {{ formatTime(ipDetection?.proxy.checked_at) }}</span>
           </div>
         </article>
       </section>

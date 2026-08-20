@@ -21,9 +21,11 @@ var requiredDirectRuntimeSites = []externalSiteProbe{
 
 func runtimeRoutingVerificationSites(mode string) []externalSiteProbe {
 	if mode == runtimeModeDirect {
-		return requiredDirectRuntimeSites
+		return append([]externalSiteProbe(nil), requiredDirectRuntimeSites...)
 	}
-	return requiredExternalSites
+	probes := make([]externalSiteProbe, 0, len(genericProxySites)+len(chatGPTApplicationSites))
+	probes = append(probes, genericProxySites...)
+	return append(probes, chatGPTApplicationSites...)
 }
 
 func verifyRuntimeRouting(ctx context.Context, proxyPort int, mode string) (RuntimeRoutingVerification, error) {
@@ -52,7 +54,10 @@ func verifyRuntimeRouting(ctx context.Context, proxyPort int, mode string) (Runt
 		}()
 	}
 	wait.Wait()
-	verification := RuntimeRoutingVerification{Verified: true, Sites: make(map[string]SiteVerification, len(results))}
+	verification := RuntimeRoutingVerification{
+		Verified: true, Sites: make(map[string]SiteVerification, len(results)),
+		VerifiedAt: time.Now().UTC(),
+	}
 	for index, probe := range probes {
 		verification.Sites[probe.Name] = results[index].verification
 		if results[index].err != nil {

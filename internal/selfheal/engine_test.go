@@ -284,3 +284,44 @@ func TestStopCancelsPendingRepair(t *testing.T) {
 		t.Fatal("repair ran during shutdown")
 	}
 }
+
+func TestRepairBudgetIsHardCappedAtTwoAttempts(t *testing.T) {
+	var repairs atomic.Int32
+	policy := testPolicy(CodeDNSMismatch, &repairs)
+	policy.Def.Budget.MaxAttempts = 5
+	policy.VerifyFunc = func(context.Context, ErrorEvent, RepairAction) (VerificationResult, error) {
+		return VerificationResult{}, errors.New("DNS remains unavailable")
+	}
+	policy.RollbackFunc = func(context.Context, ErrorEvent, RepairAction) error {
+		return nil
+	}
+	cfg := DefaultConfig(filepath.Join(t.TempDir(), "selfheal-state.json"))
+	cfg.DefaultMaxAttempts = 9
+	cfg.DedupeWindow = time.Nanosecond
+	engine := newTestEngine(t, cfg, policy)
+
+	for index := 0; index < 3; index++ {
+		event := ErrorEvent{
+			Code: CodeDNSMismatch, SourceService: "Network", ResourceID: "dns",
+			OccurredAt: time.Now().Add(time.Duration(index) * time.Second),
+		}
+		if !engine.Submit(event) {
+			t.Fatalf("event %d was not accepted", index+1)
+		}
+		waitFor(t, func() bool {
+			engine.mu.Lock()
+			defer engine.mu.Unlock()
+			return len(engine.pending) == 0
+		})
+	}
+	if repairs.Load() != MaxRepairRounds {
+		t.Fatalf("repair calls = %d, want hard cap %d", repairs.Load(), MaxRepairRounds)
+	}
+}
+
+func TestDefaultRepairBudgetIsTwoRounds(t *testing.T) {
+	cfg := DefaultConfig("")
+	if cfg.DefaultMaxAttempts != MaxRepairRounds {
+		t.Fatalf("DefaultMaxAttempts = %d, want %d", cfg.DefaultMaxAttempts, MaxRepairRounds)
+	}
+}

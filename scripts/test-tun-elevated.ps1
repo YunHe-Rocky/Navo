@@ -164,6 +164,36 @@ function Wait-CaptureCommittedOff {
     throw "Capture health recovery did not commit off within 45 seconds"
 }
 
+function Wait-CaptureSelfHealRecovered {
+    param([string]$AfterRecoveryID = "")
+    $Deadline = [DateTime]::UtcNow.AddSeconds(120)
+    do {
+        try {
+            $Status = Invoke-NavoIPC -Method "capture.status"
+            if ($Status.type -eq "RESPONSE") {
+                $RecoveryState = [string]$Status.payload.recovery.state
+                $RecoveryID = [string]$Status.payload.recovery.id
+                if ($RecoveryState -eq "recovered" -and
+                    ([string]::IsNullOrWhiteSpace($AfterRecoveryID) -or
+                        $RecoveryID -ne $AfterRecoveryID)) {
+                    if ([string]$Status.payload.committed_mode -ne "tun") {
+                        throw "SelfHeal reported recovered without committed TUN"
+                    }
+                    return $Status
+                }
+                if ($RecoveryState -eq "failed") {
+                    throw "SelfHeal exhausted without recovery: $(ConvertTo-CanonicalJSON $Status.payload.recovery)"
+                }
+            }
+        }
+        catch {
+            if (($_ | Out-String) -match "SelfHeal (reported|exhausted)") { throw }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $Deadline)
+    throw "SelfHeal did not report a recovered outcome within 120 seconds"
+}
+
 function Assert-TUNHealthy {
     param($Activation)
     if ($Activation.type -ne "RESPONSE") {
@@ -277,6 +307,7 @@ function Invoke-NoProxyHTTPProbe {
 
 function Invoke-NoProxyExternalSiteProbes {
     param([ValidateSet("bypass_mainland", "global", "direct")][string]$Mode = "bypass_mainland")
+    $Curl = Get-Command "curl.exe" -ErrorAction Stop
     $Results = [ordered]@{}
     $Probes = if ($Mode -eq "direct") { @(
         @{ Name = "baidu"; Uri = "https://www.baidu.com/"; Statuses = @(200) },
@@ -291,45 +322,76 @@ function Invoke-NoProxyExternalSiteProbes {
     ) }
     foreach ($Probe in $Probes) {
         $LastError = $null
-        for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
-            # Route churn invalidates pooled sockets; isolate every attempt from stale connections.
-            $Handler = [System.Net.Http.HttpClientHandler]::new()
-            $Handler.UseProxy = $false
-            $Client = [System.Net.Http.HttpClient]::new($Handler)
-            $Client.Timeout = [TimeSpan]::FromSeconds(15)
-            $Response = $null
+        for ($Attempt = 1; $Attempt -le 5; $Attempt++) {
+            $Arguments = @(
+                "--silent", "--show-error", "--location", "--output", "NUL",
+                "--write-out", "NAVO_HTTP_STATUS=%{http_code}",
+                "--connect-timeout", "10", "--max-time", "20",
+                "--noproxy", "*", "--header", "User-Agent: Navo-TUN-Acceptance/1",
+                $Probe.Uri
+            )
             try {
-                $Response = $Client.GetAsync(
-                    $Probe.Uri,
-                    [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
-                ).GetAwaiter().GetResult()
-                $Status = [int]$Response.StatusCode
+                $Output = @(& $Curl.Source @Arguments 2>&1)
+                $ExitCode = $LASTEXITCODE
+                $Text = ($Output | ForEach-Object { [string]$_ }) -join "`n"
+                if ($ExitCode -ne 0) {
+                    throw "$($Probe.Name) curl exit=${ExitCode}: $Text"
+                }
+                $Match = [regex]::Match($Text, "NAVO_HTTP_STATUS=(\d{3})")
+                if (-not $Match.Success) {
+                    throw "$($Probe.Name) curl returned no HTTP status: $Text"
+                }
+                $Status = [int]$Match.Groups[1].Value
                 if (@($Probe.Statuses) -notcontains $Status) {
                     throw "$($Probe.Name) returned HTTP $Status; expected $($Probe.Statuses -join ',')"
                 }
                 $Results[$Probe.Name] = [ordered]@{
-                    uri = $Probe.Uri; status = $Status; attempts = $Attempt
+                    uri = $Probe.Uri; status = $Status; attempts = $Attempt; client = "curl"
                 }
                 $LastError = $null
                 break
             }
             catch {
                 $LastError = ($_ | Out-String).Trim()
-                if ($Attempt -lt 3) { Start-Sleep -Seconds 1 }
-            }
-            finally {
-                if ($null -ne $Response) { $Response.Dispose() }
-                $Client.Dispose()
-                $Handler.Dispose()
+                if ($Attempt -lt 5) { Start-Sleep -Seconds 1 }
             }
         }
         if ($null -ne $LastError) {
-            throw "$($Probe.Name) failed after 3 attempts: $LastError"
+            $FamilyDiagnostics = [ordered]@{}
+            foreach ($Family in @(
+                @{ Name = "ipv4"; Argument = "--ipv4" },
+                @{ Name = "ipv6"; Argument = "--ipv6" }
+            )) {
+                $FamilyOutput = @()
+                $FamilyExitCode = -1
+                try {
+                    $FamilyArguments = @(
+                        "--silent", "--show-error", "--location", "--output", "NUL",
+                        "--write-out", "NAVO_HTTP_STATUS=%{http_code}",
+                        "--connect-timeout", "10", "--max-time", "15",
+                        "--noproxy", "*", $Family.Argument,
+                        "--header", "User-Agent: Navo-TUN-Acceptance/1",
+                        $Probe.Uri
+                    )
+                    $FamilyOutput = @(& $Curl.Source @FamilyArguments 2>&1)
+                    $FamilyExitCode = $LASTEXITCODE
+                }
+                catch {
+                    $FamilyOutput += ($_ | Out-String).Trim()
+                    $FamilyExitCode = $LASTEXITCODE
+                }
+                $FamilyText = ($FamilyOutput | ForEach-Object { [string]$_ }) -join "`n"
+                $FamilyMatch = [regex]::Match($FamilyText, "NAVO_HTTP_STATUS=(\d{3})")
+                $FamilyDiagnostics[$Family.Name] = [ordered]@{
+                    exit = $FamilyExitCode
+                    status = if ($FamilyMatch.Success) { [int]$FamilyMatch.Groups[1].Value } else { 0 }
+                }
+            }
+            throw "$($Probe.Name) failed after 5 attempts: $LastError; address_family=$(ConvertTo-CanonicalJSON $FamilyDiagnostics)"
         }
     }
     return $Results
 }
-
 function Get-WinINetProxySnapshot {
     $Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
     $Properties = Get-ItemProperty -LiteralPath $Path -ErrorAction Stop
@@ -564,6 +626,7 @@ $Result = [ordered]@{
     external_sites_reenabled = $null
     routing_modes = $null
     routing_rules = $null
+    routing_list_mode_off = $null
     wininet_before = $WinINetBefore
     wininet_owned = $null
     wininet_after = $null
@@ -596,8 +659,11 @@ try {
             throw "Generated upstream creation failed: $($Created | ConvertTo-Json -Compress -Depth 10)"
         }
         $Routes = Invoke-NavoIPC -Method "outbound.list"
-        if ($Routes.type -ne "RESPONSE" -or [string]$Routes.payload.active_id -ne [string]$Created.payload.id) {
-            throw "Generated upstream was not committed as active"
+        $CreatedID = [string]$Created.payload.id
+        $CreatedActiveID = [string]$Routes.payload.active_id
+        $CreatedCandidateID = [string]$Routes.payload.candidate_id
+        if ($Routes.type -ne "RESPONSE" -or ($CreatedActiveID -ne $CreatedID -and $CreatedCandidateID -ne $CreatedID)) {
+            throw "Generated upstream was not staged as candidate or active"
         }
     }
     elseif ($AutoSelectReachableOutbound) {
@@ -611,6 +677,12 @@ try {
             $RouteByID[[string]$Route.id] = $Route
         }
         $ActiveID = [string]$Routes.payload.active_id
+        if ([string]::IsNullOrWhiteSpace($ActiveID)) {
+            $ActiveID = [string]$Routes.payload.candidate_id
+        }
+        if ([string]::IsNullOrWhiteSpace($ActiveID)) {
+            $ActiveID = [string]$Routes.payload.selected_id
+        }
         $Candidates = @($Tests.payload.results | Where-Object reachable | Sort-Object @{
             Expression = { if ([string]$_.id -eq $ActiveID) { 0 } else { 1 } }
         }, latency_ms)
@@ -621,8 +693,16 @@ try {
         foreach ($Candidate in $Candidates) {
             $CandidateID = [string]$Candidate.id
             $Selected = Invoke-NavoIPC -Method "outbound.select" -Payload @{ id = $CandidateID }
-            if ($Selected.type -ne "RESPONSE" -or [string]$Selected.payload.active_id -ne $CandidateID) {
-                $Result.outbound_selection_attempts += [ordered]@{ id = $CandidateID; latency_ms = [int]$Candidate.latency_ms; status = "select_failed" }
+            $SelectionActiveID = [string]$Selected.payload.active_id
+            $SelectionCandidateID = [string]$Selected.payload.candidate_id
+            if ($Selected.type -ne "RESPONSE" -or ($SelectionActiveID -ne $CandidateID -and $SelectionCandidateID -ne $CandidateID)) {
+                $Result.outbound_selection_attempts += [ordered]@{
+                    id = $CandidateID
+                    latency_ms = [int]$Candidate.latency_ms
+                    status = "select_failed"
+                    error_code = [string]$Selected.payload.code
+                    error_message = [string]$Selected.payload.message
+                }
                 continue
             }
             $PreflightMode = Invoke-NavoIPC -Method "runtime.mode.set" -Payload @{ mode = "global" }
@@ -631,6 +711,18 @@ try {
             }
             $Preflight = Invoke-NavoIPC -Method "capture.set" -Payload @{ mode = "system_proxy" }
             if ($Preflight.type -eq "RESPONSE") {
+                $CommittedRoutes = Invoke-NavoIPC -Method "outbound.list"
+                if ($CommittedRoutes.type -ne "RESPONSE" -or [string]$CommittedRoutes.payload.active_id -ne $CandidateID) {
+                    try { Invoke-NavoIPC -Method "capture.set" -Payload @{ mode = "off" } | Out-Null } catch {}
+                    $Result.outbound_selection_attempts += [ordered]@{
+                        id = $CandidateID
+                        latency_ms = [int]$Candidate.latency_ms
+                        status = "commit_failed"
+                        active_id = [string]$CommittedRoutes.payload.active_id
+                        candidate_id = [string]$CommittedRoutes.payload.candidate_id
+                    }
+                    continue
+                }
                 $PreflightStop = Invoke-NavoIPC -Method "capture.set" -Payload @{ mode = "off" }
                 if ($PreflightStop.type -ne "RESPONSE") {
                     throw "Outbound preflight could not disable System Proxy"
@@ -673,6 +765,17 @@ try {
         if ($Result.activation.type -ne "RESPONSE") {
             throw "System Proxy activation failed: $($Result.activation | ConvertTo-Json -Compress -Depth 12)"
         }
+        if ($HasGeneratedUpstream) {
+            $CommittedRoutes = Invoke-NavoIPC -Method "outbound.list"
+            if ($CommittedRoutes.type -ne "RESPONSE" -or [string]$CommittedRoutes.payload.active_id -ne [string]$Created.payload.id) {
+                throw "Generated upstream was not committed as active after System Proxy verification"
+            }
+            $Result.selected_outbound = [ordered]@{
+                id = [string]$Created.payload.id
+                source_type = "upstream_proxy"
+                state = "active"
+            }
+        }
         $Result.wininet_owned = Get-WinINetProxySnapshot
         if ($Result.wininet_owned.proxy_enable -ne 1 -or
             $Result.wininet_owned.proxy_server -notmatch '^127\.0\.0\.1:\d+$' -or
@@ -688,8 +791,9 @@ try {
             throw "Customer routing rules failed to apply"
         }
         $ListModeOff = Invoke-NavoIPC -Method "runtime.list_mode.set" -Payload @{ mode = "off" }
+        $Result.routing_list_mode_off = $ListModeOff
         if ($ListModeOff.type -ne "RESPONSE" -or [string]$ListModeOff.payload.mode -ne "off") {
-            throw "Routing list mode did not remain explicitly disabled"
+            throw "Routing list mode did not remain explicitly disabled: $(ConvertTo-CanonicalJSON $ListModeOff)"
         }
         foreach ($Mode in @("bypass_mainland", "global", "direct")) {
             $SetMode = Invoke-NavoIPC -Method "runtime.mode.set" -Payload @{ mode = $Mode }
@@ -767,11 +871,36 @@ try {
         $Result.tun_status = Invoke-NavoIPC -Method "tun.status"
         if ($FailurePoint -eq "none") {
             $Result.tun_status = Assert-TUNHealthy -Activation $Result.activation
+            if ($HasGeneratedUpstream) {
+                $CommittedRoutes = Invoke-NavoIPC -Method "outbound.list"
+                if ($CommittedRoutes.type -ne "RESPONSE" -or [string]$CommittedRoutes.payload.active_id -ne [string]$Created.payload.id) {
+                    throw "Generated upstream was not committed as active after TUN verification"
+                }
+                $Result.selected_outbound = [ordered]@{
+                    id = [string]$Created.payload.id
+                    source_type = "upstream_proxy"
+                    state = "active"
+                }
+            }
             $Result.no_proxy_https = Invoke-NoProxyHTTPProbe
-            $Result.external_sites = if ($Scenario -eq "routing-modes") {
-                $Result.tun_status.payload.verification.sites
-            } else {
-                Invoke-NoProxyExternalSiteProbes
+            if ($Scenario -eq "routing-modes") {
+                $Result.external_sites = $Result.tun_status.payload.verification.sites
+            }
+            elseif ($Scenario -eq "disable-adapter") {
+                $BeforeExternal = Invoke-NavoIPC -Method "capture.status"
+                $BeforeRecoveryID = [string]$BeforeExternal.payload.recovery.id
+                try {
+                    $Result.external_sites = Invoke-NoProxyExternalSiteProbes
+                }
+                catch {
+                    $Result["pre_scenario_error"] = ($_ | Out-String).Trim()
+                    $Result["pre_scenario_self_heal"] = Wait-CaptureSelfHealRecovered `
+                        -AfterRecoveryID $BeforeRecoveryID
+                    $Result.external_sites = Invoke-NoProxyExternalSiteProbes
+                }
+            }
+            else {
+                $Result.external_sites = Invoke-NoProxyExternalSiteProbes
             }
             if ($StabilitySeconds -gt 0) {
                 Start-Sleep -Seconds $StabilitySeconds
@@ -929,8 +1058,17 @@ try {
                 "disable-adapter" {
                     $AdapterIndex = [int]$Result.tun_status.payload.interface_index
                     $Adapter = Get-NetAdapter -InterfaceIndex $AdapterIndex -ErrorAction Stop
+                    $BeforeDisable = Invoke-NavoIPC -Method "capture.status"
+                    $BeforeRecoveryID = [string]$BeforeDisable.payload.recovery.id
                     $Adapter | Disable-NetAdapter -Confirm:$false -ErrorAction Stop
-                    $Result.capture_after = Wait-CaptureCommittedOff
+                    $Result["self_heal"] = Wait-CaptureSelfHealRecovered -AfterRecoveryID $BeforeRecoveryID
+                    $Result.no_proxy_https = Invoke-NoProxyHTTPProbe
+                    $Result.external_sites = Invoke-NoProxyExternalSiteProbes
+                    $Stop = Invoke-NavoIPC -Method "capture.set" -Payload @{ mode = "off" }
+                    if ($Stop.type -ne "RESPONSE") {
+                        throw "SelfHeal recovery cleanup failed: $($Stop | ConvertTo-Json -Compress -Depth 10)"
+                    }
+                    $Result.capture_after = Invoke-NavoIPC -Method "capture.status"
                 }
                 "core-crash" {
                     $CoreProcessName = $Core

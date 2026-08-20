@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"navo/internal/agent/systemproxy"
@@ -27,6 +28,12 @@ import (
 )
 
 const maxCoreArchiveBytes int64 = 64 * 1024 * 1024
+
+const (
+	coreUpdateMetadataAttemptTimeout = 45 * time.Second
+	coreUpdateDownloadAttemptTimeout = 10 * time.Minute
+	coreUpdateBodyIdleTimeout        = 30 * time.Second
+)
 
 type releaseCandidate struct {
 	version    string
@@ -38,6 +45,10 @@ type coreUpdateBackup struct {
 	path string
 	data []byte
 	mode os.FileMode
+}
+
+type coreUpdateSessionStatus struct {
+	SessionID string `json:"session_id"`
 }
 
 type coreUpdateHTTPRoute struct {
@@ -98,10 +109,12 @@ func (a *App) InstallCoreUpdate(coreID string) (CoreUpdateStatus, error) {
 	currentSystemProxy, _ := systemproxy.CurrentConfig()
 	routes := coreUpdateHTTPRoutes(dashboard, currentSystemProxy, os.LookupEnv)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	candidate, err := withCoreUpdateHTTPRoutes(ctx, routes, func(client *http.Client) (releaseCandidate, error) {
-		return fetchInstallCandidate(ctx, client, source)
+	ctx := a.context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	candidate, err := withCoreUpdateHTTPRoutes(ctx, routes, coreUpdateMetadataAttemptTimeout, func(attemptCtx context.Context, client *http.Client) (releaseCandidate, error) {
+		return fetchInstallCandidate(attemptCtx, client, source)
 	})
 	if err != nil {
 		return CoreUpdateStatus{}, err
@@ -109,8 +122,8 @@ func (a *App) InstallCoreUpdate(coreID string) (CoreUpdateStatus, error) {
 	if !versionGreater(candidate.version, entry.Version) {
 		return CoreUpdateStatus{}, fmt.Errorf("%s 已是最新版本 %s", source.name, entry.Version)
 	}
-	archiveData, err := withCoreUpdateHTTPRoutes(ctx, routes, func(client *http.Client) ([]byte, error) {
-		return downloadCoreArchive(ctx, client, candidate.asset)
+	archiveData, err := withCoreUpdateHTTPRoutes(ctx, routes, coreUpdateDownloadAttemptTimeout, func(attemptCtx context.Context, client *http.Client) ([]byte, error) {
+		return downloadCoreArchive(attemptCtx, client, candidate.asset)
 	})
 	if err != nil {
 		return CoreUpdateStatus{}, err
@@ -145,55 +158,45 @@ func (a *App) InstallCoreUpdate(coreID string) (CoreUpdateStatus, error) {
 		return CoreUpdateStatus{}, err
 	}
 
-	previousMode := dashboard.Capture.CommittedMode
-	activeRunning := dashboard.Core.CoreID == coreID && dashboard.Core.State == "running"
-	if previousMode != "" && previousMode != "off" {
-		if err := a.SetCaptureMode("off"); err != nil {
-			return CoreUpdateStatus{}, fmt.Errorf("升级前关闭网络接管失败：%w", err)
-		}
-	}
-	restoreCapture := func() error {
-		if previousMode == "" || previousMode == "off" {
-			return nil
-		}
-		return a.SetCaptureMode(previousMode)
-	}
-	if activeRunning {
-		if _, err := call[struct{}](a, "core.update.stop", map[string]any{"core_id": coreID}); err != nil {
-			_ = restoreCapture()
-			return CoreUpdateStatus{}, fmt.Errorf("停止当前内核失败：%w", err)
-		}
-	}
-
 	backups, err := readCoreUpdateBackups(binaryPath, manifestPath, sumsPath)
 	if err != nil {
-		if activeRunning {
-			_, _ = call[struct{}](a, "core.update.start", map[string]any{"core_id": coreID})
-		}
-		_ = restoreCapture()
 		return CoreUpdateStatus{}, err
 	}
-	commitErr := commitCoreUpdate(stagedPath, binaryPath, manifestPath, updatedManifest, sumsPath, updatedSums)
-	startedUpdatedCore := false
-	if commitErr == nil && activeRunning {
-		_, commitErr = call[struct{}](a, "core.update.start", map[string]any{"core_id": coreID})
-		startedUpdatedCore = commitErr == nil
+	session, err := call[coreUpdateSessionStatus](a, "core.update.begin", map[string]any{"core_id": coreID})
+	if err != nil {
+		return CoreUpdateStatus{}, fmt.Errorf("建立内核升级事务失败：%w", err)
 	}
+	if strings.TrimSpace(session.SessionID) == "" {
+		return CoreUpdateStatus{}, errors.New("内核升级事务未返回 session_id")
+	}
+	sessionOpen := true
+	rollbackSession := func(reason string) error {
+		_, rollbackErr := call[struct{}](a, "core.update.rollback", map[string]any{
+			"session_id": session.SessionID, "core_id": coreID, "reason": reason,
+		})
+		if rollbackErr == nil {
+			sessionOpen = false
+		}
+		return rollbackErr
+	}
+	defer func() {
+		if sessionOpen {
+			_ = rollbackSession("core update caller exited before commit")
+		}
+	}()
+
+	commitErr := commitCoreUpdate(stagedPath, binaryPath, manifestPath, updatedManifest, sumsPath, updatedSums)
 	if commitErr == nil {
-		commitErr = restoreCapture()
+		_, commitErr = call[struct{}](a, "core.update.commit", map[string]any{
+			"session_id": session.SessionID, "core_id": coreID,
+		})
+		if commitErr == nil {
+			sessionOpen = false
+		}
 	}
 	if commitErr != nil {
-		var rollbackErr error
-		if startedUpdatedCore {
-			_, stopErr := call[struct{}](a, "core.update.stop", map[string]any{"core_id": coreID})
-			rollbackErr = errors.Join(rollbackErr, stopErr)
-		}
-		rollbackErr = errors.Join(rollbackErr, restoreCoreUpdate(backups))
-		if activeRunning {
-			_, restartErr := call[struct{}](a, "core.update.start", map[string]any{"core_id": coreID})
-			rollbackErr = errors.Join(rollbackErr, restartErr)
-		}
-		rollbackErr = errors.Join(rollbackErr, restoreCapture())
+		rollbackErr := restoreCoreUpdate(backups)
+		rollbackErr = errors.Join(rollbackErr, rollbackSession(commitErr.Error()))
 		return CoreUpdateStatus{}, errors.Join(fmt.Errorf("内核升级失败：%w", commitErr), rollbackErr)
 	}
 
@@ -233,7 +236,6 @@ func trustedCoreUpdateClient(route coreUpdateHTTPRoute) *http.Client {
 	}
 	return &http.Client{
 		Transport: transport,
-		Timeout:   45 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 6 || req.URL.Scheme != "https" || !trustedGitHubHost(req.URL.Hostname()) {
 				return errors.New("拒绝非 GitHub HTTPS 下载跳转")
@@ -338,17 +340,23 @@ func loopbackHTTPProxyURL(value string) *url.URL {
 func withCoreUpdateHTTPRoutes[T any](
 	ctx context.Context,
 	routes []coreUpdateHTTPRoute,
-	operation func(*http.Client) (T, error),
+	attemptTimeout time.Duration,
+	operation func(context.Context, *http.Client) (T, error),
 ) (T, error) {
 	var zero T
+	if attemptTimeout <= 0 {
+		return zero, errors.New("内核更新请求超时必须大于零")
+	}
 	var attemptErrors []error
 	for _, route := range routes {
 		if err := ctx.Err(); err != nil {
 			attemptErrors = append(attemptErrors, err)
 			break
 		}
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 		client := trustedCoreUpdateClient(route)
-		result, err := operation(client)
+		result, err := operation(attemptCtx, client)
+		cancel()
 		if transport, ok := client.Transport.(*http.Transport); ok {
 			transport.CloseIdleConnections()
 		}
@@ -431,7 +439,88 @@ func validGitHubAssetURL(raw string) bool {
 	return err == nil && parsed.Scheme == "https" && parsed.Hostname() == "github.com"
 }
 
+type coreUpdateProgressReader struct {
+	reader       io.Reader
+	lastProgress *atomic.Int64
+}
+
+func (r coreUpdateProgressReader) Read(buffer []byte) (int, error) {
+	n, err := r.reader.Read(buffer)
+	if n > 0 {
+		r.lastProgress.Store(time.Now().UnixNano())
+	}
+	return n, err
+}
+
+func readCoreUpdateBody(
+	ctx context.Context,
+	body io.ReadCloser,
+	maxBytes int64,
+	idleTimeout time.Duration,
+) ([]byte, error) {
+	if idleTimeout <= 0 {
+		return nil, errors.New("内核下载无进度超时必须大于零")
+	}
+	var lastProgress atomic.Int64
+	lastProgress.Store(time.Now().UnixNano())
+	done := make(chan struct{})
+	watcherDone := make(chan struct{})
+	var completed atomic.Bool
+	var stalled atomic.Bool
+	go func() {
+		defer close(watcherDone)
+		timer := time.NewTimer(idleTimeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				_ = body.Close()
+				return
+			case <-done:
+				return
+			case <-timer.C:
+				if completed.Load() {
+					return
+				}
+				last := time.Unix(0, lastProgress.Load())
+				if remaining := idleTimeout - time.Since(last); remaining > 0 {
+					timer.Reset(remaining)
+					continue
+				}
+				stalled.Store(true)
+				_ = body.Close()
+				return
+			}
+		}
+	}()
+
+	reader := coreUpdateProgressReader{reader: body, lastProgress: &lastProgress}
+	data, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	completed.Store(true)
+	close(done)
+	<-watcherDone
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if stalled.Load() {
+		return nil, fmt.Errorf("内核下载连续 %s 未收到数据", idleTimeout)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func downloadCoreArchive(ctx context.Context, client *http.Client, asset githubAsset) ([]byte, error) {
+	return downloadCoreArchiveWithIdleTimeout(ctx, client, asset, coreUpdateBodyIdleTimeout)
+}
+
+func downloadCoreArchiveWithIdleTimeout(
+	ctx context.Context,
+	client *http.Client,
+	asset githubAsset,
+	idleTimeout time.Duration,
+) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建内核下载请求失败：%w", err)
@@ -445,7 +534,7 @@ func downloadCoreArchive(ctx context.Context, client *http.Client, asset githubA
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("下载内核返回 HTTP %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxCoreArchiveBytes+1))
+	data, err := readCoreUpdateBody(ctx, resp.Body, maxCoreArchiveBytes, idleTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("读取内核下载失败：%w", err)
 	}

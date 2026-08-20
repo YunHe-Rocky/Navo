@@ -1312,3 +1312,307 @@
 - README, CLAUDE, and INSTALL_DEPLOY now describe the implemented Wails/Vue, local-only, portable workflow; stale AI, MySQL, Flutter, Android, and installer claims were removed.
 - artifacts is ignored for new output, but existing tracked historical artifacts were intentionally not deleted or untracked without an explicit retention decision.
 - Local automated gates pass, but elevated TUN routing, physical reboot/cold start, Authenticode, and the all-elevated package runtime smoke remain external acceptance work.
+
+# 2026-08-16 Phase 59: architecture boundary, scheduling, and self-heal
+
+- The V1 specification requires global observation but control only of resources proven to be Navo-owned; external Clash/v2rayN/core/TUN/route/DNS state is read-only.
+- There must be exactly one cross-domain Connection Coordinator. Core, capture, network-control, Scheduler, and SelfHeal domains may not directly orchestrate one another.
+- Observation may run concurrently, but every network mutation (node switch, capture switch, rule change, automatic failover, SelfHeal) must share one serialized transaction boundary.
+- A node remains Candidate until core, entry, DNS, TCP/HTTPS, exit-IP, and routed-traffic validation succeeds. Node-only changes must preserve capture mode and routing policy.
+- SelfHeal is domain-scoped, uses the smallest justified action, revalidates real connectivity after each round, stops after two complete rounds, and exposes attributed error evidence.
+- User-initiated A-to-B failure must restore and revalidate A. Active-node failure may search only within the same source channel (subscription pool versus standalone proxy), and inactive nodes stay quiet except for explicit testing or failover discovery.
+- Existing memory reinforces that SelfHeal must remain an observer/policy layer delegating mutations to the runtime coordinator/Supervisor, and that lifecycle context, serialization, rollback, stable error codes, and unrelated v2rayN preservation are already repaired invariants.
+## Current topology inventory (initial)
+
+- Current control ownership is split: Agent owns a capture transition mutex/journal and calls Service, while Service owns core/runtime/TUN mutations and has a separate capture lock. A single transaction boundary across node, core, capture, rule, recovery, and automatic actions is not yet evident.
+- Service already implements Candidate revisions and commits healthy runtime only after verification; this is reusable for Active/Candidate semantics instead of introducing a parallel state store.
+- Agent capture health monitoring performs recovery work, Service monitors TUN adapter health, Supervisor owns core lifecycle, and internal/selfheal provides an engine. The refactor must remove competing mutation ownership while retaining each layer's observation responsibilities.
+- Several background goroutines and tickers exist. Each must be classified as read-only observation/trigger versus direct mutation before changing behavior.
+## Confirmed boundary gaps
+
+- Agent is already the outer cross-layer owner for capture, core switch, outbound switch, and source mutations, but the abstraction is named captureMu and is bypassed by runtime.mode.set, runtime.rules.set, runtime.list_mode.set, network recovery, and some compatibility methods. Concurrent UI requests can therefore mutate policy/runtime while another connection transaction is active.
+- Service has independent captureMu and runtimeMu locks. They protect local structures but do not express one typed connection transaction or its origin/phase; IPC dispatch itself does not classify mutation versus observation.
+- SelfHeal DefaultMaxAttempts is 3, which contradicts the V1 hard limit of two full repair rounds. Built-in policies are currently observe-only, so no production mutation is performed by internal/selfheal yet.
+- Agent's System Proxy health monitor performs immediate one-shot cleanup after three samples and leaves capture off; it does not run attributed two-round minimal repair, real revalidation, or same-channel node failover.
+- User outbound switching already stops the current capture, applies the candidate, restores the same capture mode, validates the data plane through capture activation, and restores the previous outbound on failure. This is the correct transaction to preserve and formalize.
+- Runtime policy setters are forwarded directly to Service and can reload/rebind a live core. They must join the same Agent-side coordinator to satisfy observation-parallel/control-serial semantics.
+## Phase 59 implementation decision
+
+- The User Agent will be the single cross-domain Connection Coordinator because it is the only boundary that can order user-session WinINet changes together with Service-owned core/TUN/network work. Service captureMu remains a domain-local safety gate, not a second business coordinator.
+- Introduce a typed internal/connection coordinator with operation, origin, phase, queueing, context cancellation, and observable snapshots. Replace Agent captureMu ownership with this coordinator.
+- Route capture, node, core, source, routing-policy, core-update, recovery, and restart mutations through the coordinator. Keep dashboard, status, metrics, probes, and lists concurrent/read-only.
+- Make connection restart and manual network recovery one lease each; the current two independent capture calls allow an unrelated mutation to interleave between stop and restore/recover.
+- Preserve Service revision Candidate/Active mechanics, but split runtime SelectedOutbound (deployed intent) from ActiveOutbound and CandidateOutbound (committed business state). Expose both in status/list responses.
+- Do not invent unspecified domain repair commands from V1 section 22. Keep production observer policies read-only, enforce the universal two-round cap in the generic SelfHeal engine, add typed fault domains and status evidence, and retain existing ownership-aware fail-closed recovery.
+## Active/Candidate integration findings
+
+- Runtime previously exposed SelectedOutbound as active before health commit. During a stopped-core selection or in-flight validation, UI and Agent rollback could therefore not distinguish committed A from candidate B.
+- Runtime now needs three explicit identities: SelectedOutbound for deployed intent, ActiveOutbound for the last verified commit, and CandidateOutbound for an uncommitted node change. Old persisted state is promoted only when its revision_status is active.
+- Agent rollback must compare the deployed SelectedOutbound, while user-visible health and connection state use ActiveOutbound. Connection enable may start a Candidate so it can be validated and committed.
+- The Vue node list should show Candidate as pending verification, not Current. Existing traffic/health views remain bound to Active so an unverified node cannot contaminate current-link metrics.
+- SelfHeal budget state supports two sequential attempts inside one event: complete(false) keeps the circuit closed after round one and opens it at the configured second-round limit.
+## Phase 59 final boundary findings
+
+- Coordinator phase is now advanced by production paths: control work enters applying, candidate reactivation enters verifying, rollback paths enter rolling_back, and successful responses pass through committing before completion.
+- Agent observation endpoints do not acquire the Connection Coordinator; the existing Service pipe may still serialize request/response transport, but it is not a competing business mutation owner.
+- Automatic same-source failover is structurally bounded by source_type and Active/Candidate state but remains disabled because V1 section 22 does not define fault evidence, candidate discovery triggers, or round-specific actions.
+- Shutdown retains ownership-aware proxy cleanup even if its bounded wait for the Coordinator expires; this is a fail-safe cleanup exception to prevent leaving a Navo-owned WinINet proxy behind during process teardown.
+
+# 2026-08-17 Phase 60: explainable network risk and ChatGPT usability
+
+- Historical Phase 47 only proved canonical OpenAI route compilation and focused tests; real ChatGPT/Codex authentication, assets, API, streaming/WebSocket, and rollback acceptance remained explicitly pending.
+- The UI risk model is split incorrectly: `riskSummary` describes only IP hosting/proxy metadata while the same overview can present capture as enabled. It does not express data-plane reachability, evidence freshness, failure layer, or recovery action.
+- Current live read-only evidence contains no Navo process and no listener on `127.0.0.1:12080`. WinINet is enabled at `127.0.0.1:10808`, owned by the unrelated v2rayN sing-box process, which must not be stopped or claimed by Navo.
+- The running ChatGPT desktop process has multiple established TCP connections to `127.0.0.1:10808`. This proves proxy socket use only; it does not prove authentication/API/streaming success.
+- Therefore any Navo UI “enabled” indication in this host state is stale or ownership-blind. Capture availability must reconcile persisted intent with current Agent/Service/core and WinINet/TUN ownership evidence.
+- UI guidance selected for the risk adjustment: dense desktop diagnostic status, explicit text plus semantic state (not color-only), stale/loading/error states, local recovery actions, and dynamically synchronized ARIA.
+- No live networking or user process was mutated during diagnosis.
+- Current OpenAI Docs documents the Windows desktop user flow (install, sign in, send a message) but does not publish a complete proxy/domain allowlist on the skill-allowed official documentation domains. Treat the repository suffix list as a maintained compatibility set, not a proof of current completeness.
+- The production activation verifier currently checks only Google and GitHub. No ChatGPT homepage, authentication edge, API edge, asset host, or streaming/WebSocket path participates in the health commit.
+- This permits a real false-positive: capture can commit and the UI can present enabled/healthy while every OpenAI application path is unusable.
+- The safest product fix is fail-closed application readiness for the explicitly supported ChatGPT feature plus persisted, timestamped probe evidence exposed to the dashboard; do not infer ChatGPT readiness from generic IP metadata or core metrics.
+- Live no-credential control probes confirm the required distinction: direct `chatgpt.com` and `api.openai.com` time out on this host, while the existing v2rayN path reaches ChatGPT/auth edges (HTTP 403), the API edge (expected HTTP 401), assets (HTTP 404), and `ws.chatgpt.com` (HTTP 404).
+- These edge statuses prove routed DNS/TCP/TLS/HTTP reachability without using account credentials. They do not independently prove an authenticated conversation stream, so interactive desktop continuity remains a separate acceptance layer.
+- Production design: system-proxy and TUN activation must require named ChatGPT web/auth/API/assets/stream edges in addition to Google/GitHub; System Proxy must also verify the current-user WinINet PRECONFIG path after ownership commit.
+- Dashboard design: persist readiness state, scope, named-site evidence, default-proxy result, error, and timestamp in the authoritative capture snapshot; derive risk from that evidence plus capture lifecycle and exit-IP mismatch.
+
+## 2026-08-17 Phase 61 completion scope
+
+- The user explicitly requested completion of every deferred V1 item, so section 22 is now authorized implementation scope rather than a documentation-only boundary.
+- Phase 60 is already modifying application-readiness evidence and shares the capture verification path. Phase 61 must reconcile and extend those changes instead of replacing them.
+- Completion requires both code and elevated Windows data-plane evidence; source tests alone cannot close System Proxy/TUN usability.
+- External v2rayN processes, WinINet ownership, physical adapters, user DNS, and non-Navo routes remain read-only even during acceptance.
+
+## Phase 61.1 initial inventory
+
+- The generic internal/selfheal engine has budget, dedupe, circuit, verify, and rollback primitives, but production default policies remain AutoRepair=false and no fault-evidence matrix or user-facing terminal report is registered.
+- Agent monitorCaptureHealth currently waits for three failed samples, then recoverUnhealthyCapture acquires the Coordinator and performs one fail-closed capture recovery. It does not execute two attributed rounds or same-channel candidate failover.
+- Service already exposes on-demand outbound.test/outbound.testAll probes and persisted EndpointStatus latency/availability. These can seed candidate discovery, but final promotion must still run the full capture data-plane verification transaction.
+- Subscription nodes carry their subscription ProviderID; standalone upstream proxies use ProviderID=upstream_proxy. Automatic failover must compare normalized source channel, never merely any available outbound.
+- Existing Phase 60 adds named ChatGPT readiness evidence to the same capture verification chain. Phase 61 real validation must preserve and consume that authoritative result.
+
+## Phase 61.1 integration and acceptance findings
+
+- internal/selfheal is currently not instantiated outside its own tests. Completing V1 requires a production recovery orchestrator/report path, not merely more default policy declarations.
+- Phase 60 already adds ReadinessEvidence to capture.Snapshot and Wails/Vue. Recovery reporting should be separate from application-readiness evidence so repair attempts do not overwrite the proof used to commit capture.
+- The current TUN harness already covers sing-box/Mihomo golden, routing, lifecycle, injected failures, crashes, stability, rollback, and residue. It also contains system-proxy routing scenarios, so acceptance should extend this harness rather than create an unrelated runner.
+- Current version is 1.0.30. Package output must use the versioned portable directory/ZIP and must be rebuilt after Phase 61 UI/source changes.
+- UI already documents BLACKLIST as proxy-list semantics and WHITELIST as direct-list semantics. Backend canonical ordering still needs an exact regression table across runtime and capture modes.
+
+## Phase 61.1 ownership and policy findings
+
+- Service monitorTUNAdapter currently crosses the Scheduler boundary: after three adapter observations it acquires Service captureMu and directly calls rollbackCaptureLocked. It must instead publish an attributed stable fault; Agent health observation must submit the mutation through the cross-domain Coordinator.
+- Agent CaptureProbeFn performs authoritative WinINet PRECONFIG readiness for System Proxy. TUN readiness remains Service-owned and is returned from capture.prepare; periodic TUN health should consume Service fault evidence rather than duplicate raw adapter mutation.
+- Canonical list semantics are now explicit: BLACKLIST entries route through the selected proxy, WHITELIST entries route direct, private networks always route direct, and runtime mode determines only the unmatched final route.
+- Phase 60 remains in progress at risk-model repair. Phase 61 can add recovery reporting fields to the same capture status without changing its application-readiness contract.
+
+## Phase 60 final findings
+
+- “Enabled” is now a committed result, not an optimistic control-plane flag: Service must pass ChatGPT application probes before runtime commit, and Agent must pass current-user WinINet PRECONFIG before the System Proxy snapshot becomes ready.
+- Required application evidence is named and inspectable: `chatgpt-web`, `chatgpt-auth`, `openai-api`, `chatgpt-assets`, and `chatgpt-stream`, each carrying DNS/TCP/TLS/HTTP status evidence. Expected unauthenticated 401/403/404 statuses prove edge reachability without account credentials.
+- TUN direct mode previously skipped application-site probes entirely; it now uses direct-route baselines plus the same ChatGPT application set. Proxied TUN retains generic Google/GitHub baselines plus the application set.
+- Manual `capture.verify` reruns the authoritative Service verification, then rechecks WinINet for System Proxy, timestamps the result, and updates the same capture snapshot consumed by dashboard, tray, and recovery.
+- UI connection health cannot become healthy/connected while readiness is missing, checking, stale, or failed. IP Proxy/Hosting/Mobile flags remain a separate contextual panel and no longer imply ChatGPT usability.
+- Elevated isolated live evidence through v2rayN passed two rounds, preserved the unrelated upstream process/listener, restored WinINet exactly to `127.0.0.1:10808`, and left no Navo `12080` listener or process.
+- The no-credential acceptance proves the supported application network path and fail-closed behavior. It intentionally does not send a message from the user's authenticated ChatGPT account.
+
+- [2026-08-17T10:57:54.0286432+08:00] Phase61.3：Service 尚无 failover candidate API；候选发现应基于 currentOutbounds，按 airport_subscription/upstream_proxy 两类同通道筛选，TCP 仅作预筛，最终仍须经完整 capture readiness 验证。
+- [2026-08-17T10:57:54.0286432+08:00] Agent 仅在完整验证成功后提交 runtime Active，因此候选失败可保持事务语义；穷尽后需恢复原 selected outbound 并保持 OFF。
+
+- [2026-08-17T11:06:53.4852763+08:00] Phase61.3 implementation：failover candidate selection remains inside the existing Scheduler SelfHeal Coordinator transaction; original selection is restored if every full activation fails, and runtime capture commits only after capture transition plus runtime.verify readiness.
+
+- [2026-08-17T11:08:21.1227505+08:00] Phase61.3 verified：cross-channel candidates are excluded before probing; disabled/incompatible/unreachable candidates are retained as report evidence; reachable candidates sort by latency then ID; Agent full-readiness commit test PASS.
+
+- [2026-08-17T12:24:55.0704645+08:00] Phase61.4：V1 deliberately defers list-entry meaning; canonical implementation is now explicitly frozen as blacklist match -> selected proxy, whitelist match -> direct, private CIDRs -> direct, unmatched -> base runtime mode. Recovery state is transported Agent -> Wails -> Vue with fault evidence, rounds, candidate attempts, impact and terminal error.
+
+## 2026-08-18 Phase 62 enabled-but-no-traffic incident
+
+- User reports the primary proxy function enables without an error but ordinary data does not pass.
+- The last recorded TUN acceptance was only partial: internal Service probes passed, but independent sequential application confirmation timed out. Therefore `HEALTH_COMMITTED` is not current proof of usable host traffic.
+- Initial diagnostics must be read-only and must preserve unrelated v2rayN/user processes; current live ownership and listener state are time-sensitive and must be re-established.
+
+## Phase 62 live baseline
+
+- No Navo process is currently running and no process listens on `127.0.0.1:12080`; v2rayN sing-box PID 9720 owns `127.0.0.1:10808` and WinINet points to that endpoint.
+- No Navo/TUN adapter is connected. Physical DNS remains `223.5.5.5` with WLAN fallback `119.29.29.29`; the active default route is WLAN 2.
+- Current no-explicit-proxy probes: DNS GitHub PASS, TCP GitHub 443 PASS, GitHub HTTPS 200 PASS, Google 204 TIMEOUT.
+- Explicit proxy control probes: Navo `12080` fails because no listener exists; v2rayN `10808` returns Google 204.
+- This proves general networking and the existing upstream path are usable; it does not yet reproduce a running Navo failure.
+
+- Navo last wrote runtime/log state at 2026-08-18 08:56:59; v2rayN started at 08:57:02, strongly indicating the user switched back after the Navo run.
+- Current evidence sources are `%LOCALAPPDATA%\Navo\structured.log.jsonl`, `runtime_state.json`, `recovery_state.json`, and `sing-box.log`, plus the architecture-complete portable `log\navo.log`.
+- No Navo entry exists in HKCU/HKLM Run, Windows Services, or Scheduled Tasks. Automatic boot ownership is currently absent and must be treated separately from the immediate data-plane failure.
+- The only current portable output is `release\Navo-1.0.30-architecture-complete-amd64`.
+
+- Preserved runtime state is `core_id=sing-box`, `mode=bypass_mainland`, and `revision_status=candidate`, not active.
+- The 08:50-08:56 core log proves `127.0.0.1:12080` accepted many browser/application connections, but many ended with client-side reset/abort messages; these resets alone do not identify the initiating fault.
+- The latest meaningful core failure besides client resets is an IPv6 SOCKS5 rejection; IPv4/direct and mixed-in traffic was also present.
+- Recovery state reports `NORMAL` and a clean exit, so crash recovery did not flag the candidate-with-listener mismatch.
+
+- Timeline correction: `runtime_state.json` was written at 08:56:55 during the successful System Proxy -> OFF transition, so its persisted `candidate` status does not prove that the earlier running transaction failed promotion.
+- The authoritative plain log shows System Proxy activation reached `running result=success` at 08:51:17, remained on for about five minutes, then the user requested OFF at 08:56:51 and rollback completed at 08:56:55.
+- The remaining defect is therefore false-positive readiness or unstable application/upstream traffic while the committed System Proxy state is running, not an uncommitted activation inferred from the post-disable state file.
+
+- The committed 08:50-08:56 System Proxy window contains 1,576 core data-plane log lines and 550 routes through the selected SOCKS outbound.
+- Within that window there were zero DNS timeouts and zero TCP dial timeouts. Of 44 core errors, 36 were client reset/abort, 6 were IPv6 SOCKS rejections, and 2 were direct connections to an ad-blocked `0.0.0.0` result.
+- Named Google, GitHub, ChatGPT, OpenAI auth/API/assets/stream destinations were accepted by mixed-in and handed to the selected SOCKS outbound during activation and subsequent traffic.
+- Therefore the preserved logs do not support a total core-forwarding failure; controlled host/application reproduction is required to distinguish System Proxy coverage, intermittent upstream behavior, and metrics/UI perception.
+
+## Phase 62 controlled System Proxy reproduction
+
+- Elevated isolated-profile reproduction used the same 1.0.30 architecture-complete portable and preserved user profile selection. System Proxy activation returned `RESPONSE`.
+- `bypass_mainland` and `global` both applied with `verified=true` and produced a proxy exit IP; the runner reached only the known unavailable `direct` mode before failing closed.
+- Exact WinINet rollback passed after failure (`127.0.0.1:10808` before and after), v2rayN remained running, port 12080 was gone, and no Navo process remained.
+
+- The overview and connection-page primary action calls `toggleConnection()`, which always enables `system_proxy` when capture is off.
+- System Proxy is explicitly documented only inside the detailed mode selector as covering browsers and applications that honor Windows proxy settings; applications that ignore it require TUN.
+- This creates a product/runtime mismatch for a primary proxy: the top-level action says only “启动代理/连接” but silently chooses limited capture scope, allowing a truthful `running_system_proxy` state while the user's target application has no captured traffic.
+- Traffic monitoring is separate: the metrics chain reads core counters when available and physical-interface counters otherwise. It should remain extension evidence, not be used to redefine proxy success.
+
+## Phase 62 controlled TUN reproduction
+
+- Current 1.0.30 sing-box TUN activation returned `RESPONSE`, `enabled=true`, and `stage=HEALTH_COMMITTED`.
+- Service-internal evidence claimed DNS/TCP/HTTPS/exit-IP success plus Google 204, GitHub 200, and all five ChatGPT/OpenAI application edges.
+- A basic no-proxy HTTPS control returned 200, but the subsequent independent host `curl --noproxy '*'` Google probe timed out after all 5 x 10-second attempts.
+- This exactly reproduces the report: control-plane and Service verification commit success while ordinary Windows host traffic is not reliably traversing TUN.
+- Failure cleanup passed: WinINet restored to v2rayN 10808, no Navo process/listener/owned adapter remained, physical DNS and default routes were restored.
+
+- The TUN verifier uses Go `net.DefaultResolver`, `net.Dialer`, and `net/http`, while the external acceptance uses Windows `curl.exe` without forcing IPv4 or IPv6.
+- The activation plan hard-codes `IPv6Block`; network activation installs an outbound IPv6 firewall block for `::/1` and `8000::/1` instead of tunneling IPv6.
+- No evidence yet shows AAAA suppression or Windows address-family preference adjustment. An application that attempts returned IPv6 addresses can therefore time out while Go falls back to IPv4 and commits `HEALTH_COMMITTED`.
+- This hypothesis must be validated with simultaneous `curl -4` and `curl -6` under active TUN before changing production behavior.
+
+- The acceptance runner now records IPv4-only and IPv6-only curl exit/status after an ordinary host probe failure without weakening the failure gate.
+- The confirming rerun was canceled at UAC before product/network mutation, so address-family causality remains unconfirmed and must not be presented as final root cause.
+
+## Phase 62 confirmed code root cause
+
+- `cmd/navo/main.go` configures `CaptureProbeFn` to return nil for every mode except System Proxy. TUN therefore skips the Agent/current-user host-path probe during activation.
+- `verifyCaptureReadiness` also calls the Agent probe only for committed System Proxy, so the 30-second active data-plane loop and manual verification continue trusting the same Service-internal TUN verifier.
+
+- Implemented `systemproxy.ProbeDirect` with WinINet DIRECT access so TUN is checked through the current-user Windows host stack without consuming WinINet proxy settings.
+- Launcher capture probe mapping now uses PRECONFIG for System Proxy, DIRECT for TUN, and no probe for OFF.
+- Manual/periodic readiness now runs the Agent probe for every non-OFF mode; TUN cannot remain ready solely from Service-internal evidence.
+
+- Focused production/regression packages pass: `internal/agent`, `internal/agent/systemproxy`, and `cmd/navo`.
+
+- Failed-run core correlation disproves a Windows route miss: the external curl resolved only A records, entered `inbound/tun`, and was routed to the selected SOCKS outbound by IPv4 within milliseconds.
+- This also disproves the current IPv6-only hypothesis for the reproduced Google timeout; the family diagnostic remains useful but is not the primary repair.
+- The Service verifier starts Google, GitHub, five ChatGPT/OpenAI sites, TUN exit-IP, and local-proxy exit-IP work in a concentrated burst. Core logs show many simultaneous upstream SOCKS connections at the commit boundary.
+- Subsequent independent Google attempts also enter TUN/SOCKS but receive no usable response before curl timeout. The first internal burst can therefore pass while saturating or triggering concurrency limits on a weaker upstream, producing false post-commit usability.
+- The verifier must be made sequential/bounded and then followed by the independent Agent host-path probe; readiness traffic itself must not destabilize the selected route.
+
+- Production verifier now checks named external sites sequentially, so readiness no longer creates a seven-site upstream burst.
+- A regression server measured maximum external-probe concurrency of exactly 1.
+- The TUN activation/periodic path now adds an independent current-user WinINet DIRECT probe; a Service-only false positive becomes failed readiness and triggers existing fail-closed recovery.
+
+- The generic primary connection action previously selected limited System Proxy. It now selects TUN from OFF; System Proxy remains an explicit advanced option.
+- Final package gates passed with frontend 11/11, full Go test/vet, TypeScript, Vite, package manifest and ZIP verification.
+- Repaired 1.0.31 live TUN acceptance remains unperformed because UAC was canceled before script startup; no repaired-build end-to-end claim is allowed yet.
+- Post-cancel state is clean: zero Navo processes/listeners, v2rayN PIDs 23024/9720 and listener 10808 preserved, WinINet still points to 127.0.0.1:10808.
+
+## Phase 63 SelfHeal trigger gap
+
+- The health goroutine is running, but 1.0.30 TUN readiness used only the Service-internal verifier; its false `ready` result reset the failure counter, so SelfHeal received no fault.
+- The 1.0.31 current-user probe closes that observation gap, but an activation-time probe failure rolls back to `Faulted/OFF`; the monitor skips OFF captures and therefore still cannot schedule SelfHeal.
+- Current text attribution sees `TUN` before `timeout`, misclassifying a host-path/upstream timeout as adapter/TUN and preventing node failover. Adapter-specific evidence must remain TUN while TCP/HTTPS/timeout evidence must be Node.
+
+- Failed activation now finishes the user `CaptureSwitch` transaction before acquiring a separate Scheduler `SelfHeal` transaction, eliminating deterministic nested `CONNECTION_BUSY` suppression.
+- Faulted/OFF with matching desired mode is now a valid recovery source; unrelated OFF state still cannot trigger mutation.
+- Current-user HTTPS/timeout is classified as Node and receives reapply/restart plus optional same-channel failover; explicit adapter evidence remains TUN-owned recovery.
+
+## 2026-08-20 Phase 64 core capture and routing closure
+
+- The repaired 1.0.31 source/package has focused evidence for host-path verification, sequential external probes, TUN as the primary full-device action, and activation-to-SelfHeal handoff, but repaired-build elevated TUN acceptance was not completed after UAC cancellation.
+- Therefore the starting verdict is deliberately split: source behavior is partially implemented; current System Proxy/TUN/list-mode data-plane usability is unproven until this run re-establishes live ownership and executes the appropriate behavioral matrix.
+- Phase 64 will treat capture mode (OFF/System Proxy/TUN), base route mode, and independent list mode as separate axes and test their state and routing effects rather than infer them from UI labels.
+- The current shell is not elevated. Read-only process inventory shows no Navo process and preserves v2rayN PID 4716 plus its sing-box PID 1392; no Navo-owned adapter was observed.
+- The frontend already exposes `SetCaptureMode`, `SetRoutingListMode`, and `SetRoutingRules`, presents System Proxy/TUN as capture choices, and presents blacklist/whitelist as peer list-mode choices. This proves a visible control path exists, not that the backend route effect is correct.
+- The acceptance guide requires Xray TUN to fail closed for the bundled capability model; sing-box and Mihomo share the Navo-owned route/DNS/journal transaction and must pass the same real Windows matrix.
+- The current list-mode mutation is a real Coordinator-owned policy transaction: UI calls Wails, Agent serializes it as `OperationPolicyChange`, Service compiles/swaps the active core config, runs routing verification, commits healthy state only after verification, and restores the prior mode/config with an independent timeout on failure.
+- Canonical policy order is private-direct first, then only the selected list mode, then the base route mode. Blacklist rules are omitted when no proxy selection exists; whitelist rules remain direct. Unit tests cover the 3 base modes x 3 list modes semantic matrix and inactive-list isolation.
+- The elevated runner contains behavioral list checks in both System Proxy and TUN: it switches blacklist over a direct base and whitelist over a global base, then compares a matching public-IP probe against the direct baseline. The remaining question is whether those assertions and all compiler outputs pass on the current source/package.
+- Current read-only live ownership is exact: WinINet belongs to v2rayN at `127.0.0.1:10808` (sing-box PID 1392); three disconnected generic Wintun adapters exist but none is named the canonical owned `Navo`; no Navo `/1` route exists. They must not be claimed or removed by Navo.
+- Compiler inspection confirms canonical domain-suffix and CIDR list rules are emitted for sing-box, Mihomo, and Xray System Proxy configs. Xray TUN has an explicit negative test and remains unsupported.
+- After populating only pinned modules via `goproxy.cn`, `GOPROXY=off powershell ... scripts/test.ps1` passed all Go packages and `go vet ./...`, including Agent/SystemProxy, Service routing, Compiler, CoreAdapter, Network/TUN, SelfHeal, Wails, and Coordinator coverage.
+- Frontend deterministic gates pass: 11/11 behavior tests, Vue TypeScript check, and Vite production build. The suite explicitly proves the primary action chooses TUN and connection health requires application-readiness evidence; browser-visible control interaction is still a separate gate.
+- Browser-visible gate PASS in system Chrome at 1440x1000: rendered connection management exposes four peer controls; clicks invoked `system_proxy` then `tun`, blacklist then whitelist then off; rule drafts submitted normalized domain/CIDR arrays; day/night themes switched; zero console/page errors. Visual inspection found the selected TUN/base-route states readable with no horizontal overflow.
+- Production gap found after browser validation: active `runtime.mode.set`, `runtime.rules.set`, and `runtime.list_mode.set` transactions stop at Service-internal verification. Agent `forwardConnectionMutation` returns without immediately running the current-user PRECONFIG/DIRECT capture probe or refreshing capture readiness. The 30-second monitor eventually checks it, but a policy hot-swap can temporarily report old healthy evidence and ordinary host traffic can fail after the Service-only check.
+- Required repair: snapshot the prior policy before an active policy mutation, verify the current-user capture path after the Service commits, restore the exact prior policy on failure, verify the restored path, and fail closed to OFF if restoration cannot be proven.
+- Implemented that repair in the Agent transaction owner for active base-mode, rule, and list-mode mutations. Focused regressions prove successful host verification, exact prior list-mode restoration after a failed probe, and OFF fail-closed behavior when rollback cannot be proven.
+- Focused Agent tests and the complete offline `scripts/test.ps1` gate pass after the repair. The initial 1.0.33 package attempt also passed full Go, frontend 11/11, typecheck, and production build, then stopped before output creation because Wails CLI transitive modules were unavailable under `GOPROXY=off`.
+- Exact rollback coverage now spans all three mutation boundaries: base runtime mode restores only `mode`, list selection restores only `list_mode`, and rule editing restores both blacklist and whitelist arrays. The final full Go/vet gate passes with this test included.
+- Delivered and re-verified `Navo-1.0.33-portable-amd64` plus ZIP: 28 files, 27 manifest entries, 0 issues, all launcher/repair/UI PE versions 1.0.33.0, ZIP SHA-256 `E49D06916346FC50D852BC409F56FE5412B82642A42A1BA968C9062CBC9CE8A3`.
+- The current live verdict remains deliberately incomplete: the packaged launcher correctly requested elevation, but the 11-case UAC run was canceled before startup. Post-cancel ownership is unchanged (v2rayN 4716, its sing-box 1392, WinINet/10808), with no Navo process, 12080 listener, or canonical Navo adapter.
+
+## 2026-08-20 Phase 65 V1 architecture normalization
+
+- Read the complete 963-line `Navo_架构边界_调度与自愈设计规范_V1.md`. Its normative boundaries are global observation/Navo-only control, one Connection Coordinator, serial control with parallel observation, unique Active Node, mutually exclusive capture, capture-independent policy, real-network promotion, at most two full SelfHeal rounds, previous-node restoration for failed user switches, and same-source-channel automatic failover.
+- The document's statement that it was a boundary-definition phase rather than an implementation phase is document context, not an instruction that overrides the current user request. This phase therefore implements the requirements and uses the later sections as acceptance criteria.
+- The V1 document deliberately deferred exact blacklist/whitelist meaning. Current product behavior already has a canonical, tested definition—private direct; selected blacklist match proxies; selected whitelist match is direct; unmatched follows base mode—and Phase 65 will preserve it.
+- Prior V1 work stopped after audit. It found useful foundations (`SelectedOutbound`, `ActiveOutbound`, `CandidateOutbound`, `LastKnownGood`, verified `commitHealthyRuntimeLocked`) but identified distributed control ownership across Agent Coordinator, Service locks, runtime mutations, recovery, and Scheduler/SelfHeal paths. Current source must be re-audited because Phases 61–64 added substantial coordinator and recovery code afterward.
+- Live proxy usability remains an open gate despite verified 1.0.33 packaging and automated behavior. The previous consolidated elevated wrapper was canceled before startup, so this phase must not inherit a live PASS from it.
+- Initial current-source search shows the Agent dispatcher now recognizes core, capture, outbound, source, network recovery, runtime mode/rules/list mode, and core-update mutations, with most user/tray paths entering `beginConnection`. Service still owns inner `captureMu`/`runtimeMu`/`tunRuntimeMu` execution locks; those are allowed as domain locks only if no external caller can bypass the Agent transaction owner.
+- Scheduler-facing Service capture monitoring explicitly says it publishes evidence only, while Agent SelfHeal acquires `OperationSelfHeal` through the Coordinator. The audit must still inspect Service supervisor-event SelfHeal, direct recovery dispatch, and core-update paths for mutation bypass rather than infer compliance from comments.
+- `rg.exe` remains blocked by host policy; bounded PowerShell enumeration is the reliable repository search method on this machine.
+- Current typed `connection.Coordinator` covers capture, node, core, source, policy, core update, recovery, and SelfHeal operations with one token and explicit applying/verifying/committing/rollback phases. Agent user mutations wait through `Begin`; scheduled SelfHeal uses `TryBegin`, so observation may continue while control remains serialized.
+- Node switches stop the current capture, apply the target as Service candidate, restore the same capture mode for real readiness/commit, and on failure independently re-select the prior outbound and restore capture. This is substantially closer to V1 than the prior audit, but exact Active-versus-Selected fallback and previous-policy preservation still need regression inspection.
+- Service Supervisor crash SelfHeal policies are observer-only (`AutoRepair=false`), and the TUN monitor only publishes an owned-adapter fault after repeated identity checks. Actual repair is Agent-owned through `OperationSelfHeal`; no direct Scheduler network mutation was found in these paths.
+- Service exports a direct dispatcher for combined-launcher/pipe execution and retains domain locks. Product callers are expected to go through Agent, but the audit must distinguish an internal Service execution boundary from a second business coordinator and ensure every reachable product mutation has an Agent transaction wrapper.
+- Concrete control inconsistency found: Vue's primary “connect” action promises application-wide coverage and selects TUN, but the tray's generic `connection.enable` still silently selects System Proxy. This repeats the previously repaired UI mismatch through a second frontend and can leave non-proxy-aware applications unusable; the generic tray action must use the same TUN primary semantics while keeping explicit System Proxy selection available.
+- Legacy `connection.enable`/`connection.disable` and `tun.enable`/`proxy.*` dispatch paths call a background-context helper instead of the request-scoped capture entry. They still acquire the Coordinator, but cancellation/timeout and accurate origin are lost; all control aliases should converge on the context-aware entry.
+- Agent monitor performs domain attribution, at most `MaxRepairRounds`, verification after every round, same-channel failover, and final fail-closed cleanup. The repair operation currently labels its Coordinator origin as `scheduler`; to preserve the V1 Scheduler-versus-SelfHeal boundary, the mutation owner should be `OriginSelfHeal` while Scheduler remains the evidence trigger.
+- Core update is serialized only per stop/start IPC call. Wails disables capture, stops the core, writes files, restarts, and restores capture across multiple independent Coordinator transactions; tray/UI control can interleave during that window. This is a remaining cross-domain atomicity gap requiring an Agent-owned bounded update session or equivalent single transaction.
+- `outbound.update` currently computes an in-memory candidate copy and then always returns `UNSUPPORTED`, so it is not an active mutation path. It should remain fail-closed rather than being mistaken for a supported direct update.
+- A second concrete control bypass exists in Service subscription handlers: when `wait` is false, `subscription.add`/`subscription.refresh` respond and then a background goroutine fetches nodes and calls `applyRuntimeConfig` after the Agent Coordinator transaction has ended. Current Wails callers pass `wait=true`, but the backend contract still permits out-of-transaction config mutation and its comment incorrectly claims the goroutine joins the transaction. V1 requires removing or redesigning this asynchronous apply path; synchronous Agent-owned apply is the narrow safe repair.
+- Service Candidate/Active semantics are correctly explicit: runtime compilation saves a candidate revision, `activeOutboundID` returns empty for an explicit candidate, and only `commitHealthyRuntimeLocked` marks the revision active, writes `ActiveOutbound`, clears `CandidateOutbound`, and updates LastKnownGood after verification.
+- `setCaptureModeContext` is the canonical request-scoped entry; the background helper is used only by legacy aliases and tray helpers found in this audit, so those can be migrated without changing the core state machine.
+- Candidate config application preserves the previous runtime and active outbound, marks only a candidate, and has an independent 30-second rollback for core/TUN rebind failure. This path should be retained; the architectural repair belongs at caller/transaction boundaries rather than replacing the Service's proven domain rollback.
+- Subscription tests currently exercise `subscription.add` without `wait` and assert only immediate persistence, allowing an unobserved goroutine to continue after the response/test. Tests need to be rewritten to assert synchronous completion and no post-response config apply.
+- The Wails core update path downloads and validates before network mutation, which is good. The stop/write/start/restore segment itself is not protected by a single Agent Coordinator lease; `coreUpdateMu` shown in this area protects cached report state, not the full cross-domain update transaction.
+- Core update can be normalized without holding a lock during internet download: retain download/archive/version/hash/staging before mutation, then open a bounded Agent update session only for capture-off → core-stop → atomic file replacement → core-start → capture-restore. Step requests carry the session ID and reuse the held Coordinator transaction; commit or rollback releases it, and timeout performs fail-closed recovery so a crashed UI cannot leave a permanent lock.
+- Wails `call` already accepts arbitrary payloads, so session IDs can be added without changing the public Vue API. Agent direct Service wiring in the combined launcher confirms the Agent remains the right cross-domain owner.
+- Phase 65 ownership mapping is complete. The remaining cross-domain control violation is the multi-request core-update window; Candidate/Active, source-channel isolation, capture mutual exclusion, policy separation, and SelfHeal round bounds already have canonical owners and will be reinforced with gates rather than rewritten.
+- Generic tray `connection.enable` now uses request-scoped runtime observation and the same TUN primary semantics as the Vue application-wide connection action. Explicit System Proxy remains independently selectable.
+- Legacy `connection.enable`/`disable`, `tun.enable`, and `proxy.*` aliases now preserve the UI request context through the canonical capture transaction; SelfHeal mutations identify `OriginSelfHeal`, not Scheduler.
+- Service subscription add without `wait=true` is persist-only and reports `added_pending_refresh`. Refresh without `wait=true` fails with `SUB_WAIT_REQUIRED`; no goroutine can apply runtime configuration after the Agent transaction ends.
+- Focused boundary regressions passed: tray primary connect prepared/committed TUN, canceled tray requests did not mutate capture, subscription add remained persist-only, and no-wait refresh was rejected.
+- The correct repository Go cache is `.cache/go-path/pkg/mod` with build cache `.cache/go-build`, matching `scripts/test.ps1`; the older `.cache/go/pkg/mod` download cache is not sufficient for offline compilation.
+- The narrow core-update session can be simpler and safer than per-step leases: after download/staging/backups, Agent begin acquires the Coordinator, snapshots capture/core, disables capture and stops the active target; Wails atomically replaces files; Agent commit starts and verifies/restores capture, while rollback starts the restored core and restores capture. The session remains held across file replacement and has timeout recovery.
+- Inactive-core updates should not disable an unrelated active capture. They still hold the Coordinator for binary mutation, but begin reports `active_running=false` and leaves the data plane untouched.
+- Raw Service `core.update.stop/start` remain internal privileged executors. Agent UI dispatch will expose only begin/commit/rollback session methods, removing the per-call transaction gap from the product path.
+- Agent now owns a bounded core-update session across the entire mutable window. Begin snapshots active core/capture, disables capture and stops only an active target; commit restarts and verifies the updated core before restoring capture; rollback and timeout restart the restored/current core and restore capture before releasing the Coordinator.
+- Updating an inactive core no longer disables an unrelated active capture. Raw stop/start methods are rejected at the UI boundary and remain Service-only domain executors.
+- The core-update timer uses a `done` channel, so normal commit/rollback stops the timer without leaking a goroutine. Wails retains one deferred rollback retry if the first rollback IPC fails.
+- Core-update regressions prove policy mutations cannot interleave between begin and commit, rollback releases with a failed transaction record, raw UI steps fail closed, and timeout recovery restarts the core. Agent, Service, and Wails focused suites pass after the audit fixes.
+- Strict Active semantics exposed a real gap: Agent previously fell back from empty `active_id` to `selected_id`, and Service verification rollback snapshotted `SelectedOutbound`. Both could treat an unverified Candidate as rollback authority.
+- Agent now accepts only `active_id` as previous Active, rejects an inconsistent live-capture/no-Active switch, and Service snapshots `activeOutboundID` before candidate selection. Compatibility migration remains in the Service helper, where explicit candidate status still returns no Active.
+- A new failure regression proves a TUN node switch whose new-node HTTPS validation fails selects `new-node` then `old-node`, restores the old TUN capture, and leaves Global/blacklist/rule state unchanged.
+- A Service candidate regression proves `Active=old-node`, `Candidate=new-node`, while Global mode, whitelist mode, blacklist contents, and whitelist contents remain unchanged before commit.
+- Same-channel failover tests already enforce airport-versus-upstream source isolation and full readiness before commit; they passed in the Agent/Service suites together with the new strict Active tests.
+- SelfHeal has two independent hard caps at `MaxRepairRounds=2` (engine config clamp and per-fault recovery loop), domain-specific two-round actions, non-controllable physical/detection plans, observer-only Service policies, `OriginSelfHeal` mutation ownership, fail-closed exhaustion, and UI-decoded evidence/impact/round reports.
+
+## 2026-08-20 Phase 65 live closure findings
+
+- The original elevated routing script still treated selection as activation. Under strict V1 semantics a node can be Candidate after creation and becomes Active only after capture/data-plane verification; the acceptance assertion now follows that boundary.
+- Direct mode cannot require ChatGPT/OpenAI reachability because those destinations may legitimately require a proxy. Service verification now uses Baidu/Xiaomi for direct mode, and Agent current-user verification uses the same route-aware scope while still proving traffic traverses System Proxy or TUN as appropriate.
+- `runtime.verify` now exposes `mode` and `list_mode`, allowing the Agent to choose the correct current-user probe and report a truthful `direct` or application scope.
+- Reapplying list mode `off` is a verified idempotent no-op. Agent skips redundant current-user verification only when Service explicitly reports `changed:false`; real mutations still require both Service and current-user proof with rollback/fail-closed behavior.
+- Real System Proxy behavioral acceptance passed for sing-box 1.13.14, Mihomo 1.19.29, and Xray 26.3.27 using current Windows/amd64 source. Each core preserved direct exit `115.227.89.28` for direct/whitelist and used proxy exit `63.124.165.24` for Global/blacklist/list-off, while default WinINet traffic reached Google 204, GitHub 200, ChatGPT 403, and OpenAI API 401.
+- Each live case restored the exact prior WinINet state and left zero Navo processes/listeners. Existing v2rayN PID 4716, sing-box PID 1392, and listener 127.0.0.1:10808 were preserved and used only as the selected upstream.
+- These current-user cases use a test-only asInvoker launcher because the formal launcher requires elevation. They prove the System Proxy/backend/routing data plane but are not a substitute for exact-formal-binary or elevated TUN evidence.
+- The 1.0.35 formal elevated 11-case runner was canceled at UAC before startup. There is no `phase65-v1-closure` result set and no TUN mutation; therefore TUN DNS/TCP/HTTPS, stability, recovery, and exact rollback remain unproven.
+
+## 2026-08-20 Phase 66 initial updater finding
+
+- The same `context deadline exceeded ... while reading body` appears for both `Windows system proxy` and `direct`. Initial hypothesis: the updater's bounded context/client timeout covers the entire asset body transfer, so a valid but slower large download is aborted after headers rather than only when progress stalls. Current code and a controlled slow-body regression must confirm this before changing timeout semantics.
+- Prior updater requirements remain binding: route attempts need fresh transports and isolated errors, and no downloaded bytes are trusted until official host/asset allowlists, bounded size, SHA-256, archive/executable, and version checks all pass.
+- Confirmed in current source: `trustedCoreUpdateClient` sets `http.Client.Timeout = 45s`, which includes reading the complete response body. This directly matches Go's `Client.Timeout ... while reading body` error and can reject a healthy but slower 20-64 MiB asset.
+- `InstallCoreUpdate` also shares one `context.WithTimeout(..., 2m)` across release metadata lookup, every route retry, archive download, and staged executable version validation. A slow first route consumes the fallback budget, so later direct attempts are not independent.
+- Transport connect/TLS/header deadlines are already separately bounded. The safe repair is to remove the whole-body client deadline, give metadata and each route attempt separate budgets, and enforce a reset-on-progress body inactivity timeout plus the existing exact size and SHA-256 checks.
+- Controlled regressions confirm the root cause and desired semantics: a transfer whose total duration exceeds the idle window succeeds while bytes keep arriving; a stalled body is closed and attributed; caller cancellation terminates the read; and a timed-out first route does not exhaust the fallback route's budget.
+- The first focused Windows/amd64 offline updater suite passed in 1.572s after removing the 45-second whole-body client timeout and assigning independent per-route contexts.
+- The updater's own Go live path downloaded official `sing-box-1.13.19-windows-amd64.zip` through the preserved loopback proxy `127.0.0.1:10808`: 21,046,252 bytes in 203.18 seconds, then exact size, SHA-256, ZIP, and executable extraction passed. This duration independently crosses both the removed 45-second client cap and the old shared 2-minute context.
+- The live test is read-only and completed before any core-update session; installed/running core, capture, WinINet, and v2rayN ownership were not mutated.
+- Final 1.0.36 package gates passed with 28 directory files, 27 manifest entries, 28 ZIP files, and zero issues. Launcher/UI/repair versions are all 1.0.36.0; ZIP SHA-256 is `1C1E5C0F4636FC59733FD33E6FE050925943FF0472C8D3196B4AA0D494AB74E4`.
+- Final ownership check found the user's Explorer-owned Navo launcher/UI still running and preserved. WinINet remains on `127.0.0.1:10808`, the only relevant listener is v2rayN-owned PID 1392 on 10808, and no 12080 listener was introduced.

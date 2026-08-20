@@ -53,18 +53,37 @@ type AdapterStatus struct {
 	Error          string       `json:"error,omitempty"`
 }
 
+type ReadinessSite struct {
+	DNS        bool `json:"dns"`
+	TCP        bool `json:"tcp"`
+	HTTPS      bool `json:"https"`
+	StatusCode int  `json:"status_code,omitempty"`
+}
+
+// ReadinessEvidence records the application proof behind an enabled capture
+// state. It is intentionally separate from IP reputation signals.
+type ReadinessEvidence struct {
+	State        string                   `json:"state"`
+	Scope        string                   `json:"scope"`
+	Sites        map[string]ReadinessSite `json:"sites,omitempty"`
+	DefaultProxy bool                     `json:"default_proxy"`
+	CheckedAt    time.Time                `json:"checked_at"`
+	Error        string                   `json:"error,omitempty"`
+}
+
 // Snapshot is the single read model consumed by UI, tray, and recovery.
 type Snapshot struct {
-	State         State         `json:"state"`
-	Phase         Phase         `json:"phase"`
-	DesiredMode   Mode          `json:"desired_mode"`
-	CommittedMode Mode          `json:"committed_mode"`
-	TransitionID  string        `json:"transition_id,omitempty"`
-	FaultID       string        `json:"fault_id,omitempty"`
-	Adapter       AdapterStatus `json:"adapter"`
-	LastError     string        `json:"last_error,omitempty"`
-	CanRetryTUN   bool          `json:"can_retry_tun"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	State         State             `json:"state"`
+	Phase         Phase             `json:"phase"`
+	DesiredMode   Mode              `json:"desired_mode"`
+	CommittedMode Mode              `json:"committed_mode"`
+	TransitionID  string            `json:"transition_id,omitempty"`
+	FaultID       string            `json:"fault_id,omitempty"`
+	Adapter       AdapterStatus     `json:"adapter"`
+	LastError     string            `json:"last_error,omitempty"`
+	CanRetryTUN   bool              `json:"can_retry_tun"`
+	Readiness     ReadinessEvidence `json:"readiness"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 func InitialSnapshot() Snapshot {

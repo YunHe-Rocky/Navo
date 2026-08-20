@@ -6,16 +6,16 @@ package selfheal
 func DefaultObserverPolicies() []Policy {
 	return []Policy{
 		observerPolicy("supervisor-core-crash", Definition{
-			Code: CodeCoreCrashed, Category: CategoryCore, Severity: SeverityError,
+			Code: CodeCoreCrashed, Category: CategoryCore, FaultDomain: FaultDomainCore, Severity: SeverityError,
 			Retryable: true, AutoRepair: false,
-			Budget: Budget{MaxAttempts: 3},
+			Budget: Budget{MaxAttempts: MaxRepairRounds},
 		}),
 		observerPolicy("subscription-parse-preserve-snapshot", Definition{
-			Code: CodeSubscriptionParse, Category: CategorySubscription, Severity: SeverityError,
+			Code: CodeSubscriptionParse, Category: CategorySubscription, FaultDomain: FaultDomainNode, Severity: SeverityError,
 			Retryable: false, AutoRepair: false,
 		}),
 		observerPolicy("privacy-reset-startup-block", Definition{
-			Code: CodePrivacyResetFailed, Category: CategorySecurity, Severity: SeverityFatal,
+			Code: CodePrivacyResetFailed, Category: CategorySecurity, FaultDomain: FaultDomainUnknown, Severity: SeverityFatal,
 			Retryable: false, AutoRepair: false,
 		}),
 	}

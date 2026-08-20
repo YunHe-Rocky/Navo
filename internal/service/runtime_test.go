@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -96,6 +97,17 @@ func TestApplyRuntimeConfigPersistsSelectionAndMode(t *testing.T) {
 	}
 	if service.runtime.RevisionStatus != "candidate" || service.runtime.LastKnownGood != "" {
 		t.Fatalf("unverified stopped-core revision was committed: %#v", service.runtime)
+	}
+	if activeOutboundID(service.runtime) != "" ||
+		candidateOutboundID(service.runtime) != "node-1" {
+		t.Fatalf("candidate was exposed as active: %#v", service.runtime)
+	}
+	if err := service.commitHealthyRuntime(context.Background()); err != nil {
+		t.Fatalf("commit healthy runtime: %v", err)
+	}
+	if activeOutboundID(service.runtime) != "node-1" ||
+		candidateOutboundID(service.runtime) != "" {
+		t.Fatalf("healthy candidate was not committed: %#v", service.runtime)
 	}
 	data, err := os.ReadFile(service.cfg.ConfigPath)
 	if err != nil {
@@ -554,6 +566,19 @@ func TestSaveRuntimeStateLocked(t *testing.T) {
 	}
 }
 
+func TestRuntimeListModeSetSameValueIsIdempotent(t *testing.T) {
+	service := &Service{runtime: runtimeState{RoutingListMode: routingListModeOff}}
+	result := service.handleRuntimeListModeSet(context.Background(), "list-mode-noop", map[string]interface{}{
+		"mode": routingListModeOff,
+	})
+	if result["type"] == "ERROR" {
+		t.Fatalf("idempotent list-mode response = %#v", result)
+	}
+	payload, ok := result["payload"].(map[string]interface{})
+	if !ok || payload["mode"] != routingListModeOff || payload["changed"] != false || payload["verified"] != true {
+		t.Fatalf("idempotent list-mode payload = %#v", result["payload"])
+	}
+}
 func TestRuntimeRoutingPolicy(t *testing.T) {
 	tests := []struct {
 		mode      string
@@ -624,9 +649,136 @@ func TestRuntimeRoutingPolicyActivatesOnlySelectedListMode(t *testing.T) {
 	}
 }
 
+func TestRuntimeRoutingPolicySemanticMatrix(t *testing.T) {
+	tests := []struct {
+		name          string
+		mode          string
+		listMode      string
+		wantFinal     string
+		wantListRule  string
+		wantListRoute string
+		wantMainland  bool
+	}{
+		{"bypass/off", runtimeModeBypassMainland, routingListModeOff, "node-1", "", "", true},
+		{"bypass/blacklist", runtimeModeBypassMainland, routingListModeBlacklist, "node-1", "proxy-blacklist", "node-1", true},
+		{"bypass/whitelist", runtimeModeBypassMainland, routingListModeWhitelist, "node-1", "direct-whitelist", "direct", true},
+		{"global/off", runtimeModeGlobal, routingListModeOff, "node-1", "", "", false},
+		{"global/blacklist", runtimeModeGlobal, routingListModeBlacklist, "node-1", "proxy-blacklist", "node-1", false},
+		{"global/whitelist", runtimeModeGlobal, routingListModeWhitelist, "node-1", "direct-whitelist", "direct", false},
+		{"direct/off", runtimeModeDirect, routingListModeOff, "direct", "", "", false},
+		{"direct/blacklist", runtimeModeDirect, routingListModeBlacklist, "direct", "proxy-blacklist", "node-1", false},
+		{"direct/whitelist", runtimeModeDirect, routingListModeWhitelist, "direct", "direct-whitelist", "direct", false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			final, rules := runtimeRoutingPolicy(
+				test.mode, test.listMode, "node-1",
+				[]string{"proxy.example"}, []string{"direct.example"},
+			)
+			if final != test.wantFinal {
+				t.Fatalf("final = %q, want %q", final, test.wantFinal)
+			}
+			seen := make(map[string]compiler.RoutingRule, len(rules))
+			for _, rule := range rules {
+				seen[rule.ID] = rule
+			}
+			if private, ok := seen["private-networks"]; !ok || private.OutboundID != "direct" {
+				t.Fatalf("private networks must always be direct: %#v", rules)
+			}
+			_, hasMainland := seen["mainland-domains"]
+			if hasMainland != test.wantMainland {
+				t.Fatalf("mainland rule present = %t, want %t: %#v", hasMainland, test.wantMainland, rules)
+			}
+			for _, id := range []string{"proxy-blacklist", "direct-whitelist"} {
+				rule, present := seen[id]
+				if id == test.wantListRule {
+					if !present || rule.OutboundID != test.wantListRoute {
+						t.Fatalf("list rule %q = %#v, want outbound %q", id, rule, test.wantListRoute)
+					}
+				} else if present {
+					t.Fatalf("inactive list rule %q leaked into policy: %#v", id, rules)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeRoutingPolicyDoesNotInventProxyRuleWithoutProxySelection(t *testing.T) {
+	final, rules := runtimeRoutingPolicy(
+		runtimeModeDirect, routingListModeBlacklist, "direct",
+		[]string{"proxy.example"}, nil,
+	)
+	if final != "direct" {
+		t.Fatalf("final = %q", final)
+	}
+	for _, rule := range rules {
+		if rule.ID == "proxy-blacklist" || rule.OutboundID != "direct" {
+			t.Fatalf("direct-only policy invented a proxy route: %#v", rules)
+		}
+	}
+}
 func TestProxiedRuntimeDNSUsesSelectedOutbound(t *testing.T) {
 	dns := proxiedRuntimeDNS("node-1")
 	if dns.Final != "dns-proxy" || len(dns.Servers) != 1 || dns.Servers[0].Detour != "node-1" {
 		t.Fatalf("proxied DNS = %#v", dns)
+	}
+}
+
+func TestCandidateSelectionPreservesActiveAndRoutingPolicy(t *testing.T) {
+	binary := filepath.Join("..", "..", "third_party", "sing-box", "sing-box.exe")
+	if _, err := os.Stat(binary); err != nil {
+		t.Skip("sing-box test binary is not available")
+	}
+	service, err := New(Config{
+		SingBoxPath: binary,
+		ConfigPath:  filepath.Join("..", "..", "configs", "test_direct.json"),
+		ConfigDir:   t.TempDir(),
+		ProxyPort:   12080,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbounds := []compiler.Outbound{
+		{
+			ID: "old-node", Name: "Old", Type: compiler.OutboundShadowsocks,
+			Server: "old.example", Port: 8388, Method: "aes-128-gcm", Password: "old-secret", Enabled: true,
+		},
+		{
+			ID: "new-node", Name: "New", Type: compiler.OutboundShadowsocks,
+			Server: "new.example", Port: 8389, Method: "aes-128-gcm", Password: "new-secret", Enabled: true,
+		},
+	}
+	if err := service.applyRuntimeConfig(
+		context.Background(), outbounds, "old-node", runtimeModeGlobal,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.commitHealthyRuntime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.runtimeMu.Lock()
+	service.runtime.RoutingListMode = routingListModeWhitelist
+	service.runtime.RoutingRulesConfigured = true
+	service.runtime.BlacklistRules = []string{"blocked.example"}
+	service.runtime.WhitelistRules = []string{"direct.example"}
+	service.runtimeMu.Unlock()
+
+	if err := service.applyRuntimeConfig(
+		context.Background(), outbounds, "new-node", "",
+	); err != nil {
+		t.Fatal(err)
+	}
+	service.runtimeMu.Lock()
+	state := service.runtime
+	service.runtimeMu.Unlock()
+	if activeOutboundID(state) != "old-node" || candidateOutboundID(state) != "new-node" {
+		t.Fatalf("active/candidate state = %#v", state)
+	}
+	if state.Mode != runtimeModeGlobal || state.RoutingListMode != routingListModeWhitelist {
+		t.Fatalf("routing mode changed with candidate: %#v", state)
+	}
+	if !reflect.DeepEqual(state.BlacklistRules, []string{"blocked.example"}) ||
+		!reflect.DeepEqual(state.WhitelistRules, []string{"direct.example"}) {
+		t.Fatalf("routing rules changed with candidate: %#v", state)
 	}
 }

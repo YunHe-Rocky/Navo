@@ -76,12 +76,14 @@ type ProxyStatus struct {
 }
 
 type RuntimeStatus struct {
-	Mode       string   `json:"mode"`
-	ListMode   string   `json:"list_mode"`
-	ActiveID   string   `json:"active_id"`
-	TUNEnabled bool     `json:"tun_enabled"`
-	Blacklist  []string `json:"blacklist"`
-	Whitelist  []string `json:"whitelist"`
+	Mode        string   `json:"mode"`
+	ListMode    string   `json:"list_mode"`
+	SelectedID  string   `json:"selected_id"`
+	ActiveID    string   `json:"active_id"`
+	CandidateID string   `json:"candidate_id"`
+	TUNEnabled  bool     `json:"tun_enabled"`
+	Blacklist   []string `json:"blacklist"`
+	Whitelist   []string `json:"whitelist"`
 }
 
 type TUNStatus struct {
@@ -97,15 +99,101 @@ type TUNStatus struct {
 	LastError      string `json:"last_error"`
 }
 
-type CaptureStatus struct {
-	State         string `json:"state"`
+type ConnectionTransactionStatus struct {
+	Busy          bool   `json:"busy"`
+	ID            string `json:"id"`
+	Operation     string `json:"operation"`
+	Origin        string `json:"origin"`
 	Phase         string `json:"phase"`
-	DesiredMode   string `json:"desired_mode"`
-	CommittedMode string `json:"committed_mode"`
-	TransitionID  string `json:"transition_id"`
-	FaultID       string `json:"fault_id"`
+	FaultDomain   string `json:"fault_domain"`
+	StartedAt     string `json:"started_at"`
+	Queued        int    `json:"queued"`
+	LastID        string `json:"last_id"`
+	LastOperation string `json:"last_operation"`
+	LastPhase     string `json:"last_phase"`
 	LastError     string `json:"last_error"`
-	CanRetryTUN   bool   `json:"can_retry_tun"`
+	CompletedAt   string `json:"completed_at"`
+}
+
+type ReadinessSite struct {
+	DNS        bool `json:"dns"`
+	TCP        bool `json:"tcp"`
+	HTTPS      bool `json:"https"`
+	StatusCode int  `json:"status_code"`
+}
+
+type CaptureReadiness struct {
+	State        string                   `json:"state"`
+	Scope        string                   `json:"scope"`
+	Sites        map[string]ReadinessSite `json:"sites"`
+	DefaultProxy bool                     `json:"default_proxy"`
+	CheckedAt    string                   `json:"checked_at"`
+	Error        string                   `json:"error"`
+}
+type RecoveryEvidence struct {
+	Code          string         `json:"code"`
+	Domain        string         `json:"domain"`
+	Severity      string         `json:"severity"`
+	Summary       string         `json:"summary"`
+	Symptom       string         `json:"symptom"`
+	Impact        string         `json:"impact"`
+	SourceService string         `json:"source_service"`
+	CoreID        string         `json:"core_id"`
+	OutboundID    string         `json:"outbound_id"`
+	CaptureMode   string         `json:"capture_mode"`
+	ObservedAt    string         `json:"observed_at"`
+	Details       map[string]any `json:"details"`
+}
+
+type RecoveryRound struct {
+	Round       int    `json:"round"`
+	Action      string `json:"action"`
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at"`
+	Recovered   bool   `json:"recovered"`
+	Evidence    string `json:"evidence"`
+	Error       string `json:"error"`
+	Rollback    string `json:"rollback"`
+}
+
+type RecoveryCandidate struct {
+	OutboundID  string `json:"outbound_id"`
+	SourceType  string `json:"source_type"`
+	LatencyMS   int64  `json:"latency_ms"`
+	Reachable   bool   `json:"reachable"`
+	Selected    bool   `json:"selected"`
+	Verified    bool   `json:"verified"`
+	Error       string `json:"error"`
+	CompletedAt string `json:"completed_at"`
+}
+
+type RecoveryReport struct {
+	ID          string              `json:"id"`
+	State       string              `json:"state"`
+	Evidence    RecoveryEvidence    `json:"evidence"`
+	Rounds      []RecoveryRound     `json:"rounds"`
+	Candidates  []RecoveryCandidate `json:"candidates"`
+	Recovered   bool                `json:"recovered"`
+	Exhausted   bool                `json:"exhausted"`
+	Failover    bool                `json:"failover"`
+	FinalError  string              `json:"final_error"`
+	FinalImpact string              `json:"final_impact"`
+	StartedAt   string              `json:"started_at"`
+	UpdatedAt   string              `json:"updated_at"`
+}
+type CaptureStatus struct {
+	State         string                      `json:"state"`
+	Phase         string                      `json:"phase"`
+	DesiredMode   string                      `json:"desired_mode"`
+	CommittedMode string                      `json:"committed_mode"`
+	TransitionID  string                      `json:"transition_id"`
+	FaultID       string                      `json:"fault_id"`
+	LastError     string                      `json:"last_error"`
+	Readiness     CaptureReadiness            `json:"readiness"`
+	Recovery      RecoveryReport              `json:"recovery"`
+	UpdatedAt     string                      `json:"updated_at"`
+	CanRetryTUN   bool                        `json:"can_retry_tun"`
+	Transaction   ConnectionTransactionStatus `json:"transaction"`
 }
 
 type MetricsStatus struct {
@@ -170,12 +258,16 @@ type RouteInfo struct {
 	SourceType string `json:"source_type"`
 	Country    string `json:"country"`
 	Active     bool   `json:"active"`
+	Candidate  bool   `json:"candidate"`
+	Selected   bool   `json:"selected"`
 }
 
 type Routes struct {
-	Items    []RouteInfo `json:"outbounds"`
-	ActiveID string      `json:"active_id"`
-	Mode     string      `json:"mode"`
+	Items       []RouteInfo `json:"outbounds"`
+	SelectedID  string      `json:"selected_id"`
+	ActiveID    string      `json:"active_id"`
+	CandidateID string      `json:"candidate_id"`
+	Mode        string      `json:"mode"`
 }
 
 type SubscriptionInfo struct {
@@ -327,6 +419,10 @@ func (a *App) SetCaptureMode(mode string) error {
 	return err
 }
 
+func (a *App) VerifyCapture() error {
+	_, err := call[struct{}](a, "capture.verify", nil)
+	return err
+}
 func (a *App) SetRuntimeMode(mode string) error {
 	_, err := call[struct{}](a, "runtime.mode.set", map[string]any{"mode": mode})
 	return err
@@ -475,7 +571,7 @@ func (a *App) request(method string, payload any) (json.RawMessage, error) {
 }
 
 func uiIPCRequestTimeout(method string) time.Duration {
-	if method == "core.select" {
+	if method == "core.select" || strings.HasPrefix(method, "core.update.") {
 		return coreSwitchUIIPCRequestTimeout
 	}
 	if method == "capture.set" || method == "runtime.mode.set" || method == "runtime.rules.set" || method == "runtime.list_mode.set" {

@@ -178,13 +178,18 @@ func (s *Service) prepareCaptureLocked(
 	if err := s.startCoreForCapture(ctx); err != nil {
 		return nil, fmt.Errorf("start system-proxy core: %w", err)
 	}
+	verification, err := s.verifyActiveRuntimeRouting(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("verify ChatGPT application routing: %w", err)
+	}
 	if err := s.commitHealthyRuntime(ctx); err != nil {
 		return nil, fmt.Errorf("commit system-proxy runtime: %w", err)
 	}
 	return map[string]interface{}{
-		"status":  "running",
-		"pid":     s.sup.Status().PID,
-		"adapter": capture.AdapterStatus{Name: s.runtimeTUNName(), State: capture.AdapterMissing},
+		"status":       "running",
+		"pid":          s.sup.Status().PID,
+		"adapter":      capture.AdapterStatus{Name: s.runtimeTUNName(), State: capture.AdapterMissing},
+		"verification": verification,
 	}, nil
 }
 
@@ -648,14 +653,10 @@ func (s *Service) monitorTUNAdapter(ctx context.Context) {
 		if !tracker.observe(expected.sessionID, actionableTUNObservation(expected, status)) {
 			continue
 		}
-		if !s.captureMu.TryLock() {
-			continue
-		}
-		s.sup.SetRestartSuppressed(true)
 		current, stillCommitted := s.currentTUNHealthExpectation()
 		if stillCommitted && current == expected {
-			// Close the TOCTOU window: a transition or a transient adapter state
-			// may have completed while the monitor waited for capture ownership.
+			// Scheduler publishes evidence only. Agent owns the cross-domain
+			// recovery transaction and will re-check this fault before mutation.
 			confirmed := tun.InspectAdapter(ctx, current.name)
 			if actionableTUNObservation(current, confirmed) {
 				message := fmt.Sprintf(
@@ -664,18 +665,9 @@ func (s *Service) monitorTUNAdapter(ctx context.Context) {
 					confirmed.InterfaceGUID, confirmed.InterfaceIndex, confirmed.Error,
 				)
 				s.setTUNFault(message)
-				log.Printf("[service] %s", message)
-				rollbackCtx, rollbackCancel := context.WithTimeout(
-					context.Background(), captureRollbackTimeout,
-				)
-				if err := s.rollbackCaptureLocked(rollbackCtx); err != nil {
-					log.Printf("[service] TUN adapter failure rollback: %v", err)
-				}
-				rollbackCancel()
+				log.Printf("[service] TUN health event: %s", message)
 			}
 		}
-		s.sup.SetRestartSuppressed(false)
-		s.captureMu.Unlock()
 		tracker.observe("", false)
 	}
 }

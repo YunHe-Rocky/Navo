@@ -10,6 +10,9 @@ import (
 type ErrorCode string
 type Category string
 type Severity string
+type FaultDomain string
+
+const MaxRepairRounds = 2
 
 const (
 	CategoryCore         Category = "core"
@@ -25,9 +28,32 @@ const (
 )
 
 const (
+	FaultDomainNode            FaultDomain = "node"
+	FaultDomainCore            FaultDomain = "core"
+	FaultDomainSystemProxy     FaultDomain = "system_proxy"
+	FaultDomainTUN             FaultDomain = "tun"
+	FaultDomainRoute           FaultDomain = "route"
+	FaultDomainDNS             FaultDomain = "dns"
+	FaultDomainNRPT            FaultDomain = "nrpt"
+	FaultDomainFirewall        FaultDomain = "firewall"
+	FaultDomainTrafficRule     FaultDomain = "traffic_rule"
+	FaultDomainPhysicalNetwork FaultDomain = "physical_network"
+	FaultDomainDetection       FaultDomain = "detection"
+	FaultDomainUnknown         FaultDomain = "unknown"
+)
+
+const (
 	CodeCoreStartTimeout        ErrorCode = "NAVO_CORE_START_TIMEOUT"
 	CodeCoreCrashed             ErrorCode = "NAVO_CORE_CRASHED"
 	CodeCoreSwitchFailed        ErrorCode = "NAVO_CORE_SWITCH_FAILED"
+	CodeNodeUnavailable         ErrorCode = "NAVO_NODE_UNAVAILABLE"
+	CodeCaptureDataPlaneFailed  ErrorCode = "NAVO_CAPTURE_DATAPLANE_FAILED"
+	CodeNRPTMismatch            ErrorCode = "NAVO_NRPT_MISMATCH"
+	CodeFirewallMismatch        ErrorCode = "NAVO_FIREWALL_MISMATCH"
+	CodeTrafficRuleMismatch     ErrorCode = "NAVO_TRAFFIC_RULE_MISMATCH"
+	CodePhysicalNetworkDown     ErrorCode = "NAVO_PHYSICAL_NETWORK_UNAVAILABLE"
+	CodeDetectionFailed         ErrorCode = "NAVO_DETECTION_FAILED"
+	CodeConnectivityUnknown     ErrorCode = "NAVO_CONNECTIVITY_UNKNOWN"
 	CodeTUNAdapterMissing       ErrorCode = "NAVO_TUN_ADAPTER_MISSING"
 	CodeTUNAdapterDisabled      ErrorCode = "NAVO_TUN_ADAPTER_DISABLED"
 	CodeRouteBypassMissing      ErrorCode = "NAVO_ROUTE_ENDPOINT_BYPASS_MISSING"
@@ -73,6 +99,7 @@ type Budget struct {
 type Definition struct {
 	Code            ErrorCode
 	Category        Category
+	FaultDomain     FaultDomain
 	Severity        Severity
 	Retryable       bool
 	AutoRepair      bool
@@ -116,6 +143,6 @@ type Config struct {
 func DefaultConfig(stateFile string) Config {
 	return Config{
 		Enabled: true, QueueSize: 128, VerificationTimeout: 15 * time.Second,
-		DefaultMaxAttempts: 3, StateFile: stateFile, DedupeWindow: 5 * time.Second,
+		DefaultMaxAttempts: MaxRepairRounds, StateFile: stateFile, DedupeWindow: 5 * time.Second,
 	}
 }
