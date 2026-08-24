@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"sync"
 	"time"
-
-	"navo/internal/network"
 )
 
 var requiredDirectRuntimeSites = []externalSiteProbe{
@@ -32,6 +30,29 @@ func verifyRuntimeRouting(ctx context.Context, proxyPort int, mode string) (Runt
 	proxyURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", proxyPort))
 	if err != nil {
 		return RuntimeRoutingVerification{}, err
+	}
+	directIP, err := fetchCloudflareTraceIPWithRetry(ctx, func() *http.Transport {
+		return directHTTPTransport()
+	})
+	if err != nil {
+		return RuntimeRoutingVerification{}, proxyRoutingVerificationError(
+			"direct_exit_ip", "bounded direct public IP", "unavailable", err,
+		)
+	}
+	proxyExitIP, err := fetchCloudflareTraceIPWithRetry(ctx, func() *http.Transport {
+		transport := directHTTPTransport()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		return transport
+	})
+	if err != nil {
+		return RuntimeRoutingVerification{}, proxyRoutingVerificationError(
+			"proxy_exit_ip", "bounded public IP through local proxy", "unavailable", err,
+		)
+	}
+	if err := validateRuntimeExitIdentity(mode, directIP, proxyExitIP); err != nil {
+		return RuntimeRoutingVerification{
+			DirectIP: directIP, ProxyExitIP: proxyExitIP, VerifiedAt: time.Now().UTC(),
+		}, err
 	}
 	type probeResult struct {
 		verification SiteVerification
@@ -55,8 +76,8 @@ func verifyRuntimeRouting(ctx context.Context, proxyPort int, mode string) (Runt
 	}
 	wait.Wait()
 	verification := RuntimeRoutingVerification{
-		Verified: true, Sites: make(map[string]SiteVerification, len(results)),
-		VerifiedAt: time.Now().UTC(),
+		Verified: true, DirectIP: directIP, ProxyExitIP: proxyExitIP,
+		Sites: make(map[string]SiteVerification, len(results)), VerifiedAt: time.Now().UTC(),
 	}
 	for index, probe := range probes {
 		verification.Sites[probe.Name] = results[index].verification
@@ -80,13 +101,18 @@ func verifyExternalSiteViaProxy(ctx context.Context, probe externalSiteProbe, pr
 	request.Header.Set("User-Agent", "Navo-Routing-Health/1")
 	response, err := (&http.Client{Transport: transport}).Do(request)
 	if err != nil {
-		return result, &network.TUNError{Code: network.ErrTUNHTTPSVerifyFailed, Stage: network.TUNStageDataPlaneVerified, Resource: probe.Name, Expected: "TLS and HTTP through local proxy", Actual: "failed", Cause: err}
+		return result, proxyRoutingVerificationError(
+			probe.Name, "TLS and HTTP through local proxy", "failed", err,
+		)
 	}
 	_, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	closeErr := response.Body.Close()
 	result.StatusCode = response.StatusCode
 	if !acceptedProbeStatus(response.StatusCode, probe.ExpectedStatus) || readErr != nil || closeErr != nil {
-		return result, &network.TUNError{Code: network.ErrTUNHTTPSVerifyFailed, Stage: network.TUNStageDataPlaneVerified, Resource: probe.Name, Expected: "valid bounded HTTP response through local proxy", Actual: fmt.Sprintf("status=%d", response.StatusCode), Cause: errorsJoin(readErr, closeErr)}
+		return result, proxyRoutingVerificationError(
+			probe.Name, "valid bounded HTTP response through local proxy",
+			fmt.Sprintf("status=%d", response.StatusCode), errorsJoin(readErr, closeErr),
+		)
 	}
 	// A successful HTTPS CONNECT proves the core resolved the destination and
 	// established the TCP/TLS path; the client intentionally performs neither

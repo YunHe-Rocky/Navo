@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"navo/internal/networkenv"
 	"navo/internal/pipe"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -34,15 +35,25 @@ type App struct {
 	coreInstallMu    sync.Mutex
 }
 
+type StartupSettings struct {
+	Supported  bool   `json:"supported"`
+	Enabled    bool   `json:"enabled"`
+	Mode       string `json:"mode"`
+	Registered bool   `json:"registered"`
+	LastError  string `json:"last_error,omitempty"`
+	CheckedAt  string `json:"checked_at"`
+}
+
 type Dashboard struct {
-	Core    CoreStatus    `json:"core"`
-	Cores   []CoreOption  `json:"cores"`
-	Proxy   ProxyStatus   `json:"proxy"`
-	Runtime RuntimeStatus `json:"runtime"`
-	TUN     TUNStatus     `json:"tun"`
-	Capture CaptureStatus `json:"capture"`
-	Metrics MetricsStatus `json:"metrics"`
-	IP      IPStatus      `json:"ip"`
+	Core        CoreStatus           `json:"core"`
+	Cores       []CoreOption         `json:"cores"`
+	Proxy       ProxyStatus          `json:"proxy"`
+	Runtime     RuntimeStatus        `json:"runtime"`
+	TUN         TUNStatus            `json:"tun"`
+	Capture     CaptureStatus        `json:"capture"`
+	Metrics     MetricsStatus        `json:"metrics"`
+	IP          IPStatus             `json:"ip"`
+	Environment *networkenv.Snapshot `json:"environment,omitempty"`
 }
 
 type CoreStatus struct {
@@ -379,6 +390,26 @@ func (a *App) GetDashboard() (Dashboard, error) {
 	return call[Dashboard](a, "dashboard.snapshot", nil)
 }
 
+type EnvironmentRepairResult struct {
+	Environment networkenv.Snapshot `json:"environment"`
+}
+
+func (a *App) RepairNetworkEnvironment(code string) (networkenv.Snapshot, error) {
+	result, err := call[EnvironmentRepairResult](a, "environment.repair", map[string]any{"code": code})
+	return result.Environment, err
+}
+
+func (a *App) GetStartupSettings() (StartupSettings, error) {
+	return call[StartupSettings](a, "startup.status", nil)
+}
+
+func (a *App) SetStartupSettings(enabled bool, mode string) (StartupSettings, error) {
+	return call[StartupSettings](a, "startup.set", map[string]any{
+		"enabled": enabled,
+		"mode":    mode,
+	})
+}
+
 func (a *App) CheckIP() (IPDetection, error) {
 	return call[IPDetection](a, "ip.check", nil)
 }
@@ -574,7 +605,7 @@ func uiIPCRequestTimeout(method string) time.Duration {
 	if method == "core.select" || strings.HasPrefix(method, "core.update.") {
 		return coreSwitchUIIPCRequestTimeout
 	}
-	if method == "capture.set" || method == "runtime.mode.set" || method == "runtime.rules.set" || method == "runtime.list_mode.set" {
+	if method == "capture.set" || method == "environment.repair" || method == "runtime.mode.set" || method == "runtime.rules.set" || method == "runtime.list_mode.set" {
 		return captureUIIPCRequestTimeout
 	}
 	return defaultUIIPCRequestTimeout

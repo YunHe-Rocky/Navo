@@ -5,6 +5,8 @@ package systemproxy
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -24,6 +26,7 @@ var (
 	procInternetSetOptW  = wininet.NewProc("InternetSetOptionW")
 	procInternetClose    = wininet.NewProc("InternetCloseHandle")
 	procHTTPQueryInfoW   = wininet.NewProc("HttpQueryInfoW")
+	procInternetReadFile = wininet.NewProc("InternetReadFile")
 )
 
 const (
@@ -355,6 +358,7 @@ var winINetDirectConnectivityEndpoints = []string{
 }
 
 const winINetApplicationProbeAttempts = 2
+const winINetTraceEndpoint = "https://www.cloudflare.com/cdn-cgi/trace"
 
 // ProbeDefaultProxy performs a real WinINet request with PRECONFIG settings.
 // This proves that a normal current-user Windows application consumes the
@@ -386,43 +390,11 @@ func probeWinINet(ctx context.Context, accessType uintptr, pathName string, conn
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	agent, err := syscall.UTF16PtrFromString("Navo/1.0 WinINet verification")
+	session, err := openWinINetSession(ctx, accessType, pathName)
 	if err != nil {
 		return err
 	}
-	session, _, callErr := procInternetOpenW.Call(
-		uintptr(unsafe.Pointer(agent)),
-		accessType,
-		0,
-		0,
-		0,
-	)
-	if session == 0 {
-		return fmt.Errorf("InternetOpenW(%s): %w", pathName, callErr)
-	}
 	defer procInternetClose.Call(session)
-
-	timeout := uint32(2500)
-	if deadline, ok := ctx.Deadline(); ok {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return context.DeadlineExceeded
-		}
-		if remaining < time.Duration(timeout)*time.Millisecond {
-			timeout = uint32(max(250, remaining.Milliseconds()))
-		}
-	}
-	for _, option := range []uintptr{internetOptionConnectMS, internetOptionSendMS, internetOptionReceiveMS} {
-		ok, _, optionErr := procInternetSetOptW.Call(
-			session,
-			option,
-			uintptr(unsafe.Pointer(&timeout)),
-			unsafe.Sizeof(timeout),
-		)
-		if ok == 0 {
-			return fmt.Errorf("InternetSetOptionW(timeout %d): %w", option, optionErr)
-		}
-	}
 
 	var lastErr error
 	genericReady := false
@@ -440,24 +412,25 @@ func probeWinINet(ctx context.Context, accessType uintptr, pathName string, conn
 	if !genericReady {
 		return fmt.Errorf("current-user %s data plane failed: %w", pathName, lastErr)
 	}
-	if !requireChatGPT {
-		return nil
+	if requireChatGPT {
+		for _, probe := range winINetChatGPTProbes {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			status, probeErr := winINetApplicationStatus(ctx, session, probe)
+			if probeErr != nil {
+				return fmt.Errorf("current-user %s ChatGPT route %s failed: %w", pathName, probe.name, probeErr)
+			}
+			if !winINetStatusAccepted(status, probe.expected) {
+				return fmt.Errorf(
+					"current-user %s ChatGPT route %s returned unexpected status %d (expected %v)",
+					pathName, probe.name, status, probe.expected,
+				)
+			}
+		}
 	}
-
-	for _, probe := range winINetChatGPTProbes {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		status, probeErr := winINetApplicationStatus(ctx, session, probe)
-		if probeErr != nil {
-			return fmt.Errorf("current-user %s ChatGPT route %s failed: %w", pathName, probe.name, probeErr)
-		}
-		if !winINetStatusAccepted(status, probe.expected) {
-			return fmt.Errorf(
-				"current-user %s ChatGPT route %s returned unexpected status %d (expected %v)",
-				pathName, probe.name, status, probe.expected,
-			)
-		}
+	if accessType == internetOpenTypePreconfig {
+		return verifyWinINetExitIdentity(ctx, session, requireChatGPT)
 	}
 	return nil
 }
@@ -515,6 +488,136 @@ func winINetStatus(session uintptr, endpoint string) (uint32, error) {
 		return status, fmt.Errorf("HttpQueryInfoW(%s): %w", endpoint, statusErr)
 	}
 	return status, nil
+}
+func openWinINetSession(ctx context.Context, accessType uintptr, pathName string) (uintptr, error) {
+	agent, err := syscall.UTF16PtrFromString("Navo/1.0 WinINet verification")
+	if err != nil {
+		return 0, err
+	}
+	session, _, callErr := procInternetOpenW.Call(
+		uintptr(unsafe.Pointer(agent)),
+		accessType,
+		0,
+		0,
+		0,
+	)
+	if session == 0 {
+		return 0, fmt.Errorf("InternetOpenW(%s): %w", pathName, callErr)
+	}
+
+	timeout := uint32(2500)
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			procInternetClose.Call(session)
+			return 0, context.DeadlineExceeded
+		}
+		if remaining < time.Duration(timeout)*time.Millisecond {
+			timeout = uint32(max(250, remaining.Milliseconds()))
+		}
+	}
+	for _, option := range []uintptr{internetOptionConnectMS, internetOptionSendMS, internetOptionReceiveMS} {
+		ok, _, optionErr := procInternetSetOptW.Call(
+			session,
+			option,
+			uintptr(unsafe.Pointer(&timeout)),
+			unsafe.Sizeof(timeout),
+		)
+		if ok == 0 {
+			procInternetClose.Call(session)
+			return 0, fmt.Errorf("InternetSetOptionW(timeout %d): %w", option, optionErr)
+		}
+	}
+	return session, nil
+}
+
+func verifyWinINetExitIdentity(ctx context.Context, defaultSession uintptr, expectProxy bool) error {
+	defaultIP, err := winINetTraceIP(ctx, defaultSession)
+	if err != nil {
+		return fmt.Errorf("current-user default path public IP: %w", err)
+	}
+	directSession, err := openWinINetSession(ctx, internetOpenTypeDirect, "direct exit baseline")
+	if err != nil {
+		return err
+	}
+	defer procInternetClose.Call(directSession)
+	directIP, err := winINetTraceIP(ctx, directSession)
+	if err != nil {
+		return fmt.Errorf("current-user direct path public IP: %w", err)
+	}
+	return validateWinINetExitIdentity(defaultIP, directIP, expectProxy)
+}
+
+func validateWinINetExitIdentity(defaultIP, directIP string, expectProxy bool) error {
+	defaultParsed := net.ParseIP(strings.TrimSpace(defaultIP))
+	directParsed := net.ParseIP(strings.TrimSpace(directIP))
+	if defaultParsed == nil || directParsed == nil {
+		return fmt.Errorf("WinINet exit identity requires valid IPs: default=%q direct=%q", defaultIP, directIP)
+	}
+	defaultIP, directIP = defaultParsed.String(), directParsed.String()
+	if expectProxy && defaultIP == directIP {
+		return fmt.Errorf("WinINet default path is still direct: default=%s direct=%s", defaultIP, directIP)
+	}
+	if !expectProxy && defaultIP != directIP {
+		return fmt.Errorf("WinINet intentional-direct path changed exit: default=%s direct=%s", defaultIP, directIP)
+	}
+	return nil
+}
+
+func winINetTraceIP(ctx context.Context, session uintptr) (string, error) {
+	endpoint, err := syscall.UTF16PtrFromString(winINetTraceEndpoint)
+	if err != nil {
+		return "", err
+	}
+	request, _, requestErr := procInternetOpenURLW.Call(
+		session,
+		uintptr(unsafe.Pointer(endpoint)),
+		0,
+		0,
+		internetFlagReload|internetFlagNoCacheWrite,
+		0,
+	)
+	if request == 0 {
+		return "", fmt.Errorf("InternetOpenUrlW(%s): %w", winINetTraceEndpoint, requestErr)
+	}
+	defer procInternetClose.Call(request)
+
+	body := make([]byte, 0, 1024)
+	buffer := make([]byte, 512)
+	for len(body) < 4096 {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		var read uint32
+		ok, _, readErr := procInternetReadFile.Call(
+			request,
+			uintptr(unsafe.Pointer(&buffer[0])),
+			uintptr(len(buffer)),
+			uintptr(unsafe.Pointer(&read)),
+		)
+		if ok == 0 {
+			return "", fmt.Errorf("InternetReadFile(%s): %w", winINetTraceEndpoint, readErr)
+		}
+		if read == 0 {
+			break
+		}
+		remaining := 4096 - len(body)
+		if int(read) > remaining {
+			read = uint32(remaining)
+		}
+		body = append(body, buffer[:read]...)
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		value, found := strings.CutPrefix(strings.TrimSpace(line), "ip=")
+		if !found {
+			continue
+		}
+		parsed := net.ParseIP(strings.TrimSpace(value))
+		if parsed != nil {
+			return parsed.String(), nil
+		}
+	}
+	return "", fmt.Errorf("Cloudflare trace did not contain a valid public IP")
 }
 
 func winINetStatusAccepted(status uint32, expected []uint32) bool {

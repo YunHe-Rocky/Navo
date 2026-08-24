@@ -46,12 +46,13 @@ func (a *Agent) handleDashboardSnapshot(requestID string) map[string]interface{}
 
 	probePending := a.scheduleIPProbe()
 	return agentResponse(requestID, map[string]interface{}{
-		"core":    payloads["core.status"],
-		"cores":   coreList["cores"],
-		"runtime": runtimeStatus,
-		"tun":     payloads["tun.status"],
-		"metrics": payloads["metrics.current"],
-		"capture": a.captureStatusPayload(),
+		"core":        payloads["core.status"],
+		"cores":       coreList["cores"],
+		"runtime":     runtimeStatus,
+		"tun":         payloads["tun.status"],
+		"metrics":     payloads["metrics.current"],
+		"capture":     a.captureStatusPayload(),
+		"environment": a.environmentSnapshot(),
 		"proxy": map[string]interface{}{
 			"enabled": proxyStatus.Enabled,
 			"server":  proxyServer,

@@ -42,12 +42,14 @@ import (
 	"navo/internal/logstore"
 	"navo/internal/pipe"
 	"navo/internal/service"
+	"navo/internal/startup"
 	"navo/internal/winprocess"
 )
 
 var (
-	proxyPort = flag.Int("proxy", 12080, "preferred local mixed-proxy port")
-	silent    = flag.Bool("silent", false, "start minimized to system tray")
+	proxyPort     = flag.Int("proxy", 12080, "preferred local mixed-proxy port")
+	silent        = flag.Bool("silent", false, "start minimized to system tray")
+	startupLaunch = flag.Bool("startup", false, "restore the user-enabled login connection after recovery")
 )
 
 const (
@@ -175,6 +177,11 @@ func main() {
 		)
 	}
 	uiManager := newUIProcessManager(uiPath, logFile)
+	executablePath, err := os.Executable()
+	if err != nil {
+		fatal("resolve launcher path: %v", err)
+	}
+	startupController := startup.New(filepath.Join(dataDir, "startup.json"), executablePath)
 
 	// ── Service (in-process) ──
 	svc, err := service.New(service.Config{
@@ -239,7 +246,9 @@ func main() {
 			}
 			return tray.EnsureVisible()
 		},
-		RequestExitFn: func() { requestTrayExit.Do(func() { close(trayExit) }) },
+		RequestExitFn:     func() { requestTrayExit.Do(func() { close(trayExit) }) },
+		StartupController: startupController,
+		StartupLaunch:     *startupLaunch,
 	})
 	if err != nil {
 		fatal("create agent: %v", err)

@@ -53,12 +53,10 @@ export function nextPrimaryCaptureMode(current: CaptureMode): CaptureMode {
 export function deriveAppState(
   dashboard: Dashboard,
   route: RouteInfo | undefined,
-  failures: number,
-  successes: number,
 ): AppState {
   const core = normalizeCoreState(dashboard.core.state);
   const capture = captureModeOf(dashboard);
-  const health = deriveHealth(dashboard, failures, successes);
+  const health = deriveHealth(dashboard);
   const recoveryActive = ["detected", "repairing", "verifying", "failover"].includes(dashboard.capture.recovery?.state ?? "idle");
   const connection = recoveryActive
     ? "reconnecting"
@@ -205,7 +203,7 @@ function normalizeCoreState(value: string): CoreState {
     : "failed";
 }
 
-function deriveHealth(dashboard: Dashboard, failures: number, successes: number): NetworkHealthState {
+function deriveHealth(dashboard: Dashboard): NetworkHealthState {
   const capture = captureModeOf(dashboard);
   const readiness = dashboard.capture.readiness;
   const recoveryState = dashboard.capture.recovery?.state ?? "idle";
@@ -214,14 +212,11 @@ function deriveHealth(dashboard: Dashboard, failures: number, successes: number)
   if (dashboard.ip.probe_pending || readiness?.state === "checking") return "checking";
   if (capture !== "off") {
     if (dashboard.capture.state === "faulted" || readiness?.state === "failed") return "unavailable";
-    if (failures >= 3) return "unavailable";
     if (readiness?.state !== "ready") return "degraded";
     if (dashboard.metrics.reachable) return "healthy";
     return "degraded";
   }
-  if (failures >= 3) return "unavailable";
-  if (dashboard.metrics.reachable && successes >= 2) return "healthy";
-  if (dashboard.metrics.reachable) return "degraded";
+  if (dashboard.metrics.reachable) return "healthy";
   return dashboard.core.state === "running" ? "degraded" : "unknown";
 }
 

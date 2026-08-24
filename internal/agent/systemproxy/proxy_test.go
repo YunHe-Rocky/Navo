@@ -216,3 +216,33 @@ func TestOwnedProxyRecoveryCanRetryAfterTransientRegistryFailure(t *testing.T) {
 		t.Fatalf("ownership marker remains after recovery: %v", err)
 	}
 }
+
+func TestOwnershipStatusDistinguishesOwnedExternalAndCorruptMarkers(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManagerWithDirectory(dir)
+	manager.getProxy = func() (*ProxyConfig, error) {
+		return &ProxyConfig{Enabled: true, ProxyServer: "127.0.0.1:12080"}, nil
+	}
+	if got := manager.OwnershipStatus(); got.Present || got.Owned || got.Lost {
+		t.Fatalf("missing marker status = %#v", got)
+	}
+	ownerData, _ := json.Marshal(ownershipRecord{ProxyServer: "127.0.0.1:12080", Phase: ownershipCommitted})
+	if err := os.WriteFile(manager.ownerPath, ownerData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.OwnershipStatus(); !got.Present || !got.Owned || got.Lost {
+		t.Fatalf("owned status = %#v", got)
+	}
+	manager.getProxy = func() (*ProxyConfig, error) {
+		return &ProxyConfig{Enabled: true, ProxyServer: "127.0.0.1:10808"}, nil
+	}
+	if got := manager.OwnershipStatus(); !got.Present || got.Owned || !got.Lost {
+		t.Fatalf("external takeover status = %#v", got)
+	}
+	if err := os.WriteFile(manager.ownerPath, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.OwnershipStatus(); !got.Present || got.Owned || !got.Lost || got.LastError == "" {
+		t.Fatalf("corrupt marker status = %#v", got)
+	}
+}

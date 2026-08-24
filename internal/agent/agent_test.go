@@ -21,7 +21,95 @@ import (
 
 	"navo/internal/logstore"
 	"navo/internal/selfheal"
+	"navo/internal/startup"
 )
+
+type fakeStartupController struct {
+	settings       startup.Settings
+	configureCalls int
+	enabled        bool
+	mode           string
+}
+
+func (f *fakeStartupController) Status(context.Context) (startup.Settings, error) {
+	return f.settings, nil
+}
+
+func (f *fakeStartupController) Configure(_ context.Context, enabled bool, mode string) (startup.Settings, error) {
+	f.configureCalls++
+	f.enabled = enabled
+	f.mode = mode
+	f.settings.Enabled = enabled
+	f.settings.Mode = mode
+	f.settings.Registered = enabled
+	return f.settings, nil
+}
+
+func TestStartupSetRequiresSelectedRouteForProxyPolicy(t *testing.T) {
+	controller := &fakeStartupController{settings: startup.Settings{Supported: true, Mode: startup.ModeSystemProxy}}
+	instance, err := New(Config{
+		StartupController: controller,
+		SendToServiceContextFn: func(_ context.Context, msg map[string]interface{}) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"request_id": msg["request_id"], "type": "RESPONSE",
+				"payload": map[string]interface{}{"mode": "bypass_mainland", "selected_id": ""},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := instance.handleStartupSet(context.Background(), "startup-no-route", map[string]interface{}{
+		"enabled": true, "mode": startup.ModeSystemProxy,
+	})
+	if !isErrorResponse(response) || responseCode(response) != "OUTBOUND_REQUIRED" {
+		t.Fatalf("response = %#v", response)
+	}
+	if controller.configureCalls != 0 {
+		t.Fatalf("startup task configured without a route: %d calls", controller.configureCalls)
+	}
+}
+
+func TestStartupSetPersistsExplicitCaptureMode(t *testing.T) {
+	controller := &fakeStartupController{settings: startup.Settings{Supported: true, Mode: startup.ModeSystemProxy}}
+	instance, err := New(Config{
+		StartupController: controller,
+		SendToServiceContextFn: func(_ context.Context, msg map[string]interface{}) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"request_id": msg["request_id"], "type": "RESPONSE",
+				"payload": map[string]interface{}{"mode": "global", "selected_id": "route-1"},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := instance.handleStartupSet(context.Background(), "startup-tun", map[string]interface{}{
+		"enabled": true, "mode": startup.ModeTUN,
+	})
+	if isErrorResponse(response) {
+		t.Fatalf("response = %#v", response)
+	}
+	if controller.configureCalls != 1 || !controller.enabled || controller.mode != startup.ModeTUN {
+		t.Fatalf("startup configuration = calls:%d enabled:%t mode:%q", controller.configureCalls, controller.enabled, controller.mode)
+	}
+}
+
+func TestStartupRestoreDoesNothingWhenDisabled(t *testing.T) {
+	controller := &fakeStartupController{settings: startup.Settings{
+		Supported: true, Enabled: false, Mode: startup.ModeSystemProxy,
+	}}
+	instance, err := New(Config{StartupController: controller})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.restoreStartupConnection(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if controller.configureCalls != 0 {
+		t.Fatalf("disabled startup mutated configuration: %d calls", controller.configureCalls)
+	}
+}
 
 func TestAgentErrorLogsActionableCodeAndReason(t *testing.T) {
 	if err := logstore.Configure(""); err != nil {
@@ -761,6 +849,45 @@ func TestCaptureTUNFailureKeepsTransactionUncommitted(t *testing.T) {
 	}
 }
 
+func TestCaptureMissingOutboundDoesNotEnterAutomaticRepair(t *testing.T) {
+	var activationCalls int
+	instance, err := New(Config{
+		CaptureJournalPath: filepath.Join(t.TempDir(), "capture.json"),
+		ProxyManager:       systemproxy.NewManagerWithDirectory(t.TempDir()),
+		SendToServiceFn: func(msg map[string]interface{}) (map[string]interface{}, error) {
+			if msg["method"] != "capture.prepare" {
+				t.Fatalf("unexpected service call: %#v", msg)
+			}
+			if msg["mode"] == "off" {
+				return map[string]interface{}{
+					"type": "RESPONSE", "payload": map[string]interface{}{"mode": "off"},
+				}, nil
+			}
+			activationCalls++
+			return map[string]interface{}{
+				"type": "ERROR", "payload": map[string]interface{}{
+					"code": "OUTBOUND_REQUIRED", "message": "select an available proxy route",
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := instance.dispatchUI(context.Background(), map[string]interface{}{
+		"request_id": "capture-no-outbound", "method": "capture.set", "mode": "system_proxy",
+	})
+	if !isErrorResponse(response) || responseCode(response) != "OUTBOUND_REQUIRED" {
+		t.Fatalf("response = %#v", response)
+	}
+	if activationCalls != 1 {
+		t.Fatalf("missing outbound activation attempts = %d, want 1", activationCalls)
+	}
+	if report := instance.recoverySnapshot(); report.State != selfheal.RecoveryIdle || len(report.Rounds) != 0 {
+		t.Fatalf("configuration error entered automatic repair: %#v", report)
+	}
+}
+
 func TestCaptureTransitionSameHealthyModeIsIdempotent(t *testing.T) {
 	serviceCalled := false
 	instance, err := New(Config{
@@ -990,6 +1117,27 @@ func TestAgentMirrorsServiceTUNFaultWithoutStartingSecondRollback(t *testing.T) 
 	if snapshot.State != capture.StateFaulted || snapshot.CommittedMode != capture.ModeOff ||
 		snapshot.FaultID != "service-fault-1" || !snapshot.CanRetryTUN {
 		t.Fatalf("Service fault was not mirrored faithfully: %#v", snapshot)
+	}
+}
+
+func TestAgentDoesNotMirrorServiceTUNFaultIntoSystemProxyFailure(t *testing.T) {
+	instance, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.setCaptureSnapshot(capture.Snapshot{
+		State: capture.StateFaulted, Phase: capture.PhaseFaulted,
+		DesiredMode: capture.ModeSystemProxy, CommittedMode: capture.ModeOff,
+		FaultID: "system-proxy-fault", LastError: "proxy route unavailable",
+	})
+
+	instance.refreshCaptureFault(map[string]interface{}{
+		"fault_id": "stale-tun-fault", "last_error": "TUN data plane failed",
+	})
+
+	snapshot := instance.captureSnapshot()
+	if snapshot.DesiredMode != capture.ModeSystemProxy || snapshot.FaultID != "system-proxy-fault" || snapshot.CanRetryTUN {
+		t.Fatalf("System Proxy fault was rewritten as TUN: %#v", snapshot)
 	}
 }
 
@@ -1810,6 +1958,41 @@ func TestCaptureReadinessFromServicePayload(t *testing.T) {
 	}
 	if got := captureReadinessFromServicePayload(map[string]interface{}{}, capture.ModeOff); got.State != "" {
 		t.Fatalf("off readiness = %#v", got)
+	}
+}
+
+func TestCaptureRouteProbePrefersModeAwareRules(t *testing.T) {
+	legacyCalled := false
+	var gotMode capture.Mode
+	var gotRuntimeMode string
+	instance := &Agent{
+		captureRouteProbe: func(_ context.Context, mode capture.Mode, runtimeMode string) error {
+			gotMode, gotRuntimeMode = mode, runtimeMode
+			return nil
+		},
+		captureProbe: func(context.Context, capture.Mode) error {
+			legacyCalled = true
+			return nil
+		},
+	}
+	if err := instance.probeCaptureRoute(context.Background(), capture.ModeSystemProxy, "global"); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCalled || gotMode != capture.ModeSystemProxy || gotRuntimeMode != "global" {
+		t.Fatalf("route probe = mode=%s runtime=%q legacy=%t", gotMode, gotRuntimeMode, legacyCalled)
+	}
+
+	legacyMode := capture.ModeOff
+	instance.captureRouteProbe = nil
+	instance.captureProbe = func(_ context.Context, mode capture.Mode) error {
+		legacyMode = mode
+		return nil
+	}
+	if err := instance.probeCaptureRoute(context.Background(), capture.ModeTUN, "bypass_mainland"); err != nil {
+		t.Fatal(err)
+	}
+	if legacyMode != capture.ModeTUN {
+		t.Fatalf("legacy fallback mode = %s, want TUN", legacyMode)
 	}
 }
 

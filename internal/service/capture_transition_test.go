@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"navo/internal/compiler"
 	"navo/internal/domain/capture"
@@ -115,6 +116,35 @@ func TestCaptureServiceIPCRequestTimeoutCoversHardVerification(t *testing.T) {
 	}
 	if got := serviceIPCRequestTimeout(map[string]interface{}{"method": "core.status"}); got != defaultServiceIPCRequestTimeout {
 		t.Fatalf("default timeout = %s", got)
+	}
+}
+
+func TestRuntimeVerifyWaitsForCaptureTransition(t *testing.T) {
+	service := &Service{}
+	service.captureMu.Lock()
+	defer service.captureMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	responseCh := make(chan map[string]interface{}, 1)
+	go func() {
+		responseCh <- service.handleRuntimeVerify(ctx, "verify-during-transition")
+	}()
+
+	select {
+	case response := <-responseCh:
+		t.Fatalf("runtime.verify observed a partial capture transition: %#v", response)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	select {
+	case response := <-responseCh:
+		payload, _ := response["payload"].(map[string]interface{})
+		if code, _ := payload["code"].(string); code != "CAPTURE_BUSY" {
+			t.Fatalf("runtime.verify error code = %q, want CAPTURE_BUSY: %#v", code, response)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runtime.verify did not respect its context while waiting for capture transition")
 	}
 }
 

@@ -1,14 +1,26 @@
 param(
     [int]$StartupTimeoutSeconds = 20,
-    [switch]$SingleUI
+    [switch]$SingleUI,
+    [string]$PackageRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$PackageRoot = Join-Path $ProjectRoot "release\Navo"
+$ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot "release"))
+if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
+    $PackageRoot = Join-Path $ReleaseRoot "Navo"
+}
+$PackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
+$ReleasePrefix = $ReleaseRoot.TrimEnd("\", "/") + [System.IO.Path]::DirectorySeparatorChar
+if (-not $PackageRoot.StartsWith($ReleasePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "PackageRoot must stay inside $ReleaseRoot"
+}
 $TestLauncher = Join-Path $PackageRoot "navo-lightweight-smoke.exe"
+$PackageTrayData = Join-Path $PackageRoot "data"
+$PackageTrayIcon = Join-Path $PackageTrayData "navo.ico"
+$PackageTrayIconExisted = Test-Path -LiteralPath $PackageTrayIcon -PathType Leaf
 $UIExecutable = [System.IO.Path]::GetFullPath((Join-Path $PackageRoot "app_ui\navo_app.exe"))
-$SmokeRoot = Join-Path $ProjectRoot ".cache\lightweight-smoke"
+$SmokeRoot = Join-Path $ProjectRoot (".cache\lightweight-smoke\" + [Guid]::NewGuid().ToString("N"))
 $LocalAppData = Join-Path $SmokeRoot "localappdata"
 $GoCache = Join-Path $ProjectRoot ".cache\go-build"
 $GoPath = Join-Path $ProjectRoot ".cache\go-path"
@@ -43,7 +55,8 @@ function Read-Exact {
 function Invoke-NavoIPC {
     param(
         [Parameter(Mandatory)][string]$Method,
-        [hashtable]$Payload = @{}
+        [hashtable]$Payload = @{},
+        [switch]$AllowError
     )
     $Pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
         ".",
@@ -82,7 +95,7 @@ function Invoke-NavoIPC {
         $ResponseBody = Read-Exact -Stream $Pipe -Length $ResponseLength
         $Response = [System.Text.Encoding]::UTF8.GetString($ResponseBody) |
             ConvertFrom-Json
-        if ($Response.type -eq "ERROR") {
+        if ($Response.type -eq "ERROR" -and -not $AllowError) {
             throw "$Method failed: $($Response.payload.code): $($Response.payload.message)"
         }
         return $Response
@@ -219,6 +232,30 @@ try {
         throw "Dashboard snapshot blocked for $($Stopwatch.Elapsed.TotalMilliseconds) ms"
     }
 
+    $StartupSettings = (Invoke-NavoIPC -Method "startup.status").payload
+    if (-not $StartupSettings.supported -or $StartupSettings.enabled -or $StartupSettings.registered -or
+        $StartupSettings.mode -ne "system_proxy") {
+        throw "Fresh startup settings are not fail-closed: $($StartupSettings | ConvertTo-Json -Compress)"
+    }
+
+    $CaptureStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $CaptureFailure = Invoke-NavoIPC -Method "capture.set" `
+        -Payload @{ mode = "system_proxy" } -AllowError
+    $CaptureStopwatch.Stop()
+    if ($CaptureFailure.type -ne "ERROR" -or $CaptureFailure.payload.code -ne "OUTBOUND_REQUIRED") {
+        throw "No-route System Proxy admission returned an unexpected response: $($CaptureFailure | ConvertTo-Json -Compress -Depth 6)"
+    }
+    if ($CaptureStopwatch.Elapsed -gt [TimeSpan]::FromSeconds(12)) {
+        throw "No-route System Proxy failure entered a retry loop for $($CaptureStopwatch.Elapsed.TotalSeconds) seconds"
+    }
+    $AfterCapture = (Invoke-NavoIPC -Method "dashboard.snapshot").payload
+    if ($AfterCapture.capture.committed_mode -ne "off" -or
+        $AfterCapture.capture.can_retry_tun -or
+        -not [string]::IsNullOrWhiteSpace([string]$AfterCapture.tun.fault_id) -or
+        $AfterCapture.core.state -ne "stopped") {
+        throw "No-route System Proxy failure leaked into TUN/core state: $($AfterCapture | ConvertTo-Json -Compress -Depth 6)"
+    }
+
     if ($TrayAvailableAtStart) {
         Invoke-NavoIPC -Method "ui.show" | Out-Null
         Wait-Until -Failure "UI did not start on demand" -Condition {
@@ -272,6 +309,11 @@ try {
         first_ui_pid = $FirstUI.Id
         second_ui_pid = if ($null -eq $SecondUI) { 0 } else { $SecondUI.Id }
         launcher_exit_code = $Launcher.ExitCode
+        startup_enabled = [bool]$StartupSettings.enabled
+        no_route_error_code = [string]$CaptureFailure.payload.code
+        no_route_failure_ms = [math]::Round($CaptureStopwatch.Elapsed.TotalMilliseconds, 1)
+        tun_fault_after_no_route = [string]$AfterCapture.tun.fault_id
+        committed_mode_after_no_route = [string]$AfterCapture.capture.committed_mode
     } | ConvertTo-Json
 }
 finally {
@@ -293,5 +335,12 @@ finally {
         Stop-Process -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $TestLauncher -PathType Leaf) {
         Remove-Item -LiteralPath $TestLauncher -Force
+    }
+    if (-not $PackageTrayIconExisted -and (Test-Path -LiteralPath $PackageTrayIcon -PathType Leaf)) {
+        Remove-Item -LiteralPath $PackageTrayIcon -Force
+        if ((Test-Path -LiteralPath $PackageTrayData -PathType Container) -and
+            @(Get-ChildItem -LiteralPath $PackageTrayData -Force).Count -eq 0) {
+            Remove-Item -LiteralPath $PackageTrayData -Force
+        }
     }
 }

@@ -1588,3 +1588,194 @@
 - Full Go/vet gate PASS after the final downloader code; package gate also passed all Go packages, frontend 11/11, npm audit, Vue typecheck/Vite, and Wails Windows/amd64.
 - Built and verified `release/Navo-1.0.36-portable-amd64` plus ZIP: 28/27/28 file counts, zero issues, PE versions 1.0.36.0, ZIP SHA-256 `1C1E5C0F4636FC59733FD33E6FE050925943FF0472C8D3196B4AA0D494AB74E4`.
 - Phase 66 complete. Preserved the Explorer-owned running Navo pair and v2rayN/10808 state; the user must exit the older running Navo and launch 1.0.36 to use the fix.
+
+## 2026-08-23 Phase 67
+
+- Began the requested network-environment self-healing improvement.
+- Fully read the planning-with-files skill and restored the existing planning-file head/tail/status context.
+- Added Phase 67 before product exploration. No product code, process, proxy, route, DNS, firewall, adapter, listener, or WinINet state has been changed.
+- Restored Git scope: the worktree already contains extensive user changes, including an untracked UI thin-layer refactor; these will be preserved and mapped before overlapping edits.
+- Queried the relevant memory index and confirmed Coordinator-only mutation, ownership-safe recovery, and real-data-plane acceptance requirements.
+- The first full-document read hit an output truncation limit. Recorded the 3,021-line count and SHA-256 and switched to bounded chunk reads; implementation has not started.
+- Completed bounded reads for document lines 1-1500. Confirmed observation/mutation ownership split, snapshot model, refresh strategy, analyzer/findings, typed Self-Healing adapter, takeover semantics, and startup ordering.
+- Completed bounded reads for lines 1501-3021; the entire specification is now covered without truncation.
+- Phase 67.1 continues with current-HEAD symbol/state ownership mapping before product edits.
+- Verified exact baseline HEAD and inventoried the overlapping dirty worktree. No existing product changes were overwritten.
+- Read the canonical Coordinator/Capture/System Proxy/Dashboard and Self-Heal implementations. Identified safe read-only aggregation and Agent typed-adapter seams.
+- Mapped Agent startup, health polling, manual recovery, typed fault construction, two-round recovery, rollback/failover, and fail-closed behavior.
+- Mapped Service startup/IPC/TUN state and Network Manager/Journal authority. A read-only journal summary plus platform observer is required; no duplicate persistence will be introduced.
+- Mapped the current frontend thin-layer boundaries and confirmed Dashboard normalization/Overview composition as the low-conflict Environment UI path.
+- Confirmed the existing owned-network repair executor and identified the special off-mode verification needed for manual residual repair through the same Self-Heal loop.
+- Focused Go baseline initially stopped before compile because the repository module cache was empty and offline mode was forced; pinned dependency bootstrap resolved it.
+- Backend baseline PASS for Agent/Service/Network/Self-Heal; frontend baseline PASS 19/19 plus TypeScript.
+- Phase 67.1 complete. Phase 67.2 implementation is in progress.
+- The CRLF-sensitive combined planning patches were rejected without mutation; exact zero-context plan/status updates succeeded.
+- Implemented and formatted the read-only internal/networkenv model, Analyzer, and Store.
+- networkenv tests PASS, including all eight document cases, partial snapshot behavior, defensive copies, and stale reads.
+
+- Completed Phase 67 source implementation across networkenv, Network, Service, System Proxy, Agent SelfHeal, Wails, and the Vue thin-layer UI.
+- Added focused tests for the eight Analyzer cases, Store staleness/copying, Journal observation and no-mutation commands, Service dispatch cancellation, WinINet ownership loss/corruption, typed finding mapping, stale/partial/transitional monitor behavior, external observation-only handling, API delegation, DTO compatibility, and UI repair guards.
+- Confirmed full Go test and vet PASS, navo_app PASS after locked Wails dependency cache bootstrap, frontend 22/22 PASS, typecheck/build PASS, and browser-level Edge/Playwright PASS with a saved screenshot.
+- Preserved all pre-existing dirty-worktree changes and did not stop or alter any running Navo/v2rayN process or live Windows networking.
+- Phase 67.5 remains intentionally open for elevated/manual A-I network mutation and real data-plane/rollback/package acceptance; source completion is not represented as physical TUN acceptance.
+
+## 2026-08-24 Phase 68
+
+- Restored the planning-with-files instructions and existing Navo planning state.
+- Queried the relevant Navo memory index and retained the Coordinator, ownership, rollback, and physical data-plane acceptance constraints.
+- Added a bounded four-step optimization phase after both native `apply_patch` and its Windows wrapper were blocked by the managed ACL environment; used a reviewed repository-scoped unified diff fallback.
+- The first combined findings/progress append used the wrong findings EOF anchor and was rejected atomically; re-read both exact tails before this corrected patch.
+- Captured baseline HEAD `a337738`, the full dirty-worktree file list, diff scale, and project instructions without altering any user-owned source change.
+- No product code, process, listener, proxy, route, DNS, firewall, adapter, or WinINet state has been changed.
+- Compared frontend lazy loading with backend observation batching and selected the higher-impact, lower-overlap backend hotspot.
+- The previous combined status patch omitted `--unidiff-zero` for zero-context hunks and was rejected atomically; this corrected invocation preserves the reviewed changes.
+- Next: inspect fake-executor behavior and Journal action bounds, then implement red regressions before production code.
+- Implemented structured single-process Journal observation in `internal/network/observation.go`.
+- Added a command-count/mixed-state regression, item-local error regression, ambiguous-result rejection matrix, and a Windows real-PowerShell contract test.
+- Resolved the empty local module cache through the established locked-dependency mirror bootstrap and switched tests back to `GOPROXY=off`.
+- Focused Observe/decode suite PASS: `ok navo/internal/network 0.715s`.
+- Windows generated-script contract PASS: one hidden PowerShell process, exact healthy/error JSON results, `ok navo/internal/network 2.354s`.
+- No live networking query/mutation was performed by the contract test; its scripts contain only constant EXACT and injected-error expressions.
+- Phase 68.4 full package-level Go test/vet and final diff verification are now in progress.
+- Extended the command-count regression to four Journal resources; final focused contract/count run PASS: `ok navo/internal/network 2.031s`.
+- Full Go gate PASS with preserved session output: every package passed and `GO_TEST_ALL_EXIT=0`; Service completed in 33.964s and Network in 9.816s.
+- Full vet gate PASS: `GO_VET_ALL_EXIT=0`.
+- Frontend gate PASS: 22/22 tests, `vue-tsc --noEmit`, and Vite production build in 3.05s.
+- Final diff whitespace check produced no error; the large pre-existing dirty worktree and CRLF warnings were not normalized or overwritten.
+- Phase 68 is complete. No launcher, proxy, core, route, DNS, firewall, adapter, WinINet, or user process was started, stopped, queried for mutation, or changed.
+- Remaining scope: Phase 67 elevated A-I/TUN physical data-plane and rollback acceptance is still pending and was not represented as completed by this read-only observation optimization.
+
+## 2026-08-24 Phase 69
+
+- Received five repeated Service/IPC request-failed events from the user, all between 20:09:19 and 20:09:57.
+- Restored planning state and the prior Named Pipe/request-ID constraints.
+- Starting read-only timestamp correlation; no process or network state has been changed.
+- Read-only process baseline found no Navo process; preserved v2rayN PID 12972 and its sing-box PID 23476.
+- Bounded release-log inventory found only an 8/23 portable log, while `%LOCALAPPDATA%\\Navo\\structured.log.jsonl` is current.
+- Windows Application event query for 20:08-20:11 returned no Navo-related crash event.
+- The first all-file local-data inventory entered WebView2 caches and was truncated; subsequent reads will target exact Navo log/state paths only.
+- Next: parse sanitized structured log entries around the five timestamps and correlate their method/error/request identifiers.
+- Confirmed the local structured log ends on 8/23 and no Navo/WebView2 file in that data root changed during the five 8/24 timestamps.
+- Mapped Wails per-call pipe dialing, UI request IDs, Agent child Service request IDs, three reconnect attempts, single `serviceMu`, and detailed Agent error fields.
+- Source mapping shows Phase 68 background observation failures are stored as environment observation errors rather than emitted as Agent UIIPC request-failed events.
+- The user's generic card is consistent with a Service-side `request failed` entry whose fields are hidden from the pasted view; exact method/code/reason remains unproven.
+- Next: inspect the Service failure emitter/log path selection and Windows execution-history evidence for the actual binary/data root.
+- Found the exact generic emitter: `Service.errorResponse` logs only request ID and code, omitting method and reason.
+- Confirmed Agent errors already include a redacted reason, exposing an evidence parity gap.
+- BAM execution-history values were access denied; retained other read-only evidence paths rather than expanding registry privileges.
+- Next: trace errorResponse call sites/dispatch boundaries and the Vue logs presenter, then design one enriched, backwards-compatible error record.
+- Counted 110 Service errorResponse call sites; rejected a broad signature rewrite.
+- Confirmed Service request-received entries already contain method and request ID, while error entries omit reason and the Vue list hides all structured fields.
+- Chosen backwards-compatible observability seam: enrich reason in the existing error fields and render a safe bounded field subset.
+- Next: correlate dashboard polling/fan-out cadence with normal-state Service error producers before implementing the evidence repair.
+- Correlated the traffic page to a 2-second full-dashboard poll.
+- Proved `metrics.current` is availability-as-data, not an error, when stopped/unsupported; it is not the direct generic Service error producer.
+- Dashboard still aborts on any other fan-out Service error.
+- Next: inspect log-follow cadence/validation and the remaining status handlers before choosing any behavioral polling repair.
+- Ruled log follow cadence out as the direct 2-second pattern: it polls every 3 seconds.
+- Confirmed logs.query defaults are valid and errors only on explicit invalid filters.
+- Continuing with dashboard status-handler audit before source edits.
+- Audited all five dashboard status handlers; normal disconnected/unavailable states return RESPONSE payloads, not Service errors.
+- Proved fixed 2-second traffic polling silently retries every failure and lacks an in-flight guard/backoff.
+- Completed Phase 69.1 with a hard historical evidence gap: no matching current log file or process remains, and the UI hid the persisted fields.
+- Phase 69.2 now targets combined-launcher transport ownership plus a safe reproduction of Service rejection/poll retry behavior.
+- Confirmed formal desktop Agent→Service calls are direct in-process Dispatch; ruled out a second Service Named Pipe transport failure.
+- Classified the cards as handler ERROR responses whose exact historical cause was destroyed by missing method/reason evidence.
+- Completed Phase 69.2 without guessing the original handler.
+- Starting Phase 69.3 evidence enrichment and bounded non-overlapping traffic polling implementation.
+- Selected pure helpers and test seams for Service error fields, safe log evidence formatting, and bounded polling delay.
+- Located structured-log grid CSS for a compact second evidence row.
+- A read-only package manifest lookup used the wrong frontend subdirectory; corrected future gates to `navo_app`.
+- Recovered from managed ACL read/apply denial using approved repository-scoped reads and atomic `git apply` standard input.
+- Applied the Service evidence enrichment plus focused pure-helper tests; no response, request-ID, replay, pipe, or network behavior changed.
+- Logged and corrected two atomically rejected patch-format/PTY attempts; neither partially modified source.
+- Located the actual Settings feature and LogEntry type files after two stale read-only paths.
+- Finalized the frontend boundary: compact safe log evidence plus non-overlapping bounded failure retry.
+- Preserving current dashboard response handling and normal 2-second healthy metrics refresh.
+- User clarified the target architecture and reported IP-trace/discovery still proves no successful proxy path.
+- Paused the Phase 69 frontend-only retry/presentation work; retained the already applied Service evidence helper.
+- Read the complete V1 architecture specification, implementation mapping, and cold-boot acceptance constraints.
+- Started Phase 70 audit of capture ownership, mode-specific verification, and healthy commit semantics.
+- Located the Agent/Service mode transitions, runtime healthy commits, TUN verifier, and capture health monitor.
+- Next: inspect the exact readiness predicates and determine why direct exit can still be committed as healthy.
+- Found the first concrete false-success boundary: initial activation skips the only formally wired current-user route probe.
+- Found the second acceptance gap: System Proxy application checks lack exit-IP identity comparison.
+- Chose the minimal ownership-preserving repair instead of merging Service and Agent state: Service certifies the node; Agent exclusively commits the capture valve.
+- Next: add explicit-proxy and WinINet exit identity predicates, then wire the mode-aware probe into initial activation.
+- Mapped compatible DTO additions and regression seams for Service explicit exit identity and Agent initial route probing.
+- Ready to implement the focused Phase 70 valve/acceptance repair.
+- Applied the Service explicit proxy exit-IP identity repair and compatible verification evidence fields.
+- Applied the Agent initial mode-aware route probe gate plus runtime-mode evidence.
+- Applied WinINet default-versus-direct exit identity verification; starting focused regression coverage and compilation.
+- Split and applied focused regressions after one atomically rejected combined test patch.
+- Restored the three Phase 70 constraints that were omitted by an earlier under-counted planning hunk.
+- Focused gate pass so far: `internal/service` and `internal/agent/systemproxy`.
+- Corrected the Agent regression to use public runtime-mode wire values; rerunning Agent tests.
+- Full `internal/agent` package: PASS after test-contract correction.
+- Completed Phase 70.1-70.3; starting full Go/vet and then live data-plane validation if a configured Navo route is available.
+- Full Go test gate: PASS.
+- Full Go vet gate: PASS; moving to read-only live route/process baseline before any runtime launch or capture mutation.
+- Read-only live baseline confirmed no running Navo and preserved v2rayN/sing-box.
+- Located stale Navo runtime state and release 1.0.37; validating only safe route/commit metadata before any launch.
+- Confirmed the current Navo runtime has no selected/active/candidate outbound and is an uncommitted candidate.
+- Found one local repository state file; checking only counts/IDs/source types to see whether a selectable route exists without exposing credentials.
+- Repository structure confirms only historical revisions, not a current selectable route/active selection.
+- Live proxy-success acceptance remains blocked by missing Navo route; continuing with non-mutating source/build validation and exact residual reporting.
+- Frontend 22/22 tests, typecheck, and production build: PASS.
+- Phase 70 source work is validated; live real-IP completion is pending a configured/selected Navo route (and elevation for TUN).
+- Applied Phase 69 frontend log evidence and bounded metrics polling helpers/tests.
+- One touched Vue row has a mixed-indent warning; normalizing it before frontend gates.
+- Metrics polling tests: PASS.
+- Log presenter test file encoding: FAIL from patch transport; fixing with Unicode escapes before typecheck/build.
+- Safely replaced only the two encoding-damaged new files after Git refused to modify untracked paths.
+- Recreated log presenter and regression with ASCII-safe Unicode escapes; rerunning complete frontend gates.
+- Completed Phase 69 backend/UI evidence and bounded polling work; frontend 26/26, typecheck, build all PASS.
+- Final diff whitespace check PASS; Phase 70 live IP acceptance remains pending only because Navo has no selected route.
+
+- Confirmed Navo has no selected/active/candidate outbound; external v2rayN configuration was intentionally not read or reused.
+- Bumped the continuing release version to 1.0.38 so the repaired package does not overwrite 1.0.37.
+- Completed official packaging after caching fixed Wails dependencies: full Go tests/vet, frontend 26/26, typecheck, build, package/ZIP verifier, and repair check PASS.
+- Ran isolated `lightweight_smoke.ps1 -SingleUI`: IPC/UI/tray lifecycle PASS; no-route System Proxy returned `OUTBOUND_REQUIRED`, committed mode stayed off, and TUN fault stayed empty.
+- Verified post-smoke residue and removed the single smoke-created package log; directory/ZIP verification still reports zero issues.
+- Real System Proxy and elevated TUN DNS/TCP/HTTPS/exit-IP validation remains pending solely on a configured Navo route (and elevation for TUN).
+
+- Correlated the reported request IDs and two-second cadence to active capture health `runtime.verify` calls racing Service TUN transition state.
+- Added Service capture-lock serialization for external runtime verification plus `TestRuntimeVerifyWaitsForCaptureTransition`.
+- Focused regression, complete Service/Agent suites, full Go tests/vet, frontend 26/26, typecheck, and production build PASS.
+- Built and verified 1.0.39 directory/ZIP; repair check and manifest/archive checks report zero issues.
+- Two lightweight smokes passed IPC/UI/no-route failure boundaries but failed tray exit automation; stopped retrying, verified zero Navo residue, preserved v2rayN/WinINet, and cleaned smoke logs.
+- Pending: real administrator TUN data-plane rerun with a configured Navo outbound, plus independent tray-exit lifecycle diagnosis.
+
+## 2026-08-25 Phase 72
+
+- Received the intermittent TUN-enable overview data-loss report.
+- Restored the planning-with-files workflow, current dirty-worktree scope, and the relevant dashboard/request-ID historical constraints.
+- Read both relevant historical rollout summaries: Phase 36 dashboard resilience and the Agent child request-ID repair.
+- Initial code search identified `internal/agent/dashboard.go` as a serial all-or-nothing fan-out and the refactored overview/runtime state modules as the frontend projection boundary.
+- Starting exact source reads and red regressions for TUN-transition overlap.
+
+- Confirmed `loadDashboard` has no in-flight guard, request generation, or stale-response rejection; every completion overwrites the whole dashboard.
+- Confirmed TUN switching creates a fixed 350 ms interval of full dashboard requests and only clears it after the long-running capture mutation finishes.
+- Confirmed Agent dashboard aggregation is five serial Service calls with per-call locking, so multiple overview requests can interleave at component granularity.
+- Root-cause direction: replace refresh fan-out with a single-flight trailing refresh that commits only the newest generation, then add transition-overlap regressions before changing production behavior.
+
+- Added failing regressions for overlapping dashboard requests, stale transition success, stale transition error, temporary route identity loss, and fixed-interval capture polling.
+- Applied the shared-loader, route-history, and polling changes after the required patch tool and Git patch route were blocked by managed ACL/untracked-file constraints; every fallback edit used workspace path checks, unique anchors, full preflight, and reread-before-write checks.
+- One combined Git patch had incorrect hunk counts and was rejected atomically; the corrected patch precheck then refused an untracked feature file without applying any hunk.
+- The first cumulative exact-edit preflight evaluated same-file replacements independently and stopped before writing; the corrected per-file cumulative preflight applied all intended changes.
+- Focused regressions PASS 6/6.
+- Full frontend suite PASS 30/30.
+- First production build FAIL: useTraffic.ts(119,28) could not find name apis; direct dashboard access was removed correctly, but controlled traffic still uses the typed API facade.
+- Restored only the required apis import. TypeScript plus Vite production build PASS (67 modules).
+- Phase 72.1-72.3 complete. Starting browser-level mocked TUN transition timing verification without changing live networking.
+
+- Browser automation skill path initially failed because neither system nor bundled Python contained Playwright; no package install was attempted.
+- Reused bundled Node Playwright and headless Edge with the prescribed managed-server lifecycle.
+- Mocked TUN transition browser regression PASS: DASHBOARD_CALLS=6, MAX_CONCURRENT=1, TRANSITION_DATA_LOSS=0, final TUN and stable revision, zero console/page errors.
+- The managed image viewer could not read the screenshot due the same ACL helper failure; retained test assertions and copied the screenshot to the task visualization directory.
+- Final full frontend rerun PASS 30/30; prior successful TypeScript/Vite build remains valid after the sole API import restoration.
+- Final source boundary check found exactly one Wails dashboard bridge call, in the shared loader.
+- Detected the helper's residual Vite listener on 4188, verified PID 6928 as this exact workspace test child, stopped only it, and confirmed zero listeners.
+- Screenshot evidence: 551123 bytes, SHA-256 ED4FD13E847B7D4DA396400F5806D0083801B32742B4A248B68D107B81F9185B.
+- Removed three temporary browser-test cache files; retained only the copied screenshot.
+- Phase 72 complete. No live networking or unrelated process was changed; elevated physical TUN acceptance remains separate.

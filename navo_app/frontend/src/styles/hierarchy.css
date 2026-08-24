@@ -1,0 +1,120 @@
+/* Theme text follows surface luminance: dark ink by day, light ink by night. */
+:root[data-theme="day"] .primary,
+:root[data-theme="day"] .page-heading > span,
+:root[data-theme="day"] .page-intro .eyebrow,
+:root[data-theme="day"] .axis-index,
+:root[data-theme="day"] .activity-progress > div b,
+:root[data-theme="day"] .capture-phase,
+:root[data-theme="day"] .benchmark-values b,
+:root[data-theme="day"] .chart-summary em,
+:root[data-theme="day"] .subscription-summary article span,
+:root[data-theme="day"] .availability,
+:root[data-theme="day"] .availability.healthy,
+:root[data-theme="day"] .availability.update,
+:root[data-theme="day"] .risk-low,
+:root[data-theme="day"] .risk-medium,
+:root[data-theme="day"] .simulation-banner strong,
+:root[data-theme="day"] .decision-card p,
+:root[data-theme="day"] .warning-banner,
+:root[data-theme="day"] .capability-note,
+:root[data-theme="day"] .diagnostic-card code,
+:root[data-theme="day"] .inline-error,
+:root[data-theme="day"] .risk-signals span.flagged {
+  color: var(--text);
+}
+
+:root:not([data-theme="day"]) .primary,
+:root:not([data-theme="day"]) .capture-options button.selected,
+:root:not([data-theme="day"]) .capture-options button.selected small,
+:root:not([data-theme="day"]) .source-tabs button.active,
+:root:not([data-theme="day"]) .sidebar nav button.active {
+  color: var(--text);
+}
+
+/* Phase 48: shared content hierarchy for every product page. */
+button { padding-inline: 15px; font-size: var(--type-body); font-weight: 600; }
+.eyebrow, .card-label { color: var(--text-muted); font: 650 var(--type-meta)/1.45 var(--font-ui); letter-spacing: .02em; }
+.page-content { width: min(1360px, 100%); padding: 24px 28px 40px; }
+.task-page { display: grid; align-content: start; gap: 16px; }
+.task-page > * { margin-top: 0; margin-bottom: 0; }
+.page-intro { min-height: 86px; align-items: center; padding: 4px 2px 16px 16px; border-bottom: 1px solid var(--border-soft); border-left: 4px solid var(--motion-accent); }
+.page-intro h2 { font-size: 24px; }
+.page-intro .eyebrow { color: var(--cyan); }
+.section-heading { gap: 20px; margin-bottom: 16px; }
+.section-heading h3 { font-size: 18px; }
+.section-heading p { max-width: 780px; margin-top: 7px; font-size: var(--type-body); line-height: 1.65; }
+dt, dd { font-size: var(--type-meta); }
+.ip-card, .risk-card { min-height: 210px; padding: 20px; }
+.ip-card > p { font-size: var(--type-body); }
+.ip-card > small, .risk-card > small { margin-top: 14px; font-size: var(--type-caption); line-height: 1.55; }
+.risk-card ul { font-size: var(--type-body); line-height: 1.75; }
+.speed-card, .chart-card { min-height: 292px; padding: 20px; }
+.speed-value small { font-size: var(--type-meta); }
+.runtime-strip small { margin-top: 6px; font-size: var(--type-caption); }
+.chart-summary { gap: 16px; min-height: 26px; font-size: var(--type-caption); }
+.connection-source-scope, .source-management-card { gap: 20px; margin-bottom: 0; padding: 18px 20px; }
+.connection-source-scope strong, .source-management-card strong { font-size: 17px; }
+.connection-source-scope small, .source-management-card small { font-size: var(--type-meta); line-height: 1.5; }
+.config-card { padding: 22px; }
+.traffic-control-heading small { font-size: var(--type-meta); line-height: 1.55; }
+.control-axis { grid-template-columns: 170px minmax(0, 1fr); gap: 18px; padding-block: 20px; }
+.control-axis-copy small, .routing-rule-heading small, .routing-rule-actions small { font-size: var(--type-caption); line-height: 1.55; }
+.axis-index { font-size: var(--type-caption); }
+.capture-options button small, .advanced-toggle small, .connection-cta span { font-size: var(--type-meta); line-height: 1.5; }
+.core-options small { font-size: var(--type-caption); }
+.form-card { padding: 22px; }
+.form-grid label { font-size: var(--type-meta); }
+.subscription-summary article { padding: 18px; }
+.subscription-summary article span, .subscription-summary p, .subscription-summary small { font-size: var(--type-caption); line-height: 1.5; }
+.table-head { padding: 13px 16px; color: var(--text-muted); background: var(--surface-soft); font-size: var(--type-caption); letter-spacing: .02em; text-transform: none; }
+.route-row { min-height: 76px; padding: 11px 16px; }
+.route-row small, .address, .empty-state p { font-size: var(--type-caption); }
+.protocol { font-size: var(--type-caption); }
+.core-grid article { min-height: 342px; padding: 22px; }
+.availability { padding: 4px 8px; border: 1px solid currentColor; border-radius: var(--radius-chip); font-size: var(--type-caption); }
+.core-grid h3 { margin-top: 20px; font-size: 19px; }
+.core-grid p { font-size: var(--type-meta); line-height: 1.55; }
+.check-stamp { font: var(--type-caption)/1.65 var(--font-data); }
+.metric-hero { grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 0; }
+.metric-hero > div { min-height: 96px; padding: 18px; }
+.metric-hero span { font-size: var(--type-meta); }
+.metric-hero strong { margin-top: 12px; font-size: 22px; }
+.chart-card.full { min-height: 410px; }
+.traffic-simulation-card { padding: 22px; }
+.traffic-simulation-card p { font-size: var(--type-meta); line-height: 1.55; }
+.simulation-controls label { font-size: var(--type-caption); }
+.ip-detail-grid article { padding: 22px; }
+.ip-result-heading em { padding: 4px 8px; font-size: var(--type-caption); }
+.risk-panel { padding: 22px; }
+.risk-panel p { font-size: var(--type-meta); line-height: 1.65; }
+.risk-signals span { min-height: 72px; padding: 12px; font-size: var(--type-meta); }
+.risk-signals b { font-size: var(--type-caption); }
+.host-panel, .benchmark-panel { min-height: 290px; padding: 22px; }
+.panel-title > strong { font: 650 17px var(--font-ui); }
+.host-metrics small, .benchmark-values small { font: var(--type-caption) var(--font-ui); letter-spacing: 0; text-transform: none; }
+.host-metrics b { margin-top: 7px; font: 600 var(--type-body) var(--font-data); }
+.host-footer { margin-top: 15px; font: var(--type-caption) var(--font-data); }
+.benchmark-values em, .benchmark-footer small { font-size: var(--type-caption); }
+.settings-runtime > div { padding: 18px; }
+.settings-runtime small, .settings-runtime span { font-size: var(--type-caption); line-height: 1.5; }
+.changelog-card, .settings-log-card { padding: 22px; }
+.log-filters legend, .log-filters fieldset label, .log-follow { font-size: var(--type-caption); }
+.log-view span, .log-view code, .log-view.structured b, .log-view.structured i { font-size: var(--type-caption); }
+.latency-card { padding: 22px; border: 2px solid var(--border); box-shadow: var(--panel-shadow-strong); }
+.latency-metrics span { min-height: 78px; padding: 14px; }
+.latency-metrics small { font-size: var(--type-caption); }
+.latency-metrics b { margin-top: 8px; font: 650 var(--type-body) var(--font-data); }
+
+@media (max-width: 1120px) {
+  .metric-hero { grid-template-columns: repeat(2, 1fr); }
+  .page-content { padding-inline: 22px; }
+}
+
+@media (max-width: 860px) {
+  .page-content { padding: 20px 16px 32px; }
+  .page-intro { min-height: 76px; padding-left: 12px; }
+  .page-intro h2 { font-size: 21px; }
+  .control-axis { grid-template-columns: 1fr; }
+  .metric-hero { grid-template-columns: 1fr 1fr; }
+  .task-page { gap: 13px; }
+}

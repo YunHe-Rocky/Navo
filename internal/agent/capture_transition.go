@@ -14,6 +14,7 @@ import (
 	"navo/internal/agent/systemproxy"
 	"navo/internal/connection"
 	"navo/internal/domain/capture"
+	"navo/internal/networkenv"
 	"navo/internal/selfheal"
 )
 
@@ -41,13 +42,30 @@ func (a *Agent) initializeCaptureState() {
 	a.captureProbe = a.cfg.CaptureProbeFn
 	a.captureRouteProbe = a.cfg.CaptureRouteProbeFn
 }
+func (a *Agent) probeCaptureRoute(ctx context.Context, mode capture.Mode, runtimeMode string) error {
+	if a.captureRouteProbe != nil {
+		return a.captureRouteProbe(ctx, mode, runtimeMode)
+	}
+	if a.captureProbe != nil {
+		return a.captureProbe(ctx, mode)
+	}
+	return nil
+}
 
 func (a *Agent) transitionCaptureMode(
 	ctx context.Context,
 	target capture.Mode,
 ) (resultErr error) {
+	return a.transitionCaptureModeWithOrigin(ctx, target, connection.OriginUser)
+}
+
+func (a *Agent) transitionCaptureModeWithOrigin(
+	ctx context.Context,
+	target capture.Mode,
+	origin connection.Origin,
+) (resultErr error) {
 	transaction, err := a.beginConnection(
-		ctx, "", connection.OperationCaptureSwitch, connection.OriginUser, "",
+		ctx, "", connection.OperationCaptureSwitch, origin, "",
 	)
 	if err != nil {
 		return err
@@ -166,6 +184,7 @@ func (a *Agent) transitionCaptureModeLocked(ctx context.Context, target capture.
 		return a.captureFailure(target, journal, err)
 	}
 	readiness := captureReadinessFromServicePayload(servicePayload, target)
+	runtimeMode, _ := servicePayload["runtime_mode"].(string)
 	if pid, ok := numberAsInt(servicePayload["pid"]); ok {
 		journal.CorePID = pid
 	}
@@ -199,9 +218,7 @@ func (a *Agent) transitionCaptureModeLocked(ctx context.Context, target capture.
 			return a.captureFailure(target, journal, err)
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if a.captureProbe != nil {
-			err = a.captureProbe(probeCtx, target)
-		}
+		err = a.probeCaptureRoute(probeCtx, target, runtimeMode)
 		cancel()
 		if err != nil {
 			return a.captureFailure(target, journal, fmt.Errorf("capture data-plane check: %w", err))
@@ -963,13 +980,9 @@ func (a *Agent) verifyCaptureReadiness(ctx context.Context) (capture.ReadinessEv
 			}
 		}
 	}
-	if err == nil && snapshot.CommittedMode != capture.ModeOff && (a.captureRouteProbe != nil || a.captureProbe != nil) {
+	if err == nil && snapshot.CommittedMode != capture.ModeOff {
 		probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if a.captureRouteProbe != nil {
-			err = a.captureRouteProbe(probeCtx, snapshot.CommittedMode, runtimeMode)
-		} else {
-			err = a.captureProbe(probeCtx, snapshot.CommittedMode)
-		}
+		err = a.probeCaptureRoute(probeCtx, snapshot.CommittedMode, runtimeMode)
 		cancel()
 		if snapshot.CommittedMode == capture.ModeSystemProxy {
 			readiness.DefaultProxy = err == nil
@@ -1017,6 +1030,7 @@ func (a *Agent) setCaptureSnapshot(snapshot capture.Snapshot) {
 	a.captureStateMu.Lock()
 	a.captureState = snapshot
 	a.captureStateMu.Unlock()
+	a.requestEnvironmentRefresh()
 }
 func (a *Agent) recoverySnapshot() selfheal.RecoveryReport {
 	a.recoveryMu.RLock()
@@ -1079,6 +1093,12 @@ func (a *Agent) refreshCaptureFault(tunStatus map[string]interface{}) {
 	}
 	message, _ := tunStatus["last_error"].(string)
 	current := a.captureSnapshot()
+	if current.DesiredMode != capture.ModeTUN && current.CommittedMode != capture.ModeTUN {
+		// tun.status is part of every dashboard snapshot. A stale or incorrectly
+		// scoped Service fault must never rewrite an OFF/System Proxy transaction
+		// into a retryable TUN failure.
+		return
+	}
 	if current.FaultID == faultID {
 		return
 	}
@@ -1216,7 +1236,10 @@ func (a *Agent) monitorCaptureHealth(ctx context.Context) {
 			continue
 		}
 		fullProbe := failures > 0 || time.Since(lastActiveProbe) >= captureActiveProbeInterval
-		fault := a.captureHealthFault(snapshot.CommittedMode, fullProbe)
+		fault, trustedEnvironment := a.environmentCaptureFault(snapshot.CommittedMode)
+		if fault == nil && (!trustedEnvironment || fullProbe) {
+			fault = a.captureHealthFault(snapshot.CommittedMode, fullProbe)
+		}
 		if fullProbe {
 			lastActiveProbe = time.Now()
 		}
@@ -1357,6 +1380,13 @@ func classifyCaptureFault(
 	mode capture.Mode,
 	cause error,
 ) (selfheal.FaultDomain, selfheal.ErrorCode, string) {
+	var serviceErr *serviceCaptureError
+	if errors.As(cause, &serviceErr) && serviceErr.code == "OUTBOUND_REQUIRED" {
+		// A missing user-selected route is configuration, not a degraded route.
+		// Reapplying capture cannot create a node and only repeats the same failed
+		// transaction, so keep the failure visible without automatic mutation.
+		return selfheal.FaultDomainUnknown, selfheal.CodeConnectivityUnknown, "a proxy route must be selected"
+	}
 	message := strings.ToLower(cause.Error())
 	switch {
 	case strings.Contains(message, "nrpt"):
@@ -1404,6 +1434,8 @@ func (a *Agent) recoverUnhealthyCapture(
 		fault = newAttributedCaptureFault(mode, cause, "Agent", nil)
 	}
 	plan := selfheal.PlanFor(fault.evidence.Domain)
+	environmentCode := environmentFindingCode(fault)
+	environmentOwnership, _ := fault.evidence.Details["ownership"].(string)
 	transaction, err := a.coordinator.TryBegin(connection.Request{
 		Operation: connection.OperationSelfHeal, Origin: connection.OriginSelfHeal,
 		FaultDomain: string(fault.evidence.Domain),
@@ -1438,7 +1470,9 @@ func (a *Agent) recoverUnhealthyCapture(
 	}
 	a.setRecoveryReport(report)
 
-	if !plan.Controllable || (fault.evidence.Domain == selfheal.FaultDomainSystemProxy && !a.ProxyStatus().Enabled) {
+	systemProxyUnowned := fault.evidence.Domain == selfheal.FaultDomainSystemProxy &&
+		!a.ProxyStatus().Enabled && environmentOwnership != string(networkenv.OwnerNavo)
+	if !plan.Controllable || systemProxyUnowned {
 		report.State = selfheal.RecoveryFailed
 		report.Exhausted = true
 		report.FinalError = cause.Error()
@@ -1465,7 +1499,11 @@ func (a *Agent) recoverUnhealthyCapture(
 			report.UpdatedAt = time.Now().UTC()
 			a.setRecoveryReport(report)
 			_ = transaction.SetPhase(connection.PhaseVerifying)
-			readiness, repairErr = a.verifyCaptureReadiness(recoveryCtx)
+			if environmentCode != "" && mode == capture.ModeOff {
+				readiness, repairErr = a.verifyEnvironmentFindingCleared(recoveryCtx, environmentCode)
+			} else {
+				readiness, repairErr = a.verifyCaptureReadiness(recoveryCtx)
+			}
 		}
 		result.CompletedAt = time.Now().UTC()
 		result.Recovered = repairErr == nil && readiness.State == "ready"
@@ -1486,7 +1524,11 @@ func (a *Agent) recoverUnhealthyCapture(
 		if result.Recovered {
 			report.State = selfheal.RecoveryRecovered
 			report.Recovered = true
-			report.FinalImpact = "real connectivity restored"
+			if environmentCode != "" && mode == capture.ModeOff {
+				report.FinalImpact = "Navo-owned network finding cleared"
+			} else {
+				report.FinalImpact = "real connectivity restored"
+			}
 			report.UpdatedAt = time.Now().UTC()
 			a.setRecoveryReport(report)
 			return nil

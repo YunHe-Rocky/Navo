@@ -828,6 +828,10 @@ func (s *Service) verifyActiveRuntimeRouting(ctx context.Context) (RuntimeRoutin
 }
 
 func (s *Service) handleRuntimeVerify(ctx context.Context, requestID string) map[string]interface{} {
+	if err := s.lockCapture(ctx); err != nil {
+		return errorResponse(requestID, "CAPTURE_BUSY", err)
+	}
+	defer s.captureMu.Unlock()
 	verification, err := s.verifyActiveRuntimeRouting(ctx)
 	if err != nil {
 		return errorResponse(requestID, "APPLICATION_READINESS_FAILED", err)
@@ -1723,9 +1727,7 @@ func sanitizeID(name string) string {
 }
 
 func errorResponse(requestID, code string, err error) map[string]interface{} {
-	_ = logstore.Emit(logstore.LevelError, "Service", "IPC", "request failed", map[string]any{
-		"request_id": requestID, "error_code": code,
-	})
+	_ = logstore.Emit(logstore.LevelError, "Service", "IPC", "request failed", serviceIPCErrorFields(requestID, code, err))
 	return map[string]interface{}{
 		"request_id": requestID,
 		"type":       "ERROR",
@@ -1733,5 +1735,17 @@ func errorResponse(requestID, code string, err error) map[string]interface{} {
 		"payload": map[string]interface{}{
 			"code": code, "message": err.Error(),
 		},
+	}
+}
+
+func serviceIPCErrorFields(requestID, code string, err error) map[string]any {
+	reason := "unknown service error"
+	if err != nil && strings.TrimSpace(err.Error()) != "" {
+		reason = err.Error()
+	}
+	return map[string]any{
+		"request_id": requestID,
+		"error_code": code,
+		"reason":     reason,
 	}
 }

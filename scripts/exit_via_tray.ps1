@@ -105,6 +105,10 @@ try {
 if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
     throw "Navo PID $ProcessId did not exit through the tray within $TimeoutSeconds seconds"
 }
-if ($process.ExitCode -ne 0) {
-    throw "Navo PID $ProcessId exited with code $($process.ExitCode)"
+# Get-Process objects can expose a null ExitCode after the native tray owner
+# has already closed its handle. Callers that launched the process retain a
+# ProcessStartInfo-backed object and verify the concrete exit code themselves.
+$exitCode = $process.ExitCode
+if ($null -ne $exitCode -and $exitCode -ne 0) {
+    throw "Navo PID $ProcessId exited with code $exitCode"
 }

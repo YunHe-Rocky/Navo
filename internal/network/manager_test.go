@@ -16,6 +16,8 @@ type fakeExecutor struct {
 	mu                  sync.Mutex
 	commands            []Command
 	inspectionState     string
+	inspectionStates    []string
+	observationOutput   string
 	failContains        string
 	failOnce            bool
 	cancelOnFailure     context.CancelFunc
@@ -38,6 +40,29 @@ func (f *fakeExecutor) RunOutput(ctx context.Context, command Command) (string, 
 			return "CLEAN", nil
 		}
 		return f.orphanFirewallState, nil
+	}
+	if strings.Contains(script, "NAVO_NETWORK_OBSERVATION_BATCH") {
+		if f.observationOutput != "" {
+			return f.observationOutput, nil
+		}
+		count := strings.Count(script, "NAVO_NETWORK_OBSERVATION_ITEM")
+		states := f.inspectionStates
+		if len(states) == 0 {
+			state := f.inspectionState
+			if state == "" {
+				state = "MISSING"
+			}
+			states = make([]string, count)
+			for index := range states {
+				states[index] = state
+			}
+		}
+		results := make([]map[string]interface{}, 0, len(states))
+		for index, state := range states {
+			results = append(results, map[string]interface{}{"index": index, "state": state})
+		}
+		encoded, _ := json.Marshal(map[string]interface{}{"results": results})
+		return string(encoded), nil
 	}
 	state := f.inspectionState
 	if state == "" {

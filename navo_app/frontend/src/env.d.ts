@@ -2,6 +2,7 @@
 
 import type {
   Dashboard,
+  NetworkEnvironmentSnapshot,
   CoreUpdateReport,
 	CoreUpdateStatus,
   HostStatus,
@@ -14,6 +15,7 @@ import type {
   Routes,
   SubscriptionRequest,
   Subscriptions,
+  StartupSettings,
   TestResult,
   UpstreamRequest,
 } from "./types";
@@ -30,9 +32,13 @@ declare global {
       main?: {
         App?: {
           GetDashboard(): Promise<Dashboard>;
+          RepairNetworkEnvironment(code: string): Promise<NetworkEnvironmentSnapshot>;
+          GetStartupSettings(): Promise<StartupSettings>;
+          SetStartupSettings(enabled: boolean, mode: string): Promise<StartupSettings>;
           CheckIP(): Promise<IPDetection>;
           GetHostStatus(): Promise<HostStatus>;
           RunProxyBenchmark(): Promise<ProxyBenchmark>;
+          RunRouteBenchmark(outboundId: string): Promise<ProxyBenchmark>;
           CancelProxyBenchmark(): Promise<void>;
 		  RunLatencyTest(outboundId: string): Promise<LatencyResult>;
 		  RunTrafficTransfer(sizeMiB: number, direction: string): Promise<ProxyBenchmark>;

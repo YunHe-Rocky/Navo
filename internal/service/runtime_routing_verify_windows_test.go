@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -75,5 +76,9 @@ func TestVerifyExternalSiteViaProxyRejectsUnexpectedStatus(t *testing.T) {
 	}, proxyURL)
 	if err == nil {
 		t.Fatal("unexpected proxied HTTP status was accepted")
+	}
+	var captureErr *captureTransitionError
+	if !errors.As(err, &captureErr) || captureErr.code != proxyHTTPSVerifyFailed {
+		t.Fatalf("proxied HTTP failure = %T %v, want %s", err, err, proxyHTTPSVerifyFailed)
 	}
 }

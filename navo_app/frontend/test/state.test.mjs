@@ -30,11 +30,11 @@ function dashboard(readinessState = "ready") {
 }
 
 test("ChatGPT readiness is a hard condition for healthy and connected state", () => {
-  const ready = state.deriveAppState(dashboard(), { id: "route-1" }, 0, 0);
+  const ready = state.deriveAppState(dashboard(), { id: "route-1" });
   assert.equal(ready.networkHealth, "healthy");
   assert.equal(ready.connection, "connected");
 
-  const failed = state.deriveAppState(dashboard("failed"), { id: "route-1" }, 0, 10);
+  const failed = state.deriveAppState(dashboard("failed"), { id: "route-1" });
   assert.equal(failed.networkHealth, "unavailable");
   assert.equal(failed.connection, "failed");
 });
@@ -47,12 +47,12 @@ test("active recovery overrides transient OFF state until verification finishes"
     evidence: { domain: "node" },
     rounds: [],
   };
-  const active = state.deriveAppState(recovering, { id: "route-1" }, 0, 0);
+  const active = state.deriveAppState(recovering, { id: "route-1" });
   assert.equal(active.networkHealth, "checking");
   assert.equal(active.connection, "reconnecting");
 
   recovering.capture.recovery.state = "failed";
-  const failed = state.deriveAppState(recovering, { id: "route-1" }, 0, 0);
+  const failed = state.deriveAppState(recovering, { id: "route-1" });
   assert.equal(failed.networkHealth, "unavailable");
   assert.equal(failed.connection, "failed");
 });

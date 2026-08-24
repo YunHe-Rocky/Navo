@@ -24,6 +24,15 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "rec
 export type NetworkHealthState = "unknown" | "checking" | "healthy" | "degraded" | "unavailable";
 export type IconState = "default" | "airport" | "proxy" | "error";
 
+export interface StartupSettings {
+  supported: boolean;
+  enabled: boolean;
+  mode: Extract<CaptureMode, "system_proxy" | "tun">;
+  registered: boolean;
+  last_error: string;
+  checked_at: string;
+}
+
 export type RecoveryState = "idle" | "detected" | "repairing" | "verifying" | "failover" | "recovered" | "failed";
 
 export interface RecoveryEvidence {
@@ -124,7 +133,102 @@ export interface MetricsStatus {
 	traffic_sampled_at: string;
 }
 
+export type NetworkOwnership = "none" | "navo" | "external" | "unknown";
+export type NetworkFindingSeverity = "info" | "warning" | "error";
+
+export interface NetworkEnvironmentFinding {
+  code: string;
+  severity: NetworkFindingSeverity;
+  domain: string;
+  summary: string;
+  detail?: string;
+  ownership: NetworkOwnership;
+  recoverable: boolean;
+  transitional: boolean;
+}
+
+export interface NetworkResourceSnapshot {
+  known: boolean;
+  coherent: boolean;
+  owned_count: number;
+  existing_count: number;
+  missing_count: number;
+  conflict_count: number;
+  last_error?: string;
+}
+
+export interface NetworkEnvironmentSnapshot {
+  version: number;
+  collected_at: string;
+  health: NetworkHealthState;
+  stale: boolean;
+  partial: boolean;
+  transition: {
+    busy: boolean;
+    id?: string;
+    operation?: string;
+    phase?: string;
+    fault_domain?: string;
+  };
+  capture: {
+    state: string;
+    desired_mode: CaptureMode;
+    committed_mode: CaptureMode;
+    fault_id?: string;
+    readiness_state?: string;
+    readiness_error?: string;
+  };
+  physical: {
+    known: boolean;
+    available: boolean;
+    active_interfaces?: string[];
+    last_error?: string;
+  };
+  system_proxy: {
+    enabled: boolean;
+    proxy_server?: string;
+    ownership: NetworkOwnership;
+    owned_by_navo: boolean;
+    ownership_marker: boolean;
+    ownership_lost: boolean;
+    local_endpoint: boolean;
+    reachable: boolean;
+    reachable_known: boolean;
+    last_error?: string;
+  };
+  tun: {
+    expected: boolean;
+    navo: {
+      present: boolean;
+      enabled: boolean;
+      name?: string;
+      state?: string;
+      ownership: NetworkOwnership;
+      last_error?: string;
+    };
+    external_present: boolean;
+    external?: Array<{ name: string; interface_index?: number; state?: string }>;
+  };
+  dns: NetworkResourceSnapshot;
+  routes: NetworkResourceSnapshot;
+  nrpt: NetworkResourceSnapshot;
+  firewall: NetworkResourceSnapshot;
+  journal: {
+    present: boolean;
+    dirty: boolean;
+    owned_resources: number;
+    preexisting_resources: number;
+    pending_actions: number;
+    missing_resources: number;
+    conflicting_resources: number;
+    last_error?: string;
+  };
+  findings: NetworkEnvironmentFinding[];
+  observation_errors?: string[];
+}
+
 export interface Dashboard {
+  environment?: NetworkEnvironmentSnapshot;
   core: CoreStatus;
   cores: CoreOption[];
   proxy: { enabled: boolean; server: string; port: number };

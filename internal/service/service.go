@@ -644,6 +644,8 @@ func (s *Service) dispatchUncached(ctx context.Context, msg map[string]interface
 		return s.handleIPCheck(requestID)
 	case "network.recover":
 		return s.handleNetworkRecover(ctx, requestID)
+	case "network.observe":
+		return s.handleNetworkObserve(ctx, requestID)
 	case "diagnostics.export":
 		return s.handleDiagnosticsExport(ctx, requestID)
 	case "core.log.tail":

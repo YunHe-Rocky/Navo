@@ -87,8 +87,10 @@ func logStringList(value any) []string {
 
 func logServiceForMethod(method string) string {
 	switch {
-	case strings.HasPrefix(method, "tun."), strings.HasPrefix(method, "capture."), strings.HasPrefix(method, "network."):
+	case strings.HasPrefix(method, "tun."):
 		return "TUN"
+	case strings.HasPrefix(method, "capture."), strings.HasPrefix(method, "network."):
+		return "Capture"
 	case strings.HasPrefix(method, "subscription."):
 		return "Subscription"
 	case strings.HasPrefix(method, "ip."):

@@ -26,8 +26,10 @@ import (
 	"navo/internal/connection"
 	"navo/internal/domain/capture"
 	"navo/internal/logstore"
+	"navo/internal/networkenv"
 	"navo/internal/pipe"
 	"navo/internal/selfheal"
+	"navo/internal/startup"
 )
 
 const (
@@ -59,27 +61,33 @@ type Config struct {
 	CaptureRouteProbeFn      func(context.Context, capture.Mode, string) error
 	CoreUpdateSessionTimeout time.Duration // optional bounded mutation window; defaults to four minutes
 	ProxyManager             *systemproxy.Manager
+	StartupController        startup.Controller
+	StartupLaunch            bool
 }
 
 // Agent is the user-session agent.
 type Agent struct {
-	cfg        Config
-	proxy      *systemproxy.Manager
-	proxyProbe func(context.Context, string) error
+	cfg          Config
+	proxy        *systemproxy.Manager
+	proxyProbe   func(context.Context, string) error
+	currentProxy func() (systemproxy.ProxyConfig, error)
 
-	serviceCh         *pipe.Channel // connection to service
-	serviceMu         sync.Mutex    // serializes request/response pairs on serviceCh
-	serviceSession    string        // isolates Service replay IDs from UI request IDs
-	serviceSeq        atomic.Uint64
-	captureStateMu    sync.RWMutex
-	captureState      capture.Snapshot
-	captureJournal    *capture.JournalStore
-	captureProbe      func(context.Context, capture.Mode) error
-	captureRouteProbe func(context.Context, capture.Mode, string) error
-	uiListener        pipe.Listener // listener for UI connections
-	coordinator       *connection.Coordinator
-	recoveryMu        sync.RWMutex
-	recoveryReport    selfheal.RecoveryReport
+	serviceCh            *pipe.Channel // connection to service
+	serviceMu            sync.Mutex    // serializes request/response pairs on serviceCh
+	serviceSession       string        // isolates Service replay IDs from UI request IDs
+	serviceSeq           atomic.Uint64
+	captureStateMu       sync.RWMutex
+	captureState         capture.Snapshot
+	captureJournal       *capture.JournalStore
+	captureProbe         func(context.Context, capture.Mode) error
+	captureRouteProbe    func(context.Context, capture.Mode, string) error
+	uiListener           pipe.Listener // listener for UI connections
+	coordinator          *connection.Coordinator
+	recoveryMu           sync.RWMutex
+	recoveryReport       selfheal.RecoveryReport
+	environmentStore     *networkenv.Store
+	environmentRefresh   chan struct{}
+	environmentRefreshMu sync.Mutex
 
 	coreUpdateMu      sync.Mutex
 	coreUpdateSession *coreUpdateSession
@@ -125,12 +133,15 @@ func New(cfg Config) (*Agent, error) {
 		proxyManager = systemproxy.NewManager()
 	}
 	agent := &Agent{
-		cfg:            cfg,
-		proxy:          proxyManager,
-		proxyProbe:     proxyProbe,
-		serviceSession: hex.EncodeToString(serviceSessionBytes),
-		coordinator:    connection.NewCoordinator(),
-		stopCh:         make(chan struct{}),
+		cfg:                cfg,
+		proxy:              proxyManager,
+		proxyProbe:         proxyProbe,
+		currentProxy:       systemproxy.CurrentConfig,
+		environmentStore:   networkenv.NewStore(),
+		environmentRefresh: make(chan struct{}, 1),
+		serviceSession:     hex.EncodeToString(serviceSessionBytes),
+		coordinator:        connection.NewCoordinator(),
+		stopCh:             make(chan struct{}),
 	}
 	agent.initializeCaptureState()
 	return agent, nil
@@ -175,7 +186,16 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err := a.recoverCaptureOnStartup(ctx); err != nil {
 		log.Printf("[agent] capture startup recovery: %v", err)
 	}
+	if a.cfg.StartupLaunch {
+		startupCtx, startupCancel := context.WithTimeout(ctx, captureIPCRequestTimeout)
+		if err := a.restoreStartupConnection(startupCtx); err != nil {
+			log.Printf("[agent] login startup connection failed: %v", err)
+		}
+		startupCancel()
+	}
 	go a.monitorCaptureHealth(ctx)
+	a.refreshEnvironment(ctx)
+	go a.monitorEnvironment(ctx)
 
 	// Wait for stop
 	select {
@@ -591,7 +611,7 @@ func agentIPCRequestTimeout(msg map[string]interface{}) time.Duration {
 	case "core.select", "core.update.begin", "core.update.commit", "core.update.rollback",
 		"core.update.stop", "core.update.start":
 		return coreSwitchIPCRequestTimeout
-	case "capture.set", "capture.verify", "capture.prepare", "tun.enable", "proxy.enable", "proxy.disable", "proxy.toggle", "network.recover",
+	case "capture.set", "capture.verify", "capture.prepare", "tun.enable", "proxy.enable", "proxy.disable", "proxy.toggle", "network.recover", "environment.repair",
 		"runtime.mode.set", "runtime.rules.set", "runtime.list_mode.set",
 		"outbound.select", "outbound.create", "outbound.delete",
 		"subscription.add", "subscription.remove", "subscription.refresh":
@@ -648,6 +668,12 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 		return a.handleConnectionRestart(ctx, requestID)
 	case "network.recover":
 		return a.handleNetworkRecover(ctx, requestID)
+	case "environment.repair":
+		return a.handleEnvironmentRepair(ctx, requestID, msg)
+	case "startup.status":
+		return a.handleStartupStatus(ctx, requestID)
+	case "startup.set":
+		return a.handleStartupSet(ctx, requestID, msg)
 	case "capture.set":
 		return a.setCaptureModeContext(ctx, requestID, msg)
 	case "core.select":

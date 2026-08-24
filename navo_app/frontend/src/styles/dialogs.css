@@ -1,0 +1,53 @@
+.close-dialog-backdrop {
+  position: fixed;
+  z-index: 2000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 3, 10, .62);
+  backdrop-filter: blur(10px);
+}
+.close-dialog {
+  width: min(520px, 100%);
+  padding: 22px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-fill);
+  box-shadow: var(--panel-shadow-strong);
+}
+.close-dialog-heading { display: flex; align-items: center; gap: 13px; }
+.close-dialog-heading h2 { margin: 3px 0 0; }
+.close-dialog > p { margin: 16px 0; color: var(--text-muted); font-size: 12px; line-height: 1.65; }
+.close-action-options { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.close-action-options legend { margin-bottom: 8px; color: var(--text-dim); font: 650 9px/1.4 "Cascadia Code", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.close-action-options label,
+.remember-close-action {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-height: 64px;
+  padding: 11px 13px;
+  border: 2px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  cursor: pointer;
+  transition: color var(--motion), border-color var(--motion), background var(--motion), box-shadow var(--motion);
+}
+.close-action-options label:hover { border-color: var(--text-dim); }
+.close-action-options label.selected { border-color: var(--selection-border); background: var(--selection-fill); box-shadow: var(--selection-shadow); }
+.close-action-options input,
+.remember-close-action input { width: 18px; height: 18px; margin: 0; accent-color: var(--motion-accent); }
+.close-action-options strong,
+.close-action-options small,
+.remember-close-action strong,
+.remember-close-action small { display: block; }
+.close-action-options strong,
+.remember-close-action strong { color: var(--text); font-size: 12px; }
+.close-action-options small,
+.remember-close-action small { margin-top: 4px; color: var(--text-dim); font-size: 10px; line-height: 1.45; }
+.remember-close-action { min-height: 56px; margin-top: 12px; border-style: dashed; }
+.close-dialog .close-dialog-error { margin: 12px 0 0; color: var(--red); }
+.close-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.close-dialog-actions button { min-width: 112px; }

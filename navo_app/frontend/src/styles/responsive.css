@@ -1,0 +1,76 @@
+@media (max-width: 1120px) {
+  .app-shell { grid-template-columns: 214px minmax(0, 1fr); }
+  .overview-grid { grid-template-columns: 1fr 1fr; }
+  .recovery-evidence-grid { grid-template-columns: 1fr 1fr; }
+  .risk-card { grid-column: 1 / -1; min-height: auto; }
+  .monitor-grid { grid-template-columns: 1fr; }
+  .runtime-strip { grid-template-columns: repeat(3, 1fr); }
+  .core-grid, .subscription-summary { grid-template-columns: 1fr 1fr; }
+  .table-head { display: none; }
+  .route-row { grid-template-columns: minmax(140px, 1fr) 70px minmax(150px, 1fr) 80px; }
+  .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .icon-preview-grid { grid-template-columns: 1fr 1fr; }
+  .diagnostics-grid { grid-template-columns: 1fr; }
+	.routing-policy-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.mode-entry-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .app-shell { grid-template-columns: 72px minmax(0, 1fr); }
+  .brand { justify-content: center; padding-inline: 0; }
+  .brand > div, .sidebar nav button > span, .nav-group > h2 { display: none; }
+  .sidebar nav button { justify-content: center; padding: 0; }
+  .sidebar nav button svg { width: 20px; height: 20px; }
+  .service-state > div { display: none; }
+  .service-state { justify-content: center; }
+  .page-content { padding-inline: 16px; }
+  header { padding-inline: 16px; }
+  .overview-grid, .connection-layout, .ip-detail-grid, .risk-panel { grid-template-columns: 1fr; }
+  .recovery-progress-grid { grid-template-columns: 1fr; }
+  .connection-source-scope, .source-management-card { align-items: stretch; flex-direction: column; }
+  .connection-source-scope .source-tabs { width: 100%; min-width: 0; }
+  .risk-card { grid-column: auto; }
+  .metric-hero { grid-template-columns: 1fr 1fr; }
+  .core-grid { grid-template-columns: 1fr; }
+  .runtime-strip { grid-template-columns: 1fr 1fr; }
+  .risk-signals { grid-template-columns: 1fr 1fr; }
+  .benchmark-values { grid-template-columns: 1fr 1fr; }
+  .settings-runtime { grid-template-columns: 1fr 1fr; }
+  .startup-settings-card { grid-template-columns: 1fr 1fr; align-items: start; }
+	.latency-metrics { grid-template-columns: 1fr 1fr; }
+	.traffic-simulation-card { align-items: stretch; flex-direction: column; }
+	.simulation-controls { justify-content: flex-start; }
+	.control-axis { grid-template-columns: 1fr; gap: 10px; }
+	.route-config-card { grid-template-columns: 1fr; }
+	.route-config-card > .card-label, .route-config-card > .capability-note { grid-column: auto; }
+	.traffic-control-heading, .routing-rule-actions { align-items: stretch; flex-direction: column; }
+	.traffic-control-heading .traffic-control-actions { width: 100%; justify-content: stretch; }
+	.traffic-control-heading .secondary, .routing-rule-actions .primary { flex: 1; width: 100%; }
+}
+
+@media (max-width: 560px) {
+	.startup-settings-card { grid-template-columns: 1fr; }
+	.capture-method-options, .mode-entry-options, .routing-policy-options { grid-template-columns: 1fr; }
+	.routing-rule-heading { align-items: flex-start; flex-direction: column; }
+	.routing-list-grid { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+:root[data-theme="day"] body::before { display: none; }
+:root[data-theme="day"] .sidebar nav button.active svg { color: var(--cyan); }
+:root[data-theme="day"] header { backdrop-filter: none; }
+:root[data-theme="day"] .primary { box-shadow: var(--panel-shadow); }
+:root[data-theme="day"] .text-button { color: #b84000; border-color: transparent; background: transparent; box-shadow: none; }
+:root[data-theme="day"] .text-button:hover:not(:disabled) { color: #111; background: transparent; }
+:root[data-theme="day"] .panel-title > i { border-color: #111; box-shadow: 3px 3px 0 #111; }
+:root[data-theme="day"] .log-view code { color: #202020; }
+:root[data-theme="day"] .log-view span { color: #8b4e2a; }
+:root[data-theme="day"] .log-view > div:not(.empty-state):hover { background: #ffe6d2; }
+:root[data-theme="day"] .protocol { color: #111; border-color: #111; background: #ffe0cc; }
+:root[data-theme="day"] .activity-progress { border-bottom: 2px solid #111; background: var(--motion-surface); box-shadow: 0 5px 0 var(--motion-accent); }
+:root[data-theme="day"] .activity-progress > i { border: 2px solid #111; }
+:root[data-theme="day"] .capture-modal { color: #111; border-color: #111; background: #fff; box-shadow: 9px 9px 0 var(--cyan); }
+:root[data-theme="day"] .capture-modal-backdrop { background: rgba(245,239,229,.84); backdrop-filter: none; }

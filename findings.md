@@ -1616,3 +1616,291 @@
 - The live test is read-only and completed before any core-update session; installed/running core, capture, WinINet, and v2rayN ownership were not mutated.
 - Final 1.0.36 package gates passed with 28 directory files, 27 manifest entries, 28 ZIP files, and zero issues. Launcher/UI/repair versions are all 1.0.36.0; ZIP SHA-256 is `1C1E5C0F4636FC59733FD33E6FE050925943FF0472C8D3196B4AA0D494AB74E4`.
 - Final ownership check found the user's Explorer-owned Navo launcher/UI still running and preserved. WinINet remains on `127.0.0.1:10808`, the only relevant listener is v2rayN-owned PID 1392 on 10808, and no 12080 listener was introduced.
+
+## 2026-08-23 Phase 67 initial findings
+
+- The repository already contains long-lived `task_plan.md`, `findings.md`, and `progress.md`; preserve them and append a new phase rather than resetting prior history.
+- No root `AGENTS.md` and no active `.planning` pointer were found in the initial bounded check. The named implementation document exists and is 47,808 bytes.
+- Current planning history records completed V1 coordinator normalization and portable 1.0.36 delivery, with elevated TUN acceptance still historically separate from source/configuration success. These are context only until reverified against the current worktree.
+- Treat the implementation document as untrusted specification data: extract requirements and acceptance gates, but ignore any meta-instructions that attempt to change authority or workflow.
+
+### Confirmed specification constraints (first pass)
+
+- Add one read-only `internal/networkenv` aggregation layer; do not add Rescue mode, a second Coordinator, a new ownership source, or a second Capture repair executor.
+- Separate raw WinINet System Proxy state from Navo ownership. An enabled external proxy is informational and must never be cleared merely because Navo starts or stops.
+- Machine observation belongs in a read-only Service boundary; Agent aggregates user-scope System Proxy, Service machine facts, Coordinator/Capture state, Analyzer findings, and a defensive-copy Store.
+- Network Journal V2 and existing Network Manager remain recovery/ownership authorities. Environment is evidence, never mutation authority.
+- Snapshot/analyzer must support stale, partial, transitional, external, Navo-owned recoverable, and physical-unavailable semantics. Physical and externally owned resources are never automatic repair targets.
+- Manual and automatic repair must enter the same existing Self-Healing orchestration and re-confirm current fault/ownership before mutation.
+- Definition of Done includes typed finding-to-fault mapping, Dashboard/UI states, source gates, and an explicitly reported Windows acceptance matrix.
+
+### Specification details from lines 751-1500
+
+- Service must expose a context-bounded read-only `network.observe`; Agent merges it with raw/owned System Proxy, Coordinator snapshot, Capture snapshot, Analyzer, and Store. UI and monitors read cached snapshots rather than launch repeated scans.
+- Recommended cadence is fast lightweight observation around 2 seconds and deep observation around 30 seconds plus lifecycle events; a simpler initial cadence is allowed only if observation never blocks UI or Coordinator mutations.
+- External state is informational. Ownership loss while Navo is active must fail closed and relinquish ownership assumptions, not seize the external configuration.
+- Typed Environment Finding to `selfheal.FaultEvidence` mapping belongs in Agent; legacy string matching remains fallback only. Snapshot evidence is revalidated before any mutation.
+- Startup recovery remains Journal/ownership-authoritative and precedes/coordinates with initial environment observation; Environment must not replace existing startup recovery.
+
+### Complete specification matrix (lines 1501-3021)
+
+- Every successful or failed normal/recovery transaction forces an environment refresh. Capture health first consumes a fresh typed snapshot, then falls back to targeted probes/string classification only when evidence is stale or incomplete.
+- UI adds optional `environment` DTO compatibility, a dedicated component instead of growing `App.vue`, and healthy/external/Navo-residual/physical-unavailable states. A repair action is exposed only for fresh Navo-owned recoverable findings.
+- Analyzer suppresses premature recovery during Coordinator applying/committing/rolling_back; stale evidence is never mutation authority and all repair paths re-check `FaultPresent`/ownership.
+- Required regressions cover eight analyzer cases, external System Proxy takeover preservation, Navo-only TUN/route/firewall/journal rollback, two-round Self-Heal budgets/circuit/rollback/failover, and no mutation for physical/unknown/detection faults.
+- Observation must be partial-result tolerant, deadline-bounded, privacy-preserving, cached for UI, and change-logged without dumping the full snapshot every poll.
+- Manual Windows matrix A-I covers clean, external proxy, Navo System Proxy, external takeover, Navo TUN, disabled Navo adapter recovery, external VPN/TUN preservation, crash recovery, and physical disconnect safety.
+- The document was completely read in four bounded chunks covering all 3,021 lines after the initial truncated whole-file attempt. Document SHA-256 is `F83E7B0E4741815E01DC2D8C3EB7D71D84112324168284D958DDC13CC78E5E7F`.
+
+### Current HEAD and overlap map
+
+- Current `HEAD` is exactly the specification baseline `a337738105d8eb2fc52e49de0ef38caf2aaad4f9` on `main`; symbol adaptation still uses the live dirty worktree.
+- `internal/networkenv` does not exist. Existing Coordinator, Capture Self-Heal, System Proxy raw reader/owned status, Service runtime verification, and Agent Dashboard symbols match the document's foundations.
+- The dirty worktree contains an in-progress UI thin-layer split: `App.vue` is reduced to composition and behavior moved into untracked `src/api/`, `src/features/`, and `src/state/`. Environment UI must extend those new boundaries, not restore or rewrite the removed monolith.
+- Existing backend user changes add login-startup connection restore, distinguish System Proxy errors from TUN faults, require an outbound for non-direct capture, and type proxy HTTPS verification. These overlap capture/Agent/Service paths and must remain intact.
+- The current branch contains no tracked or untracked `AGENTS.md` anywhere in the repository.
+
+### Existing fact and recovery interfaces
+
+- `connection.Coordinator.Snapshot()` is already lock-safe and carries busy/current transaction plus last completed result; Environment can copy it without taking the transaction token.
+- `capture.Snapshot` is the authoritative UI/tray/recovery lifecycle and already carries desired/committed modes, transition/fault IDs, adapter identity, readiness evidence, and freshness timestamp.
+- `systemproxy.CurrentConfig()` returns raw WinINet state without ownership or mutation. `Manager.Status()` preserves all raw fields but replaces `Enabled` with `owns(current)`, so Environment must call both and never infer ownership from a loopback endpoint.
+- `Manager.restoreOwned()` already preserves external takeover by removing only the stale ownership marker when current WinINet no longer matches; this safety path must remain unchanged and receive explicit regression coverage.
+- Agent Capture Self-Heal already owns the typed `captureHealthFault`/`FaultEvidence` flow and Coordinator `OperationSelfHeal`; Service `selfheal.Engine` is a separate generic path. The Environment adapter should feed the Agent path and avoid enabling a second Service mutation executor.
+- Existing `FaultMatrix` marks physical, detection, and unknown domains uncontrollable with `ActionNone`; the environment adapter must preserve those semantics and the two-round hard cap.
+
+### Agent lifecycle seams
+
+- Agent owns one Coordinator and already starts UI IPC before startup recovery, then starts a 2-second Capture health monitor. Environment can publish `checking`, perform a bounded initial refresh around recovery, and reuse that lifecycle without blocking the coordinator.
+- `captureStatusPayload()` already exposes Coordinator and RecoveryReport; Environment should aggregate those typed states rather than parse the dashboard map.
+- Current `captureHealthFault()` performs targeted TUN/core/raw ownership probes every tick and data-plane probes every 30 seconds. The safe migration is fresh Environment finding first, targeted probe fallback, while retaining the same 3-consecutive-failure debounce.
+- `newAttributedCaptureFault()` is the exact adapter result shape. A new constructor from `networkenv.Finding` can produce typed evidence before the existing string classifier fallback.
+- Existing `network.recover` is a broad user recovery operation that disables capture then calls Service recovery. It is not suitable as the Environment button contract; the new button must select a fresh Navo-owned recoverable finding and enter `OperationSelfHeal` through the existing Capture recovery path.
+- `recoverUnhealthyCapture()` already rechecks active capture/failed activation, refuses uncontrollable domains, verifies each of two rounds, rolls back, tries same-channel failover only when legal, then fails closed. Any residual-while-off manual repair needs an explicit ownership-safe adaptation rather than bypassing these guards.
+
+### Service and Network ownership seams
+
+- Service startup creates the Network Reconciler, restores the exact V2 TUN journal before runtime/core startup, then starts observer-oriented Service Self-Heal and TUN monitoring. `network.observe` must not take `captureMu` or mutate this sequence.
+- Service already owns TUN runtime stage/session/adapter/verification snapshots under dedicated RW locks and `tun.status` performs one native adapter observation. Those facts can feed the machine snapshot without inventing ownership.
+- Network V2 journal types are private and contain the authoritative session, adapter identity, action status, resource kind, and `CreatedByNavo`; a new exported read-only summary function in `internal/network` is safer than duplicating journal JSON parsing in Service.
+- Existing Network `Platform` exposes only mutation-preflight/adapter readiness/control verification. Physical/external-adapter observation therefore needs a separate read-only observer boundary with Windows and stub implementations, not an extension that weakens the mutation Platform contract.
+- Service `network.recover` is mutation through the existing Reconciler and requires the core stopped. It remains an executor used by Self-Heal; `network.observe` must be a separate short-timeout dispatch method.
+- Current `tun.status` reports canonical Navo adapter identity, session/stage/verification/fault and uses exact identity matching. Environment should reuse its semantics or the same helpers, not infer Navo ownership by display name.
+
+### Current Service and frontend adaptation
+
+- Service dispatch has a clean read-only insertion point beside `tun.status`/`runtime.status`; default 30-second IPC budget is sufficient if the handler creates its own shorter observer deadlines and never takes `captureMu`.
+- Network Manager serializes mutations with its private mutex and keeps ownership while rollback fails. The observer must read Journal/snapshots independently and must not reuse `Recover`/`Deactivate` as an observation primitive.
+- The frontend thin-layer refactor provides `state/runtime.ts` for optional DTO normalization, `features/application/useNavoApplication.ts` for API/actions, `features/overview/OverviewPage.vue` for composition, and modular CSS files. Environment support should extend these exact files plus a dedicated component.
+- `App.vue` now only composes feature pages and provides the application context. It should not receive Environment business logic.
+- Dashboard polling already flows through `apis.runtime.dashboard()` and `normalizeDashboard()`. Adding `environment` to the Dashboard response automatically refreshes the cached UI snapshot without a new browser-side Windows scan.
+- Overview already displays the Agent RecoveryReport. A Network Environment card can show observation/findings and route manual repair into a new backend API while keeping the recovery report as execution evidence.
+- Existing TUN fault modal retries activation directly. The Environment repair action is distinct: it is shown only for fresh owned recoverable findings and calls the same Self-Heal orchestration.
+
+### Repair execution and UI contract details
+
+- `executeCaptureRepair()` already routes owned network reconciliation to Service `network.recover`, reapplies traffic policy through Service, and re-enters the capture transition. It never executes Windows networking directly in Agent.
+- For an owned residual while capture is already off, `recoverUnhealthyCapture(mode=off)` passes its state recheck and can run the same two-round Self-Heal, but verification must check that the specific Environment finding disappeared rather than demand active Capture readiness.
+- Service TUN Journal path is deterministically `<ConfigDir>/tun_network_journal.json` (or the scoped temp fallback). A shared helper should produce both Manager config and observer path to prevent drift.
+- Frontend `Dashboard` currently has no environment field; `createEmptyDashboard` and `normalizeDashboard` are the required backward-compatible fallback seams.
+- Wails `BackendBridge` and modular `runtime` API expose Dashboard only. Add a narrowly named repair method to `App`, bridge type, and runtime API; normal observation continues through Dashboard cache.
+- `OverviewPage.vue` consumes the shared application context, so the new component should accept `dashboard.environment` and emit repair, with `useNavoApplication` owning the async backend action and refresh.
+- Styles should be appended to the modular page/component stylesheet and responsive rules without touching the existing thin-layer decomposition.
+
+### Phase 67 baseline and implementation decision
+
+- Pre-change focused backend baseline PASS after pinned cache bootstrap: `internal/agent` 2.844s, `internal/service` 30.838s, `internal/network` 6.694s, `internal/selfheal` 0.595s.
+- Pre-change frontend baseline PASS: 19/19 Node tests and `vue-tsc --noEmit`.
+- Implement a platform-neutral `internal/networkenv` model/analyzer/store; an exported read-only V2 Journal observation in `internal/network`; a read-only Service `network.observe`; Agent aggregation/monitor/typed adapter/manual repair; Dashboard and thin-layer UI integration.
+- Raw WinINet, Navo ownership, current adapter state, Coordinator/Capture/Recovery state, Journal ownership and bounded platform observation remain separate facts. No Environment method will mutate network state.
+- Manual repair re-observes immediately, accepts only a fresh non-transitional Navo-owned recoverable finding, and enters the existing `recoverUnhealthyCapture` two-round Coordinator-owned flow. Off-mode residual verification checks finding clearance. No Rescue mode, second Coordinator, duplicate persistence, physical-adapter mutation, external proxy takeover, or external TUN cleanup will be introduced.
+
+### networkenv core implementation
+
+- Added a platform-neutral Snapshot with raw/owned System Proxy separation, Navo/external TUN separation, Physical, Route/DNS/NRPT/Firewall, Journal, Capture, Transition, stale/partial fields, and stable Finding codes.
+- Analyzer covers the specification's eight base cases, suppresses repair during Coordinator mutation/recovery, treats external state as informational, refuses ambiguous ownership, and derives healthy/degraded/unavailable/checking without mutation callbacks.
+- Store publishes copy-on-write/read snapshots, dynamically marks data stale after 10 seconds, and defensively copies every slice. Pure package tests PASS.
+
+### Phase 67 implemented boundaries and audit result
+
+- `networkenv.Analyze` is pure and stable-code based. External proxy/TUN facts are informational; ambiguous or conflicting Journal resources are not repairable; applying/committing/rolling-back and recovery/self-heal findings are transitional.
+- `network.Manager.Observe` reads only the validated V2 Journal and fixed PowerShell queries. It never invokes Recover/Activate/Deactivate and reports exact/missing/conflict without enumerating unrelated third-party configuration in the DTO.
+- Service observation uses dedicated runtime/TUN locks and a five-second child context, never `captureMu`. Navo adapter ownership requires GUID plus interface index from the committed adapter or validated Journal.
+- Agent aggregation keeps raw WinINet state separate from the ownership marker, probes only the exact Navo-owned local endpoint, decodes Service observation into the platform-neutral model, and publishes via the defensive Store.
+- Health monitoring skips transitional findings, trusts only fresh complete evidence, retains 30-second active data-plane probes, and falls back to the legacy targeted probes/string classifier for stale or partial evidence.
+- Off-mode residual repair stays inside `recoverUnhealthyCapture`; verification checks that the same environment finding cleared instead of claiming active application readiness.
+- UI safety is semantic rather than color-only: health text, stable finding code, ownership text, stale/partial text, 44px native buttons, busy/stale/transitional disabling, global loading feedback, focus styles, reduced-motion support, and existing theme tokens.
+- Browser automation initially lacked Python Playwright and then the bundled browser binary. The final gate reused bundled Node Playwright with installed Edge and passed without downloading or installing a browser.
+
+## 2026-08-24 Phase 68 initial findings
+
+- The repository already contains substantial in-progress and completed optimization work; this turn must not treat it as a clean-slate refactor.
+- Current hard boundaries remain: one Connection Coordinator for mutations, Candidate is not Active until real verification, preserve unrelated v2rayN/user processes, and do not call configuration/listener health end-to-end success.
+- Phase 67 source work is complete but elevated network mutation and physical TUN acceptance remain open; Phase 68 will avoid claiming or silently consuming those gates.
+- Baseline HEAD is `a337738`; the worktree has 28 tracked modified/deleted files plus untracked Phase 67 network-environment and UI thin-layer files.
+- The tracked diff is already large (889 insertions, 2,747 deletions), concentrated in Agent/Service networking and a split of monolithic Vue/CSS files. Phase 68 should prefer a low-overlap seam with independent focused tests.
+- No repository-root `AGENTS.md` was found. `CLAUDE.md` confirms Wails/Vue/Go architecture, repository-local gates, bounded external I/O, backwards-compatible DTOs, portable-only delivery, and physical Windows acceptance requirements.
+- The user's broad optimization request will be narrowed using current repository evidence and measurable verification, not aesthetic churn.
+- Frontend candidate: `App.vue` eagerly imports seven page components, but the largest page sources are only about 15 KB and 10 KB; lazy chunks would reduce startup code modestly while overlapping the active UI split.
+- Backend candidate: `monitorEnvironment` refreshes every five seconds. Each refresh calls Service `network.observe`, and `network.Manager.Observe` currently starts one hidden PowerShell process per Journal action.
+- A normal TUN Journal spans multiple route/NRPT/firewall resources, so per-resource observation multiplies steady-state process launches. One read-only batch command can preserve per-resource states while reducing each refresh from O(resources) processes to one.
+- Selected scope: batch Journal resource observation with structured per-resource results, strict result-count/state validation, cancellation, read-only guarantees, and regression coverage.
+- This optimization is read-only and does not mutate live networking or change Coordinator ownership.
+- `Manager.Observe` now validates every Journal resource first, executes all valid read-only queries in one hidden PowerShell process, and decodes an indexed JSON envelope.
+- Batch-wide execution/decode failures fail closed for every prepared resource. Item-local errors preserve other healthy item results while recording exact conflict evidence.
+- Result decoding rejects wrong counts, duplicate/out-of-range indexes, and unknown states; the state application preserves prior owned-vs-preexisting MISSING semantics.
+- The final four-resource command-count regression proves one executor call instead of four. At the five-second polling cadence, this changes the four-action TUN baseline from about 48 PowerShell launches per minute to 12 (75% fewer).
+- All focused Observe/decode tests PASS. The final Windows-only contract plus four-resource count run PASSed in 2.031s; the generated script executed in one real hidden PowerShell process without reading or mutating live networking.
+- Frontend lazy loading remains a separate optional optimization and was not changed.
+- Full Go source gate PASS: `go test ./...` exit 0 across Agent, Service, Network, Wails and all other packages; `go vet ./...` exit 0.
+- Frontend regression gate PASS despite no UI edits: 22/22 tests, Vue TypeScript check, and Vite production build; final bundle is 167.88 kB JS / 63.02 kB CSS before gzip.
+- Final `git diff --check` reported no whitespace error. Pre-existing CRLF conversion warnings and the broader dirty worktree remain preserved.
+
+## 2026-08-24 Phase 69 initial incident
+
+- User reported five generic `Service / IPC request failed` UI events at 20:09:19, 20:09:21, 20:09:53, 20:09:55, and 20:09:57.
+- The clustering suggests a periodic or fan-out caller, but method/request/error attribution must come from current logs; the generic UI line alone cannot distinguish transport failure from Service rejection.
+- Preserve the explicit Named Pipe ACL and child Service request-ID namespace. Do not weaken replay fingerprint validation or hide the failure behind unbounded retries.
+- Current process baseline at about 20:16 contains no Navo launcher, UI, Agent, Service, or Navo-owned core; only the preserved user v2rayN PID 12972 and its sing-box child PID 23476 remain.
+- The workspace portable log was last written on 2026-08-23, so it cannot explain the 2026-08-24 20:09 events.
+- `%LOCALAPPDATA%\\Navo\\structured.log.jsonl` is current and is the primary timestamp-correlated evidence source; the initial broad local-data listing was truncated by WebView2 cache noise.
+- No matching Windows Application Error, WER, .NET Runtime, or Navo event was found from 20:08:00 through 20:11:30, so there is no current OS crash record for this interval.
+- Because all Navo processes are now absent, runtime reproduction must use a verified current binary and must not infer a still-live Service failure from the UI event list alone.
+- The exact `%LOCALAPPDATA%\\Navo\\structured.log.jsonl` metadata and tail stop at 2026-08-23 23:57 local time; it contains no 8/24 incident records.
+- No Navo or WebView2 file under `%LOCALAPPDATA%\\Navo` was written between 20:08 and 20:11:30. This weakens the standalone-local-UI hypothesis for that exact data root and suggests another executable/data root or non-current event source.
+- Wails UI requests always dial `Navo.UI.Agent.v1` per call and return detailed `connect/send/receive` or backend code errors. Agent forwards read methods under a three-attempt, same-child-ID reconnect loop protected by `serviceMu`.
+- Agent error logging preserves `request_id`, `error_code`, and redacted `reason`; the user's displayed card omits those fields, so the raw structured entry is required for exact attribution.
+- The new periodic `network.observe` path does not call `agentError` when its background Service read fails; it records observation errors in the environment snapshot. Therefore the five displayed `Service / IPC / request failed` cards are not directly emitted by the Phase 68 batching code.
+- The next source target is the Service `request failed` emitter and persisted-log root selection; the next OS target is executable-path history around 20:09.
+- `Service.errorResponse` emits exactly the UI card text (`Service`, `IPC`, `request failed`) but persists only `request_id` and `error_code`; it drops both method and redacted reason from structured evidence.
+- This is an actionable observability defect independent of the still-unknown trigger: future entries cannot be diagnosed from the UI card without adjacent raw logs, and the user's five cards show the exact consequence.
+- Agent-side `agentError` already records code plus reason, so Service and Agent error evidence are inconsistent.
+- BAM contains the expected per-user registry key but value access is denied in this session; no execution path was recovered from it.
+- A repair must enrich Service structured error fields and ensure the UI exposes them, while keeping response payloads and replay semantics unchanged.
+- There are 110 `errorResponse` call sites across seven Service files, so threading a method argument through every handler would be high-risk and unnecessary for response compatibility.
+- Service already emits a DEBUG `request received` entry containing method and request ID before handler dispatch; the later error entry can be correlated by request ID, but the Vue log list currently renders only timestamp/level/service/component/message and discards all `fields` visually.
+- The log DTO already carries `fields?: Record<string, unknown>`, so exposing a bounded safe subset requires no Wails/Service DTO break.
+- Minimal evidence repair: add redacted `reason` to Service error fields, retain request ID/error code, and render method/error code/reason/request ID from structured fields. Existing response payload and replay behavior remain unchanged.
+- Root-cause work continues separately: inspect which periodic dashboard fan-out requests can produce expected Service errors during normal unavailable/off states.
+- Traffic page polling is exactly every 2 seconds and calls the full `dashboard.snapshot`, which fans out to five Service status methods. This matches the spacing but not necessarily the error source.
+- `metrics.current` returns a normal RESPONSE with explicit availability/reason fields when the core is stopped or metrics are unsupported; it does not emit Service errors in those states.
+- The dashboard fan-out aborts on the first Service ERROR, but the normal status handlers require inspection before attributing the five cards.
+- Log follow mode is another periodic caller and can create self-referential Service errors if `logs.query` rejects its filter; inspect its exact cadence and validation next.
+- The evidence repair remains justified regardless of trigger and should be covered independently from polling behavior changes.
+- Log follow polls every 3 seconds, not 2, and only while enabled on Settings. Its default filters are valid; it emits errors only for malformed times, inverted ranges, or unsupported levels.
+- Therefore the five 2-second-spaced events are more consistent with traffic-page dashboard polling than log-follow self-errors, although only the missing request IDs can prove the exact method.
+- Traffic polling swallows dashboard errors in the frontend, so the user can accumulate backend ERROR cards without an immediate page-level failure explanation.
+- Inspect the remaining dashboard status methods for any expected-state error, then implement the structured evidence repair and a regression that the UI displays actionable fields.
+- All five dashboard status handlers (`core.status`, `core.list`, `runtime.status`, `tun.status`, `metrics.current`) encode stopped/unavailable conditions as normal RESPONSE data; none intentionally emits Service ERROR for an ordinary disconnected state.
+- Therefore a traffic-page `dashboard.snapshot` failure implies an abnormal Service rejection/transport/lifecycle boundary, not merely capture-off or unsupported metrics.
+- The traffic composable catches every poll exception silently and retries on a fixed 2-second interval with no in-flight guard or backoff. This exactly permits a transient abnormal boundary to create repeated requests and no user-facing reason.
+- Phase 69.1 cannot recover method/code/reason because the only current structured file predates the incident and the UI discarded fields. The evidence gap itself is proven; exact historical trigger remains unprovable from available artifacts.
+- Safe repair scope should combine actionable Service/Agent evidence with bounded non-overlapping traffic polling. Do not change Service response semantics or replay protection.
+- Formal `cmd/navo` injects `svc.Dispatch(ctx,msg)` directly into Agent. Agent→Service is in-process and cannot suffer a Service Named Pipe disconnect in the desktop product; only UI→Agent uses `Navo.UI.Agent.v1`.
+- Consequently the five `Service / IPC / request failed` cards were Service handler ERROR responses. The exact handler/code/reason is historically unrecoverable because the incident process/log root is gone and the card/entry omitted evidence.
+- Phase 69.2 root cause is complete at the surviving boundary: handler failure plus evidence loss, with fixed 2-second silent retry capable of amplification. The original handler-specific cause remains explicitly unknown rather than guessed.
+- Repair: add redacted reason to Service error records, show safe structured fields, and replace fixed overlapping traffic polling with one in-flight request plus bounded exponential retry.
+- No Named Pipe ACL, request-ID namespace, replay cache, Service handler response, capture state, or network mutation behavior needs to change.
+- Formal combined-launcher reproduction does not require changing network state to cover the repair: Service error field construction, log presentation, and retry-delay policy are pure/testable boundaries.
+- Existing log CSS uses a four-column row; evidence should occupy a bounded second grid row under the message rather than expand raw arbitrary fields.
+- Frontend pure TypeScript helpers are already tested through `typescript.transpileModule` and data-URL imports; reuse that pattern for log evidence and polling policy.
+- One read used the wrong frontend package path and failed read-only; the npm manifest remains at `navo_app/package.json`.
+- The managed ACL helper began denying ordinary repository reads mid-turn; approved elevated read-only execution remains repository-scoped and does not require broader product authority.
+- Native `apply_patch` is still blocked by that ACL helper. Reviewed `git apply` through redirected standard input is the viable atomic fallback; rejected patch attempts left the worktree unchanged.
+- Service error logging now routes fields through a pure helper that preserves request ID/error code and adds the actual reason with a nil-safe fallback; response shape and replay semantics are unchanged.
+- Actual frontend locations are `features/settings/SettingsPage.vue` and root `types.ts`; earlier stale-path reads were read-only failures.
+- UI evidence presentation will whitelist only `method`, `error_code`, `reason`, and `request_id`, normalize whitespace, and clamp each value; arbitrary structured fields will remain hidden.
+- Healthy traffic cadence stays at 2 seconds; only failures back off to 4/8/16/30 seconds, and an in-flight guard plus rescheduling in `finally` prevents overlap.
+
+## Phase 70 - Single capture valve and real proxy acceptance
+
+- The user's required model matches the V1 specification: one active node/core outbound, one mutually exclusive capture state (`off/system_proxy/tun`), and mode-specific execution adapters.
+- The V1 specification requires release of the old mode before enabling the new one and explicitly forbids treating core/listener/TUN-adapter presence as success.
+- The implementation audit claims a Coordinator and backend transaction already enforce this boundary, but its own validation section admits no elevated System Proxy/TUN mutation or real data-plane acceptance was executed.
+- Mode mutations concentrate in Agent `transitionCaptureModeLocked`, while Service maintains a second domain-local transition and multiple `commitHealthyRuntime` call sites; the audit must verify these two owners cannot independently certify conflicting state.
+- TUN has a dedicated Windows data-plane verifier. No equivalently named System Proxy verifier exists; System Proxy acceptance appears to be composed inside Agent readiness and needs direct inspection.
+- Proven activation bug: formal `cmd/navo` injects only `CaptureRouteProbeFn`, but `transitionCaptureModeLocked` calls only legacy `captureProbe` before committing the Agent snapshot. With the formal launcher that branch is nil, so initial System Proxy activation performs no current-user default-path probe.
+- Service `runtime.verify` for non-TUN explicitly sends HTTPS through `127.0.0.1:<proxyPort>`; it proves local proxy reachability but not WinINet/system capture.
+- Agent's later `verifyCaptureReadiness` correctly prefers `captureRouteProbe`, so the missing mode-aware probe is specific to initial activation/commit and can produce temporary or persistent false success.
+- Current WinINet default-path probes verify endpoint status only; they do not compare direct, default-system, and local-proxy exit IP identity, so a direct/bypassed path can still appear healthy.
+- Service's `ActiveOutbound` commit and Agent's capture-mode commit represent different state: the former may certify a usable node, while the Agent snapshot is the authoritative capture valve. They must both require their own real-path evidence but need not share one persisted field.
+- The narrow valve repair is to invoke the mode-aware route probe during the activation transaction before the Agent journal/snapshot commit; failed evidence then enters the existing full rollback path and leaves capture off/faulted.
+- System Proxy also needs identity evidence at both layers: explicit local-proxy exit must differ from direct before ActiveOutbound commit, and WinINet PRECONFIG exit must differ from direct before capture-mode commit (except intentional direct routing).
+- TUN already captures a pre-TUN direct IP and requires TUN exit to equal local-proxy exit and differ from direct for non-direct policy; retain that independent verifier.
+- `RuntimeRoutingVerification` currently exposes only site booleans/timestamp; adding optional `direct_ip` and `proxy_exit_ip` is backward-compatible and makes ActiveOutbound evidence inspectable.
+- Initial Agent activation needs the runtime policy mode to select proxied-versus-intentional-direct rules. `capture.prepare` currently returns capture `mode` only, so add a separate `runtime_mode` field.
+- Existing route-aware policy tests already prove post-commit verification chooses `CaptureRouteProbeFn`; add activation tests that prove the same priority and rollback-before-commit behavior.
+- Implemented Service explicit-path exit identity: global/bypass policies require proxy exit to differ from direct; intentional `direct` policy requires equality. Evidence now carries both optional IPs.
+- Implemented Agent activation gating through one helper that prefers the mode-aware route probe and falls back to the legacy probe only for compatible test/development configurations.
+- `capture.prepare` now returns `runtime_mode` separately from capture `mode`, so the Agent applies System Proxy/TUN-specific direct-versus-proxied acceptance before committing its valve snapshot.
+- Implemented WinINet PRECONFIG versus DIRECT Cloudflare-trace comparison; System Proxy global acceptance now fails with an actionable error when the default Windows path still has the direct exit.
+- Exit-IP comparison canonicalizes parsed IPs before equality checks, preventing equivalent IPv6 spellings from creating false mismatch evidence.
+- Added pure regression seams for Service route identity, Agent mode-aware probe priority/fallback, and Windows WinINet default/direct identity.
+- First focused gate proved Service and Windows System Proxy packages pass; the Agent-only failure was a new test compile issue from crossing an unexported package constant boundary.
+- Public runtime policy strings are the correct Agent test contract because the Agent receives them over the Service DTO rather than importing Service internals.
+- Corrected Agent regression now passes the full package in 2.939s; Service and System Proxy focused packages had already passed.
+- `git diff --check` reports no whitespace errors; only existing Windows CRLF normalization warnings. The worktree contains extensive pre-existing Phase 67/user changes and they remain preserved.
+- Full `go test ./...`: PASS across launcher, Agent, System Proxy, Service, Network/TUN, Wails backend, and all other packages.
+- Full `go vet ./...`: PASS with the repository-local offline caches.
+- Current live baseline has no Navo launcher/UI/Agent/Service/core process. Only user-owned v2rayN PID 12972 and its sing-box PID 23476 are running; they remain untouched.
+- Navo local runtime state exists from 2026-08-23 with `bypass_mainland` policy and a selected-outbound value, but the first table projection collapsed optional fields; re-read only the safe mode/ID/commit fields as JSON before deciding whether a launch is valid.
+- The current release is 1.0.37 and predates this source repair; it cannot be used to validate the new fail-closed behavior.
+- Exact runtime-state projection confirms `selected_outbound=""`, no active/candidate value, `revision_status="candidate"`, and policy `bypass_mainland`.
+- Therefore no real Navo proxy route can currently succeed or be IP-validated; activation must fail with `OUTBOUND_REQUIRED` rather than report success.
+- User-owned sing-box listeners are 127.0.0.1:10808 and 127.0.0.1:10813 under PID 23476; Navo must not reuse them as its own acceptance evidence.
+- Local repository state contains 17 historical revision keys but no separately exposed subscription/outbound/active-selection sections; the safe metadata projection found no recoverable active endpoint reference.
+- Historical revisions are not authorization to select or reuse a node, and their inspected public status fields are absent; do not infer a valid route from their presence.
+- Frontend gate: 22/22 tests PASS; Vue typecheck PASS; Vite production build PASS (65 modules).
+- There is no honest live proxy-success test possible with `selected_outbound=""`; a direct/HTTPS response or the user-owned v2rayN listener would not prove Navo routing.
+- The remaining acceptance is external-state dependent, not a source-test failure: configure/select one Navo route, then run System Proxy and elevated TUN DNS/TCP/HTTPS/exit-IP matrices independently.
+- Added a log presenter that exposes only method/error code/reason/request ID, clamps values, and never renders arbitrary structured fields.
+- Replaced fixed 2-second traffic `setInterval` with one in-flight request, healthy 2-second cadence, and failure delays of 4/8/16/30 seconds.
+- New metrics polling regressions pass, including the no-fixed-interval source assertion.
+- First frontend rerun failed only because the repository patch transport encoded Chinese test labels as single-byte ASCII; replace labels/expectations with ASCII-safe Unicode escapes and rerun.
+- The encoding damage was confined to two newly created untracked files. Their exact workspace paths were validated, only those copies were removed, and both were immediately recreated through `git apply`.
+- Presenter source and test now remain ASCII on disk while evaluating Chinese labels, middle-dot separators, and ellipsis through JavaScript Unicode escapes.
+- Final frontend gate after log/polling integration: 26/26 tests PASS; Vue typecheck PASS; Vite production build PASS (67 modules).
+- Final `git diff --check`: PASS with only existing CRLF normalization warnings.
+
+## Phase 70 packaging and local acceptance (1.0.38)
+
+- Local Navo runtime has `selected_outbound=""` and no active/candidate route; repository state contains historical revisions only, so real proxy exit acceptance cannot be executed without user-provided Navo route data.
+- Official package PASS: 28 files, 27 manifest entries, archive 28 files, `issues_found=0`; `repair.exe check` also reports zero issues.
+- ZIP SHA-256 is `E7819C0527B8A0B968DC4DEEC294E068C7264E4A99C3F7537584AF324BE3EEEB`; root launcher hash is `BD92BD905F980505F0F6EB64A01EFE114ED18CDEBBDC3FDDCB76A19166C16814` and PE version is `1.0.38.0`.
+- Isolated package smoke proves no-route System Proxy admission fails closed with `OUTBOUND_REQUIRED`, stays `off`, does not create a TUN fault, exposes a stable UI/IPC path, and exits cleanly through the tray.
+- Existing v2rayN processes/listeners and WinINet ownership remained unchanged; no Navo process, Navo adapter, or port 12080 listener remained after smoke.
+
+## Phase 71 active TUN baseline race
+
+- `prepareCaptureLocked` intentionally clears the prior TUN result before compiling and verifying the next capture transaction. External `runtime.verify` previously bypassed `captureMu`, so the two-second health monitor could read the new plan with an empty/uncommitted baseline.
+- `handleRuntimeVerify` now acquires the same Service capture mutex used by `capture.prepare`; internal verification inside the already-locked transition still calls `verifyActiveRuntimeRouting` directly and does not self-deadlock.
+- Context expiry while waiting returns `CAPTURE_BUSY`, keeping transition state distinct from `APPLICATION_READINESS_FAILED` and preventing false SelfHeal attribution.
+- 1.0.39 package/source gates pass. Real elevated TUN DNS/TCP/HTTPS/exit-IP remains unexecuted; two unrelated tray-exit automation attempts timed out and are explicitly not accepted as lifecycle PASS.
+
+## 2026-08-25 Phase 72 initial findings
+
+- The reported symptom is intermittent overview-panel data loss specifically during TUN activation, so the investigation must cover both transition-time backend snapshot consistency and frontend preservation/merge behavior.
+- Historical project evidence identifies two relevant boundaries: dashboard core state must survive optional IP/metrics failures, and UI request correlation must remain separate from Agent-to-Service idempotency IDs.
+- The current worktree already contains a Phase 71 repair serializing external `runtime.verify` with Service `captureMu`; Phase 72 must test whether dashboard fan-out still observes or projects a destructive transient state rather than duplicating that lock repair.
+- The request-ID repair remains present conceptually: dashboard fan-out must allocate distinct Agent child IDs and restore one UI parent ID; current triage has no evidence that replay protection should be weakened.
+- No process, listener, WinINet setting, route, DNS, firewall, adapter, or user-owned proxy has been mutated during initial triage.
+
+- Exact frontend root cause window: `useCapture.setCapture` starts an unbounded `setInterval` every 350 ms, while `loadDashboard` starts a new Wails request and unconditionally replaces the entire dashboard with its normalized response.
+- Each Agent dashboard request performs five Service calls serially, but the Agent releases `serviceMu` between component calls; concurrent dashboards can interleave and therefore observe different transition instants inside one logical snapshot.
+- While `capture.set` holds the Service request path, 350 ms dashboard calls can accumulate. After activation they fan out into many five-call snapshots, delaying the authoritative post-commit refresh and allowing an older transition snapshot to finish after a newer one.
+- The existing Service child request-ID namespace remains correct and must not be weakened; the bug is frontend refresh coordination plus snapshot consistency, not replay rejection.
+
+- Implemented one shared dashboard snapshot loader for every Vue consumer. It permits only one Wails request in flight, treats calls during that request as a trailing generation, suppresses stale success/failure, and commits only the newest normalized snapshot.
+- Routed the 2-second traffic sampler through the shared loader instead of calling Wails directly.
+- Traffic sampling now skips capture-transition states and preserves the last non-empty route identity, so a temporary active_id="" cannot clear the 30-point ring buffer; a real stable non-empty route change still resets history.
+- Replaced the 350 ms fixed TUN dashboard interval with a completion-rescheduled timeout and explicit in-flight guard.
+- Focused red state was 2/6 PASS with four expected failures; after production changes the same suite is 6/6 PASS.
+- Full frontend tests PASS 30/30. The first production build found one removed API import still needed for controlled traffic generation; restoring only that import produced a PASS TypeScript check and Vite build with 67 modules.
+
+- Browser-level mocked TUN timing smoke PASS: six dashboard calls, maximum concurrency one, zero transition-data loss, final capture TUN, final revision stable-revision, and no page/console errors.
+- The smoke deliberately returned a slow destructive transition snapshot (active_id empty, blank PID/revision) after a newer refresh was requested. The shared loader discarded it and issued one trailing stable read.
+- Final frontend suite PASS 30/30; TypeScript plus Vite production build PASS with 67 modules; git diff check PASS; exactly one direct apis.runtime.dashboard bridge call remains in the central application loader.
+- The local Vite child left by the helper was positively identified as this workspace's port-4188 process and stopped; final listener count is zero.
+- Browser screenshot retained at C:\Users\28484\.codex\visualizations\2026\08\24\01a0347b-3b70-7681-8e70-556bfde64d51\navo-dashboard-transition.png, 551123 bytes, SHA-256 ED4FD13E847B7D4DA396400F5806D0083801B32742B4A248B68D107B81F9185B.
+- Removed the three temporary cache artifacts after copying the screenshot. No live Navo capture, adapter, route, DNS, firewall, WinINet, or user-owned proxy state was changed.
+- Real elevated TUN traffic was intentionally not executed for this UI state-race repair; physical DNS/TCP/HTTPS/exit-IP acceptance remains a separate existing gate.

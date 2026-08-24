@@ -90,10 +90,21 @@ func (s *Service) handleCapturePrepare(
 		if errors.As(combined, &captureErr) && captureErr.code != "" {
 			code = captureErr.code
 		}
-		s.setTUNFault(combined.Error())
+		if mode == capture.ModeTUN {
+			s.setTUNFault(combined.Error())
+		} else {
+			// System Proxy failures are not TUN adapter failures. Publishing them
+			// through tun.status makes the Agent rewrite the requested mode and the
+			// desktop offer an invalid "retry TUN" action.
+			s.clearTUNFault()
+		}
 		return errorResponse(requestID, code, combined)
 	}
 	s.clearTUNFault()
+	s.runtimeMu.Lock()
+	runtimeMode := s.runtime.Mode
+	s.runtimeMu.Unlock()
+	payload["runtime_mode"] = runtimeMode
 	payload["mode"] = mode.String()
 	return response(requestID, payload)
 }
@@ -204,9 +215,16 @@ func (e *captureTransitionError) Unwrap() error { return e.err }
 func (s *Service) verifySelectedOutboundReachable(ctx context.Context) error {
 	s.runtimeMu.Lock()
 	selectedID := strings.TrimSpace(s.runtime.SelectedOutbound)
+	runtimeMode := s.runtime.Mode
 	s.runtimeMu.Unlock()
 	if selectedID == "" {
-		return nil
+		if runtimeMode == runtimeModeDirect {
+			return nil
+		}
+		return &captureTransitionError{
+			code: "OUTBOUND_REQUIRED",
+			err:  fmt.Errorf("select an available proxy route before enabling capture in %s mode", runtimeMode),
+		}
 	}
 	return verifyOutboundReachability(ctx, selectedID, s.currentOutbounds(ctx), s.prober)
 }

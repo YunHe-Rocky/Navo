@@ -46,6 +46,16 @@ type ownershipRecord struct {
 	Phase       string `json:"phase,omitempty"`
 }
 
+// OwnershipStatus is a read-only comparison of Navo's marker and WinINet.
+type OwnershipStatus struct {
+	Present     bool   `json:"present"`
+	Owned       bool   `json:"owned"`
+	Lost        bool   `json:"lost"`
+	ProxyServer string `json:"proxy_server,omitempty"`
+	Phase       string `json:"phase,omitempty"`
+	LastError   string `json:"last_error,omitempty"`
+}
+
 // CurrentConfig reads the current-user WinINet proxy without taking ownership
 // or changing any registry value.
 func CurrentConfig() (ProxyConfig, error) {
@@ -262,6 +272,37 @@ func (m *Manager) Status() ProxyConfig {
 	}
 	cfg.Enabled = m.owns(*cfg)
 	return *cfg
+}
+
+// OwnershipStatus compares the marker with raw WinINet without mutation.
+func (m *Manager) OwnershipStatus() OwnershipStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	data, err := os.ReadFile(m.ownerPath)
+	if os.IsNotExist(err) {
+		return OwnershipStatus{}
+	}
+	if err != nil {
+		return OwnershipStatus{LastError: fmt.Sprintf("read proxy ownership: %v", err)}
+	}
+	status := OwnershipStatus{Present: true}
+	var owner ownershipRecord
+	if err := json.Unmarshal(data, &owner); err != nil || owner.ProxyServer == "" {
+		status.Lost = true
+		status.LastError = "corrupted proxy ownership record"
+		return status
+	}
+	status.ProxyServer = owner.ProxyServer
+	status.Phase = owner.Phase
+	current, err := m.getProxy()
+	if err != nil {
+		status.LastError = fmt.Sprintf("read current system proxy: %v", err)
+		return status
+	}
+	status.Owned = (owner.Phase == "" || owner.Phase == ownershipCommitted) && ownershipMatchesCurrent(owner, *current)
+	status.Lost = !status.Owned
+	return status
 }
 
 func (m *Manager) owns(cfg ProxyConfig) bool {

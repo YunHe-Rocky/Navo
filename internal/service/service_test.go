@@ -677,3 +677,23 @@ func TestSupervisorIntegration(t *testing.T) {
 		t.Errorf("initial state = %s, want %s", status.State, supervisor.StateStopped)
 	}
 }
+
+func TestNetworkObserveDispatchReturnsBoundedReadOnlySnapshot(t *testing.T) {
+	svc := &Service{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	result := svc.Dispatch(ctx, map[string]interface{}{
+		"request_id": "network-observe", "method": "network.observe",
+	})
+	if result["type"] != "RESPONSE" {
+		t.Fatalf("network.observe response = %#v", result)
+	}
+	payload, ok := result["payload"].(map[string]interface{})
+	if !ok || payload["environment"] == nil {
+		t.Fatalf("network.observe payload = %#v", result["payload"])
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("network.observe ignored caller cancellation for %v", elapsed)
+	}
+}

@@ -1,0 +1,57 @@
+# Progress
+
+## 2026-08-20
+
+- Selected and fully read the `planning-with-files` skill because this is a multi-phase refactor.
+- Confirmed the requested document defines the implementation and acceptance requirements.
+- Created an isolated task plan, findings log, and progress log to preserve existing project planning state.
+- No product code has been changed yet.
+- Completed the full 1,323-line specification read and recorded its implementation, test, and reporting requirements.
+- Checked relevant UI history: preserve all page IDs/actions, responsive accessibility, and current backend behavior.
+- Inventoried the worktree and frontend/Wails file sizes; tracked files are currently clean.
+- Confirmed baseline entrypoints: `scripts/test.ps1`, then `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` from `navo_app`.
+- Completed frontend baseline: dependency install/audit PASS, 11/11 tests PASS, typecheck PASS, production build PASS.
+- Go baseline reached an external dependency-download timeout before compilation; verified both local and user Go module caches lack the required modules.
+- Downloaded the locked Go modules through a bounded alternate proxy and completed the unchanged Go baseline: all package tests PASS and go vet PASS.
+- Phase 0 is complete; beginning the required responsibility-by-responsibility `App.vue` audit before product edits.
+- Extracted the complete `App.vue` declaration/function outline and inventoried API/state/types/test responsibilities; no product code changes yet.
+- Read App.vue lines 1-720 and identified the first concrete boundary defect: optimistic `runtime.list_mode` assignment after a backend call but before snapshot refresh.
+- Read through line 1400 and identified a second clear boundary defect: UI-owned temporary route switch plus restore/rollback around route benchmarking.
+- Completed the full App.vue and state.ts audit. Confirmed seven inline page responsibilities and frontend-owned network-health hysteresis that conflicts with backend runtime truth.
+- Added `docs/audit/NAVO_UI_THIN_LAYER_MIGRATION.md` with the required A-M classification, concrete boundary defects, migration destinations, and compatibility guardrails.
+- Phase 1 is complete; Phase 2 API adapter extraction is in progress.
+- Added typed, feature-scoped Wails adapters plus executable delegation tests; removed direct Wails runtime import from App.vue.
+- Frontend regression after adapters: 13/13 tests PASS and typecheck PASS.
+- Phase 2 is complete; beginning incremental feature/application extraction.
+- Mechanically moved App.vue setup logic into `features/application/useNavoApplication.ts`; frontend tests remained 13/13 PASS. Typecheck exposed one shifted-boundary declaration error, now corrected for rerun.
+- Extracted all seven page templates into Feature Page components and reduced App.vue to 301 lines. Frontend tests remained 13/13 PASS; typecheck/build found only missing `.vue` import suffixes, now corrected for rerun.
+- Completed Runtime/UI state separation, removed frontend health authority and optimistic routing truth, and added UI-state/presenter tests.
+- Moved route benchmark switching/restoration behind one backend Application intent with rollback tests; focused Go and frontend gates pass.
+- Phases 3-6 are complete; beginning CSS modularization.
+- Split the 1,047-line stylesheet into eight ordered modules. Production CSS hash and size remain exactly `D5vcQRCT`, 59.39 kB (11.72 kB gzip).
+- Added Python Playwright smoke with a mock Wails bridge. First run reached all-page iteration and found one assertion-location mistake on overview; corrected without product-code changes.
+- Browser smoke now passes all seven pages, both themes, compact layout, no horizontal overflow, and no browser errors; three screenshots were visually inspected.
+- Reduced App.vue further from 301 to 192 lines by removing page-owned shell destructuring.
+- Phase 7 is complete; Phase 8 full repository gates and final acceptance review are in progress.
+- Final gates PASS: all Go tests, go vet, 17/17 frontend tests, typecheck, production build, browser smoke, visual inspection, and diff check.
+- Updated the migration audit checklist and recorded the remaining UI-only controller/API/error-adapter debt.
+- Phase 8 is complete; no required implementation or validation work remains.
+- The user requested continuation of the reported residual debt. Restored the isolated plan and confirmed the prior full-pass worktree is intact.
+- Inventoried all controller declarations/functions and flat API calls. Only `useNavoApplication.ts` still imports the flat compatibility facade; its public application-context contract can remain stable during extraction.
+- Added Phases 9-12 for composable extraction, facade retirement, focused regression, browser-visible validation, and final gate refresh.
+- Migrated the controller's complete flat API call set to grouped adapters and deleted the now-unreferenced `frontend/src/api.ts` compatibility facade.
+- Immediate facade-retirement regression PASS: 17/17 frontend tests and typecheck.
+- Extracted pure format/error presentation helpers and `useApplicationFeedback`; the controller no longer owns generic operation progress timers or formatting implementations.
+- Preserved the prior activity/log-follow interaction through an explicit feedback hook. Focused regression remains 17/17 tests PASS and typecheck PASS.
+- Extracted `useLogs` and `useCloseBehavior`. Log polling and close-request listener cleanup are now owned by their features; the application-context names and close-preference semantics are unchanged.
+- Post-extraction regression remains 17/17 frontend tests PASS and typecheck PASS.
+- Extracted `useDiagnostics` and `useCore`; IP/host checks, ChatGPT verification presentation, proxy/layered benchmark state, core update UI, and core selection intents now belong to their feature modules.
+- Post-diagnostics/core regression remains 17/17 frontend tests PASS and typecheck PASS.
+- Extracted routing and subscription composables, retaining backend-snapshot-only committed routing state and the original route/subscription refresh order.
+- Extracted `useTraffic`; its feature now owns the ring buffer, sampling/visibility lifecycle, synthetic preview, controlled transfer, and route-change history reset.
+- Post-routing/subscription/traffic regression remains 17/17 frontend tests PASS and typecheck PASS.
+- Extracted `useNodes`, `useCapture`, and `useRuntimeOverview`. Node selection/testing, capture transition polling/TUN fault focus, and overview/risk mappings are now feature-owned.
+- Reduced `useNavoApplication.ts` from 1,058 to 357 lines while preserving its existing returned application-context field names.
+- Added thin-layer architecture regression guards; 19/19 tests, typecheck, and production build pass. Phase 12 full/browser gates are now in progress.
+- Browser-visible smoke PASS after lifecycle extraction: seven pages, two themes, compact 760x900, zero overflow, no browser errors.
+- Full Go tests and vet PASS; `git diff --check` PASS with only normal LF/CRLF warnings. Updated the migration audit and completed Phase 12.

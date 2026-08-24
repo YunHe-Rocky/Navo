@@ -44,3 +44,18 @@ func TestWinINetStatusAccepted(t *testing.T) {
 		t.Fatal("server failure was accepted as readiness evidence")
 	}
 }
+
+func TestValidateWinINetExitIdentity(t *testing.T) {
+	if err := validateWinINetExitIdentity("203.0.113.20", "198.51.100.10", true); err != nil {
+		t.Fatalf("distinct proxy exit rejected: %v", err)
+	}
+	if err := validateWinINetExitIdentity("198.51.100.10", "198.51.100.10", true); err == nil {
+		t.Fatal("direct WinINet leak was accepted as proxy")
+	}
+	if err := validateWinINetExitIdentity("2001:db8::1", "2001:0db8:0:0:0:0:0:1", false); err != nil {
+		t.Fatalf("equivalent intentional-direct IPv6 exits rejected: %v", err)
+	}
+	if err := validateWinINetExitIdentity("203.0.113.20", "198.51.100.10", false); err == nil {
+		t.Fatal("changed intentional-direct exit was accepted")
+	}
+}
