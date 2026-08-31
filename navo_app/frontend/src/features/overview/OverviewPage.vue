@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import StateGlyph from "../../components/StateGlyph.vue";
 import TrafficChart from "../../components/TrafficChart.vue";
-import NetworkEnvironmentCard from "../environment/NetworkEnvironmentCard.vue";
 import { useNavoApplicationContext } from "../application/context";
 import type { CaptureMode } from "../../types";
 
 const {
   page,
   dashboard,
-  ipDetection,
   benchmark,
   benchmarkRunning,
   trafficPoints,
@@ -17,7 +15,8 @@ const {
   activeRoute,
   activeRouteLatency,
   captureMode,
-  appState,
+  effectiveConnection,
+  connectionIcon,
   networkHealthLabel,
   activeTrafficSeries,
   trafficContext,
@@ -38,7 +37,6 @@ const {
   recoveryStateLabel,
   faultDomainLabel,
   repairActionLabel,
-  sourceLabel,
   connectionLabel,
   formatBytes,
   formatRate,
@@ -49,18 +47,18 @@ const {
 
 <template>
   <section class="page-content task-page overview-page">
-    <article class="hero-status" :class="`state-${appState.icon}`">
+    <article class="hero-status" :class="`state-${connectionIcon}`">
       <div class="hero-copy">
-        <StateGlyph :state="appState.icon" size="lg" />
+        <StateGlyph :state="connectionIcon" size="lg" />
         <div>
           <span class="eyebrow">{{ networkHealthLabel }}</span>
           <h2>{{ connectionLabel() }}</h2>
-          <p>{{ sourceLabel(activeRoute?.source_type) }} · {{ activeRoute?.name || "尚未选择节点" }} · {{ captureLabel(captureMode) }}</p>
+          <p>{{ effectiveConnection.summary }} · {{ effectiveConnection.modeLabel }}</p>
         </div>
       </div>
       <div class="hero-actions">
-        <button class="secondary" :disabled="loading || ipChecking" @click="checkConnection">{{ ipChecking ? "验证中" : "验证 ChatGPT 链路" }}</button>
-        <button class="primary" :disabled="loading" @click="toggleConnection">{{ dashboard.core.state === "running" ? "停止代理" : "启动代理" }}</button>
+        <button class="secondary" :disabled="loading || ipChecking" @click="checkConnection">{{ ipChecking ? "验证中" : effectiveConnection.kind === "external_system_proxy" ? "检测外部代理出口" : effectiveConnection.kind === "direct" ? "检测公网出口" : "验证 ChatGPT 链路" }}</button>
+        <button class="primary" :disabled="loading" @click="toggleConnection">{{ dashboard.core.state === "running" ? "停止 Navo 代理" : "启动 Navo 代理" }}</button>
       </div>
     </article>
   
@@ -113,37 +111,37 @@ const {
       <small class="recovery-stamp">最后更新：{{ formatTime(dashboard.capture.recovery.updated_at) }}</small>
     </article>
   
-    <NetworkEnvironmentCard />
-
     <div class="overview-grid">
-      <article class="ip-card">
-        <span class="card-label">直连公网 IP</span>
-        <strong class="mono">{{ ipDetection?.source.ip || "等待检测" }}</strong>
-        <p v-if="ipDetection?.source.error" class="inline-error">{{ ipDetection.source.error }}</p>
-        <p>{{ ipDetection?.source.country || "地区未知" }} {{ ipDetection?.source.city }}</p>
-        <dl>
-          <div><dt>ISP</dt><dd>{{ ipDetection?.source.isp || "暂不可用" }}</dd></div>
-          <div><dt>ASN</dt><dd>{{ ipDetection?.source.asn || "暂不可用" }}</dd></div>
+      <article class="connection-evidence-card" :data-kind="effectiveConnection.kind" aria-labelledby="effective-connection-title">
+        <div class="connection-evidence-heading">
+          <div>
+            <span class="card-label">当前有效连接 · {{ effectiveConnection.ownerLabel }}</span>
+            <h3 id="effective-connection-title">{{ effectiveConnection.modeLabel }}</h3>
+          </div>
+          <span class="connection-owner-badge">{{ effectiveConnection.controlledByNavo ? "Navo 管理" : "只读观察" }}</span>
+        </div>
+        <div class="connection-primary-evidence">
+          <small>{{ effectiveConnection.kind === "direct" ? "当前公网 IP" : "当前出口 IP" }}</small>
+          <strong class="mono">{{ effectiveConnection.exitIP || (effectiveConnection.exitPending ? "正在检测" : "等待检测") }}</strong>
+          <p v-if="effectiveConnection.exitError" class="inline-error">{{ effectiveConnection.exitError }}</p>
+          <p v-else>{{ effectiveConnection.exitCountry || "地区未知" }}</p>
+        </div>
+        <dl class="connection-evidence-grid">
+          <div><dt>连接归属</dt><dd>{{ effectiveConnection.ownerLabel }}</dd></div>
+          <div><dt>连接对象</dt><dd>{{ effectiveConnection.routeName || "未确认" }}</dd></div>
+          <div><dt>代理端点</dt><dd class="mono">{{ effectiveConnection.endpoint || "不适用" }}</dd></div>
+          <div><dt>直连基线</dt><dd class="mono">{{ effectiveConnection.directIP || "等待检测" }}</dd></div>
+          <div><dt>出口检测源</dt><dd>{{ effectiveConnection.exitProvider || "等待检测" }}</dd></div>
+          <div><dt>检测时间</dt><dd>{{ formatTime(effectiveConnection.exitCheckedAt) }}</dd></div>
         </dl>
-        <small>{{ ipDetection?.source.provider || "无检测源" }} · {{ formatTime(ipDetection?.source.checked_at) }}</small>
-      </article>
-      <article class="ip-card">
-        <span class="card-label">代理出口 IP</span>
-        <strong class="mono">{{ ipDetection?.proxy.ip || dashboard.ip.proxy_ip || "等待检测" }}</strong>
-        <p v-if="ipDetection?.proxy.error" class="inline-error">{{ ipDetection.proxy.error }}</p>
-        <p>{{ ipDetection?.proxy.country || dashboard.ip.proxy_country || "地区未知" }} {{ ipDetection?.proxy.city }}</p>
-        <dl>
-          <div><dt>ISP</dt><dd>{{ ipDetection?.proxy.isp || "暂不可用" }}</dd></div>
-          <div><dt>ASN</dt><dd>{{ ipDetection?.proxy.asn || "暂不可用" }}</dd></div>
-        </dl>
-        <small>{{ ipDetection?.proxy.provider || "无检测源" }} · {{ formatTime(ipDetection?.proxy.checked_at) }}</small>
+        <small class="connection-evidence-note">{{ effectiveConnection.trafficNote }}</small>
       </article>
       <article class="risk-card">
-        <span class="card-label">连接可用性风险</span>
+        <span class="card-label">当前连接证据</span>
         <strong :class="`risk-${activeRisk.level}`">{{ activeRisk.label }}</strong>
         <ul><li v-for="reason in activeRisk.reasons" :key="reason">{{ reason }}</li></ul>
         <p v-if="activeRisk.action" class="risk-action">建议：{{ activeRisk.action }}</p>
-        <small>{{ dashboard.capture.readiness.default_proxy ? "Windows 默认代理已验证" : captureMode === "tun" ? "TUN 数据面已验证" : "尚无默认应用证据" }} · {{ formatTime(dashboard.capture.readiness.checked_at) }}</small>
+        <small>{{ effectiveConnection.kind === "external_system_proxy" ? "外部出口已独立检测；ChatGPT 应用链路未由 Navo 接管验证" : dashboard.capture.readiness.default_proxy ? "Windows 默认代理已验证" : captureMode === "tun" ? "TUN 数据面已验证" : "尚无默认应用证据" }} · {{ formatTime(effectiveConnection.exitCheckedAt || dashboard.capture.readiness.checked_at) }}</small>
       </article>
     </div>
   
@@ -168,7 +166,7 @@ const {
       </article>
       <article class="chart-card">
         <div class="section-heading"><div><span class="card-label">最近 60 秒 · 自动跟随接管模式</span><h3>{{ trafficContext.label }}</h3></div><button class="text-button" @click="changePage('traffic')">查看详情</button></div>
-        <TrafficChart :points="trafficPoints" :visible-series="activeTrafficSeries" :stopped="activeTrafficUnavailable" :status-label="activeTrafficUnavailableReason" compact />
+        <TrafficChart :points="trafficPoints" :visible-series="activeTrafficSeries" :stopped="activeTrafficUnavailable" :status-label="activeTrafficUnavailableReason" :local-metric-label="effectiveConnection.kind === 'external_system_proxy' ? '系统总量' : undefined" compact />
       </article>
     </div>
   

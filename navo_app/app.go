@@ -231,32 +231,39 @@ type MetricsStatus struct {
 }
 
 type IPStatus struct {
-	ProxyIP      string `json:"proxy_ip"`
-	ProxyCountry string `json:"proxy_country"`
-	DirectIP     string `json:"direct_ip"`
-	ProxyError   string `json:"proxy_error,omitempty"`
-	DirectError  string `json:"direct_error,omitempty"`
-	ProbePending bool   `json:"probe_pending,omitempty"`
+	ConnectionKind  string `json:"connection_kind"`
+	ProxyIP         string `json:"proxy_ip"`
+	ProxyCountry    string `json:"proxy_country"`
+	DirectIP        string `json:"direct_ip"`
+	ProxyError      string `json:"proxy_error,omitempty"`
+	DirectError     string `json:"direct_error,omitempty"`
+	ProxyProvider   string `json:"proxy_provider,omitempty"`
+	DirectProvider  string `json:"direct_provider,omitempty"`
+	ProxyCheckedAt  string `json:"proxy_checked_at,omitempty"`
+	DirectCheckedAt string `json:"direct_checked_at,omitempty"`
+	ProbePending    bool   `json:"probe_pending,omitempty"`
 }
 
 type IPDetection struct {
-	Source IPDetectionResult `json:"source"`
-	Proxy  IPDetectionResult `json:"proxy"`
+	ConnectionKind string            `json:"connection_kind,omitempty"`
+	Source         IPDetectionResult `json:"source"`
+	Proxy          IPDetectionResult `json:"proxy"`
 }
 
 type IPDetectionResult struct {
-	IP        string `json:"ip"`
-	Country   string `json:"country"`
-	City      string `json:"city"`
-	ASN       string `json:"asn"`
-	ISP       string `json:"isp"`
-	Network   string `json:"network"`
-	Provider  string `json:"provider"`
-	Mobile    bool   `json:"mobile"`
-	Proxy     bool   `json:"proxy"`
-	Hosting   bool   `json:"hosting"`
-	CheckedAt string `json:"checked_at"`
-	Error     string `json:"error"`
+	OutboundID string `json:"outbound_id,omitempty"`
+	IP         string `json:"ip"`
+	Country    string `json:"country"`
+	City       string `json:"city"`
+	ASN        string `json:"asn"`
+	ISP        string `json:"isp"`
+	Network    string `json:"network"`
+	Provider   string `json:"provider"`
+	Mobile     bool   `json:"mobile"`
+	Proxy      bool   `json:"proxy"`
+	Hosting    bool   `json:"hosting"`
+	CheckedAt  string `json:"checked_at"`
+	Error      string `json:"error"`
 }
 
 type RouteInfo struct {
@@ -322,6 +329,7 @@ type LogEntry struct {
 	ID        uint64         `json:"id"`
 	Timestamp string         `json:"timestamp"`
 	Level     string         `json:"level"`
+	Category  string         `json:"category"`
 	Service   string         `json:"service"`
 	Component string         `json:"component"`
 	Message   string         `json:"message"`
@@ -329,12 +337,13 @@ type LogEntry struct {
 }
 
 type LogQuery struct {
-	Levels   []string `json:"levels"`
-	Services []string `json:"services"`
-	From     string   `json:"from"`
-	To       string   `json:"to"`
-	AfterID  uint64   `json:"after_id"`
-	Limit    int      `json:"limit"`
+	Levels     []string `json:"levels"`
+	Categories []string `json:"categories"`
+	Services   []string `json:"services"`
+	From       string   `json:"from"`
+	To         string   `json:"to"`
+	AfterID    uint64   `json:"after_id"`
+	Limit      int      `json:"limit"`
 }
 
 type LogQueryResult struct {
@@ -344,8 +353,9 @@ type LogQueryResult struct {
 }
 
 type LogMetadata struct {
-	Levels   []string `json:"levels"`
-	Services []string `json:"services"`
+	Levels     []string `json:"levels"`
+	Categories []string `json:"categories"`
+	Services   []string `json:"services"`
 }
 
 type wireResponse struct {
@@ -527,7 +537,13 @@ func (a *App) GetLogMetadata() (LogMetadata, error) {
 	if err != nil {
 		return LogMetadata{}, err
 	}
-	return LogMetadata{Levels: levels.Levels, Services: services.Services}, nil
+	categories, err := call[struct {
+		Categories []string `json:"categories"`
+	}](a, "logs.categories", nil)
+	if err != nil {
+		return LogMetadata{}, err
+	}
+	return LogMetadata{Levels: levels.Levels, Categories: categories.Categories, Services: services.Services}, nil
 }
 
 func (a *App) ClearPersistedLogs() error {

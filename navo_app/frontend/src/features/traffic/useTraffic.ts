@@ -3,14 +3,15 @@ import { apis } from "../../api/index";
 
 import { TrafficRingBuffer } from "../../state";
 
-import { generateSyntheticTraffic, seriesForCaptureMode, trafficContextForCaptureMode } from "../../traffic.js";
-import type { CaptureMode, Dashboard, ProxyBenchmark, TrafficPoint, TrafficSeries } from "../../types";
+import { generateSyntheticTraffic } from "../../traffic.js";
+import type { Dashboard, ProxyBenchmark, TrafficPoint, TrafficSeries } from "../../types";
 import { errorMessage, formatBytes } from "../application/formatters";
+import type { EffectiveConnection } from "../runtime/effectiveConnection";
 import { metricsPollDelay, shouldRecordTrafficSample, trafficRouteUpdate } from "./polling";
 
 interface UseTrafficOptions {
   dashboard: Ref<Dashboard>;
-  captureMode: ComputedRef<CaptureMode>;
+  effectiveConnection: ComputedRef<EffectiveConnection>;
   benchmark: Ref<ProxyBenchmark | undefined>;
   notice: Ref<string>;
   failure: Ref<string>;
@@ -19,7 +20,7 @@ interface UseTrafficOptions {
   loadDashboard: () => Promise<Dashboard>;
 }
 
-export function useTraffic({ dashboard, captureMode, benchmark, notice, failure, beginActivity, finishActivity, loadDashboard }: UseTrafficOptions) {
+export function useTraffic({ dashboard, effectiveConnection, benchmark, notice, failure, beginActivity, finishActivity, loadDashboard }: UseTrafficOptions) {
   const trafficPoints = ref<TrafficPoint[]>([]);
   const simulatedTrafficPoints = ref<TrafficPoint[]>([]);
   const trafficSimulationSize = ref(8);
@@ -32,29 +33,40 @@ export function useTraffic({ dashboard, captureMode, benchmark, notice, failure,
   let metricsPollInFlight = false;
   let metricsPollFailures = 0;
 
-  const metricsAvailable = computed(() => dashboard.value.metrics.available || dashboard.value.metrics.local_available);
+  const proxyTrafficActive = computed(() => effectiveConnection.value.trafficMetric === "proxy");
+  const metricsAvailable = computed(() => proxyTrafficActive.value
+    ? dashboard.value.metrics.available
+    : dashboard.value.metrics.local_available);
   const trafficDisplayPoints = computed(() => simulatedTrafficPoints.value.length ? simulatedTrafficPoints.value : trafficPoints.value);
   const latestTraffic = computed(() => trafficPoints.value.at(-1));
-  const activeTrafficSeries = computed(() => seriesForCaptureMode(captureMode.value) as TrafficSeries[]);
-  const trafficContext = computed(() => trafficContextForCaptureMode(captureMode.value));
-  const activeTrafficUnavailable = computed(() => captureMode.value === "off"
-    ? !dashboard.value.metrics.local_available
-    : !dashboard.value.metrics.available);
-  const activeTrafficUnavailableReason = computed(() => captureMode.value === "off"
-    ? dashboard.value.metrics.local_unavailable_reason
-    : dashboard.value.metrics.unavailable_reason);
-  const activeTrafficDownload = computed(() => captureMode.value === "off"
-    ? latestTraffic.value?.localDownloadBps
-    : latestTraffic.value?.proxyDownloadBps);
-  const activeTrafficUpload = computed(() => captureMode.value === "off"
-    ? latestTraffic.value?.localUploadBps
-    : latestTraffic.value?.proxyUploadBps);
-  const activeTrafficDownloadTotal = computed(() => captureMode.value === "off"
-    ? dashboard.value.metrics.local_download_total
-    : dashboard.value.metrics.proxy_download_total);
-  const activeTrafficUploadTotal = computed(() => captureMode.value === "off"
-    ? dashboard.value.metrics.local_upload_total
-    : dashboard.value.metrics.proxy_upload_total);
+  const activeTrafficSeries = computed<TrafficSeries[]>(() => proxyTrafficActive.value
+    ? ["proxyDownloadBps", "proxyUploadBps"]
+    : ["localDownloadBps", "localUploadBps"]);
+  const trafficContext = computed(() => ({
+    id: effectiveConnection.value.kind,
+    label: effectiveConnection.value.trafficLabel,
+    source: effectiveConnection.value.trafficSource,
+    note: effectiveConnection.value.trafficNote,
+    metric: effectiveConnection.value.trafficMetric,
+  }));
+  const activeTrafficUnavailable = computed(() => proxyTrafficActive.value
+    ? !dashboard.value.metrics.available
+    : !dashboard.value.metrics.local_available);
+  const activeTrafficUnavailableReason = computed(() => proxyTrafficActive.value
+    ? dashboard.value.metrics.unavailable_reason
+    : dashboard.value.metrics.local_unavailable_reason);
+  const activeTrafficDownload = computed(() => proxyTrafficActive.value
+    ? latestTraffic.value?.proxyDownloadBps
+    : latestTraffic.value?.localDownloadBps);
+  const activeTrafficUpload = computed(() => proxyTrafficActive.value
+    ? latestTraffic.value?.proxyUploadBps
+    : latestTraffic.value?.localUploadBps);
+  const activeTrafficDownloadTotal = computed(() => proxyTrafficActive.value
+    ? dashboard.value.metrics.proxy_download_total
+    : dashboard.value.metrics.local_download_total);
+  const activeTrafficUploadTotal = computed(() => proxyTrafficActive.value
+    ? dashboard.value.metrics.proxy_upload_total
+    : dashboard.value.metrics.local_upload_total);
 
   function scheduleMetricsPoll() {
     if (metricsPollStopped) return;
@@ -70,7 +82,11 @@ export function useTraffic({ dashboard, captureMode, benchmark, notice, failure,
     metricsPollInFlight = true;
     try {
       const snapshot = await loadDashboard();
-      const routeUpdate = trafficRouteUpdate(previousRouteID, snapshot.runtime.active_id, snapshot.capture.state);
+      const routeUpdate = trafficRouteUpdate(
+        previousRouteID,
+        effectiveConnection.value.routeID,
+        snapshot.capture.state,
+      );
       if (routeUpdate.reset) resetTrafficHistory();
       previousRouteID = routeUpdate.routeID;
       if (shouldRecordTrafficSample(snapshot.capture.state)) {

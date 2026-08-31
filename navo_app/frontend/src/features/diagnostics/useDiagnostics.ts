@@ -16,7 +16,7 @@ interface UseDiagnosticsOptions {
 
 export function useDiagnostics(options: UseDiagnosticsOptions) {
   const {
-    captureMode, activeRoute, loadDashboard, notice, failure, beginActivity, finishActivity,
+    dashboard, captureMode, activeRoute, loadDashboard, notice, failure, beginActivity, finishActivity,
   } = options;
   const ipDetection = ref<IPDetection>();
   const hostStatus = ref<HostStatus>();
@@ -41,7 +41,13 @@ export function useDiagnostics(options: UseDiagnosticsOptions) {
   async function checkConnection() {
     if (captureMode.value === "off") {
       await checkIP();
-      notice.value = "当前未启用网络接管，已完成直连与 IP 属性检测";
+      const systemProxy = dashboard.value.environment?.system_proxy;
+      const externalObserved = dashboard.value.ip.connection_kind === "external_system_proxy" || Boolean(
+        systemProxy?.enabled && systemProxy.ownership === "external",
+      );
+      notice.value = externalObserved
+        ? "已完成外部系统代理出口与直连基线检测；该代理由外部应用管理，未执行 Navo ChatGPT 全链路验证"
+        : "当前未启用网络接管，已完成直连与 IP 属性检测";
       return;
     }
     ipChecking.value = true;

@@ -23,7 +23,14 @@ export function createEmptyDashboard(): Dashboard {
       local_upload_total: 0, local_download_total: 0, proxy_upload_total: 0, proxy_download_total: 0,
       traffic_source_state: "unavailable", traffic_sampled_at: "",
     },
-    ip: { proxy_ip: "", proxy_country: "", direct_ip: "" },
+    ip: {
+      connection_kind: "direct",
+      proxy_ip: "", proxy_country: "", direct_ip: "",
+      proxy_error: "", direct_error: "",
+      proxy_provider: "", direct_provider: "",
+      proxy_checked_at: "", direct_checked_at: "",
+      probe_pending: false,
+    },
   };
 }
 

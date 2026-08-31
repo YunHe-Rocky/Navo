@@ -25,6 +25,7 @@ import (
 	"navo/internal/agent/systemproxy"
 	"navo/internal/connection"
 	"navo/internal/domain/capture"
+	"navo/internal/ipdetect"
 	"navo/internal/logstore"
 	"navo/internal/networkenv"
 	"navo/internal/pipe"
@@ -53,6 +54,7 @@ type Config struct {
 	SendToServiceFn          func(msg map[string]interface{}) (map[string]interface{}, error)
 	IsElevatedFn             func() bool
 	ProxyProbeFn             func(context.Context, string) error
+	ExternalIPCheckFn        func(context.Context, string) (ipdetect.DualIPResult, error)
 	ShowUIFn                 func() error
 	MinimizeToTrayFn         func() error
 	RequestExitFn            func()
@@ -67,10 +69,11 @@ type Config struct {
 
 // Agent is the user-session agent.
 type Agent struct {
-	cfg          Config
-	proxy        *systemproxy.Manager
-	proxyProbe   func(context.Context, string) error
-	currentProxy func() (systemproxy.ProxyConfig, error)
+	cfg             Config
+	proxy           *systemproxy.Manager
+	proxyProbe      func(context.Context, string) error
+	externalIPCheck func(context.Context, string) (ipdetect.DualIPResult, error)
+	currentProxy    func() (systemproxy.ProxyConfig, error)
 
 	serviceCh            *pipe.Channel // connection to service
 	serviceMu            sync.Mutex    // serializes request/response pairs on serviceCh
@@ -95,6 +98,8 @@ type Agent struct {
 	ipProbeMu      sync.Mutex
 	ipProbeRunning bool
 	lastIPProbe    time.Time
+	lastIPProbeKey string
+	ipProbePayload map[string]interface{}
 
 	mu       sync.Mutex
 	running  bool
@@ -128,6 +133,10 @@ func New(cfg Config) (*Agent, error) {
 	if proxyProbe == nil {
 		proxyProbe = probeHTTPProxy
 	}
+	externalIPCheck := cfg.ExternalIPCheckFn
+	if externalIPCheck == nil {
+		externalIPCheck = checkExternalSystemProxyIP
+	}
 	proxyManager := cfg.ProxyManager
 	if proxyManager == nil {
 		proxyManager = systemproxy.NewManager()
@@ -136,6 +145,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg:                cfg,
 		proxy:              proxyManager,
 		proxyProbe:         proxyProbe,
+		externalIPCheck:    externalIPCheck,
 		currentProxy:       systemproxy.CurrentConfig,
 		environmentStore:   networkenv.NewStore(),
 		environmentRefresh: make(chan struct{}, 1),
@@ -711,6 +721,8 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 		return agentResponse(requestID, map[string]interface{}{
 			"readiness": readiness,
 		})
+	case "ip.check":
+		return a.handleIPCheck(ctx, requestID)
 	case "tun.enable":
 		return a.setCaptureModeContext(ctx, requestID, map[string]interface{}{"mode": "tun"})
 	case "proxy.enable":
@@ -735,9 +747,9 @@ func (a *Agent) dispatchUI(ctx context.Context, msg map[string]interface{}) map[
 		"subscription.list",
 		"outbound.list", "outbound.test", "outbound.testAll", "outbound.failover_candidates",
 		"runtime.status",
-		"metrics.current", "ip.check", "ip.check_all",
+		"metrics.current", "ip.check_all",
 		"diagnostics.export", "log.tail", "core.log.tail",
-		"logs.query", "logs.services", "logs.levels", "logs.clear.persisted":
+		"logs.query", "logs.services", "logs.categories", "logs.levels", "logs.clear.persisted":
 		// Forward to service
 		resp, err := a.SendToServiceContext(ctx, msg)
 		if err != nil {

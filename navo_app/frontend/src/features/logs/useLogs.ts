@@ -2,6 +2,7 @@ import { onBeforeUnmount, ref, type Ref } from "vue";
 import { apis } from "../../api/index";
 import type { LogEntry, LogMetadata, Page } from "../../types";
 import type { ApplicationExecute } from "../application/useApplicationFeedback";
+import { defaultLogCategorySelection, LOG_CATEGORIES, normalizeLogMetadata } from "./categories";
 
 interface UseLogsOptions {
   page: Ref<Page>;
@@ -11,8 +12,13 @@ interface UseLogsOptions {
 
 export function useLogs({ page, loading, execute }: UseLogsOptions) {
   const logs = ref<LogEntry[]>([]);
-  const logMetadata = ref<LogMetadata>({ levels: ["DEBUG", "INFO", "WARN", "ERROR"], services: [] });
+  const logMetadata = ref<LogMetadata>({
+    levels: ["DEBUG", "INFO", "WARN", "ERROR"],
+    categories: LOG_CATEGORIES.map((item) => item.id),
+    services: [],
+  });
   const selectedLogLevels = ref<string[]>(["INFO", "WARN", "ERROR"]);
+  const selectedLogCategories = ref<string[]>(defaultLogCategorySelection());
   const selectedLogServices = ref<string[]>([]);
   const logFrom = ref("");
   const logTo = ref("");
@@ -24,6 +30,7 @@ export function useLogs({ page, loading, execute }: UseLogsOptions) {
   function query(afterID: number) {
     return apis.logs.query({
       levels: selectedLogLevels.value,
+      categories: selectedLogCategories.value,
       services: selectedLogServices.value,
       from: logFrom.value ? new Date(logFrom.value).toISOString() : "",
       to: logTo.value ? new Date(logTo.value).toISOString() : "",
@@ -33,7 +40,7 @@ export function useLogs({ page, loading, execute }: UseLogsOptions) {
   }
 
   async function loadLogs() {
-    logMetadata.value = await apis.logs.metadata();
+    logMetadata.value = normalizeLogMetadata(await apis.logs.metadata());
     const result = await query(0);
     logs.value = result.entries ?? [];
     logCursor.value = result.next_cursor || 0;
@@ -51,8 +58,10 @@ export function useLogs({ page, loading, execute }: UseLogsOptions) {
     logHasMore.value = result.has_more;
   }
 
-  function toggleLogSelection(target: "level" | "service", value: string, checked: boolean) {
-    const selected = target === "level" ? selectedLogLevels : selectedLogServices;
+  function toggleLogSelection(target: "level" | "category" | "service", value: string, checked: boolean) {
+    const selected = target === "level"
+      ? selectedLogLevels
+      : target === "category" ? selectedLogCategories : selectedLogServices;
     const values = new Set(selected.value);
     checked ? values.add(value) : values.delete(value);
     selected.value = [...values];
@@ -91,6 +100,7 @@ export function useLogs({ page, loading, execute }: UseLogsOptions) {
     logs,
     logMetadata,
     selectedLogLevels,
+    selectedLogCategories,
     selectedLogServices,
     logFrom,
     logTo,

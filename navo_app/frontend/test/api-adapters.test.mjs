@@ -56,7 +56,7 @@ test("feature adapters delegate one intent to the matching Wails method", async 
   await diagnostics.cancelProxyBenchmark();
   await diagnostics.runLatencyTest("route-1");
   await diagnostics.runTrafficTransfer(8, "download");
-  await logs.query({ levels: ["ERROR"], services: [], from: "", to: "", after_id: 0, limit: 20 });
+  await logs.query({ levels: ["ERROR"], categories: ["basic_service"], services: [], from: "", to: "", after_id: 0, limit: 20 });
   await logs.metadata();
   await logs.clear();
   await runtime.dashboard();

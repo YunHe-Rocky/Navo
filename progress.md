@@ -1779,3 +1779,94 @@
 - Screenshot evidence: 551123 bytes, SHA-256 ED4FD13E847B7D4DA396400F5806D0083801B32742B4A248B68D107B81F9185B.
 - Removed three temporary browser-test cache files; retained only the copied screenshot.
 - Phase 72 complete. No live networking or unrelated process was changed; elevated physical TUN acceptance remains separate.
+
+## 2026-08-31 Phase 73
+
+- Received the request for classified log persistence, user level handling/filtering, and Basic Service as the default log view.
+- Restored the planning-with-files workflow, read repository rules, checked the relevant Navo memory index, and confirmed a clean worktree.
+- Added Phase 73 with explicit compatibility, redaction, legacy-record, and non-destructive-filtering constraints.
+- Starting the canonical logger/query/Wails/Vue contract map before changing product code.
+- Read the complete relevant log-enhancement specification plus the canonical store, Wails DTOs, composable, Settings template, and current store tests.
+- Confirmed severity is already persisted and backend-filtered; the missing visible behavior is a named Basic Service grouping/default rather than a new destructive log operation.
+- Continuing producer-to-category mapping and regression seam selection before code changes.
+- Completed the canonical producer map: structured logs currently originate as Launcher, Agent, Service-derived method services, and SelfHeal, with deterministic service names available before persistence.
+- Ran the required UI/UX design-system, Vue, and accessibility searches. The change will preserve the existing dense diagnostic surface, use semantic labeled controls, keep focus/loading behavior visible, and avoid a broad visual restyle.
+- Phase 73.1 is complete. Starting red regressions for persisted category, category query, legacy log compatibility, and Basic Service as the frontend default.
+- Added red store regressions for persisted category, category filtering, and deterministic legacy JSONL classification, plus frontend regressions for Basic Service default/labels and distinct service-level versus severity controls.
+- Frontend red state is confirmed: 0/2 PASS because the category module and Settings controls do not exist yet.
+- The Go red run is blocked before compilation by the empty/missing `x/sys` cache and a failed `proxy.golang.org` download; its source references intentionally require the not-yet-implemented Category contract.
+- Phase 73.2 is complete. Implementing the canonical store/query/DTO/UI classification path now.
+- Implemented category persistence/legacy derivation/filtering in `internal/logstore`, category validation and metadata IPC in Service/Agent, compatible Wails/TypeScript DTO additions, and the Basic Service frontend default.
+- Updated the Settings log UI into separate “日志级别 / 服务分级 / 具体服务” semantic fieldsets, added textual default guidance, category labels on rows, and reused existing theme tokens/layout.
+- Ran gofmt on all touched Go files.
+- Focused frontend category/API tests PASS 4/4.
+- Found the established repository-local Go caches at `.cache/go-build` and `.cache/go-path`; the next Go rerun will use them with `GOPROXY=off`.
+- Focused offline Go suites PASS: logstore 0.587s, Service 45.013s, Agent 3.144s.
+- Reviewed the complete product diff; `git diff --check` PASS with only repository CRLF conversion notices, and no unrelated source file is modified.
+- Normalized the newly touched TypeScript/Vue indentation after diff review.
+- Phase 73.3 is complete. Starting full Go test/vet and frontend test/typecheck/build gates before browser-visible verification.
+- Full Go test gate PASS across every package using repository-local offline caches.
+- Full Go vet gate PASS.
+- Full frontend gate PASS: 32/32 tests; Vue TypeScript check and Vite production build PASS with 68 modules in 3.00s.
+- Read the complete webapp-testing skill and ran its required `with_server.py --help`. Python Playwright is unavailable, so the browser check will reuse the repository's established Node Playwright/Wails mock approach.
+- Located the bundled Node Playwright runtime and existing Navo Wails bridge mocks. Preparing a dedicated logs UI smoke that asserts the initial Basic Service query, severity/category interaction, console cleanliness, day/night rendering, and compact-layout overflow.
+- Added `scripts/logs_ui_smoke.cjs` with filtered mock JSONL entries for Basic Service, Network & Capture, and Core Runtime.
+- First browser attempt reached the Vue server but timed out on an exact visible-label selector because the navigation button intentionally exposes a longer aria-label. Corrected the selector from source evidence.
+- The helper left its Vite child on port 4193; verified PID 28280 as this task's exact workspace/port child, stopped only it, and confirmed `VITE_LISTENER_4193=0`.
+- Second browser smoke PASS: initial query category `basic_service`, default INFO/WARN/ERROR, category switch to `network_capture`, concrete TUN filter, severity exclusion, two themes, 760x900 compact layout, zero horizontal overflow, and zero console/page errors.
+- The helper again left its directly launched Vite process. Verified PID 27652 by exact command/port/start time, stopped only it, and confirmed `VITE_LISTENER_4193=0`.
+- Screenshot files and SHA-256 values were generated and copied to the task visualization directory. The managed image viewer remained blocked by the known ACL helper failure, so manual pixel inspection is not claimed; browser layout/theme/DOM assertions remain the visual acceptance evidence.
+- Added an explicit pre-interaction Basic Service night screenshot to the reusable smoke for final evidence.
+- Re-ran the final browser smoke under an interactive Vite session and closed it with explicit Ctrl+C; `LISTENER_COUNT=0`.
+- Final screenshots: default night `07053E41C23732D15D9C4716B5156939C17D343C5FB438A5FFBE5B02452CD983`; filtered night `1F903157D2270269C139C72E65512CDBB7AC595425EB7C0DEA553C6CD5B1D9C9`; filtered day `9150AA3369CEDFFBF2A1FAFEEF77F480DB2390268B5F28889DFBE10BFBB2A475`; compact day `72288C8569B0D33F891C790C370ABF4D7129956A4A2EC29CA3904A0C1EFBD6D4`.
+- Updated README with the structured JSONL path, persisted severity/service classification, combined filtering, and Basic Service default behavior.
+- Final smoke script syntax and `git diff --check` PASS; only repository CRLF conversion notices remain.
+- Phase 73.4 is complete. Bumped VERSION from 1.0.39 to 1.0.40 and starting the official portable directory/ZIP packaging path.
+- Official package script PASS: repeated full Go/frontend gates, Wails production build, directory verifier, archive verifier, and npm audit (0 vulnerabilities).
+- Built `release/Navo-1.0.40-portable-amd64` and matching ZIP; directory/archive both report `issues_found=0`.
+- `repair.exe check` PASS with zero issues. All three Navo-owned PE files report 1.0.40.0.
+- Final ZIP SHA-256: `66D57EC1334E375CBD5273A7C6CC9E87112CDE4FB246672B64E37D7F0FBA6517`; no Navo process is running.
+- Phase 73 is complete.
+
+## 2026-08-31 Phase 74
+
+- Received the V2 overview consistency report: one proxy is shown as two boxes, traffic is attributed to a local proxy, and exit detection is absent.
+- Restored repository rules, historical active/candidate and Dashboard boundaries, and the completed Phase 73 dirty-worktree scope; no existing changes were reverted.
+- Read the complete planning and UI/UX skill instructions and ran the required local design/chart/Vue guidance searches.
+- Added Phase 74 with canonical active-connection, single capture valve, DTO compatibility, request-ID, and real-data-plane constraints.
+- Starting exact source/DTO/test mapping before changing product code.
+- Read-only live state confirms the active proxy is external v2rayN/WinINet at `127.0.0.1:10808`; no Navo process is currently running.
+- Mapped the complete split: NetworkEnvironmentCard observes the external proxy; Overview hero/IP cards, traffic series, and Service `ip.check` still depend exclusively on Navo committed capture/Supervisor state.
+- A malformed read-only regex search failed once; reran it as literal matching and recorded the error without changing product state.
+- Phase 74.1 is complete. Starting red backend/frontend regressions for the external effective-connection projection, observed exit probe, one connection card, and honest traffic attribution.
+- Added backend and frontend red regressions; Go failed on the missing external IP seam and all four frontend Phase 74 cases failed as intended.
+- Implemented Agent external System Proxy endpoint normalization, dual-link IP detection, keyed cache, Dashboard evidence merge, and external-only `ip.check` interception.
+- Restored the old runtime exit compatibility after the first focused regression, then made external selection depend on the published Environment snapshot instead of host-global registry state.
+- Added the shared Vue effective-connection projection and routed overview, risk, traffic series, totals, history identity, source copy, and chart legend through it.
+- Merged the two overview IP cards into one current-connection evidence card and moved the Environment aggregate to Network Detection.
+- One multi-file patch stopped after partial success on a stale runtime default anchor; inspected and completed only the missing field defaults.
+- Focused Agent regressions PASS. Frontend focused suite PASS 15/15 and Vue typecheck PASS.
+- Phase 74.2 is complete. Phase 74.3 implementation is present; starting affected Go/frontend full gates and browser-visible external-v2rayN verification.
+- Corrected the remaining external-action mismatch: overview now offers external exit detection, and the completion message no longer implies Navo ChatGPT readiness while capture is off.
+- Frontend final gate PASS: 36/36 tests, Vue typecheck, and Vite production build with 69 modules.
+- The first affected Service package run failed one near-bound readiness timeout and a concurrent Xray version probe; both isolated tests passed, the full Service rerun passed, and full `go test ./...` then passed across all packages.
+- Full `go vet ./...` PASS.
+- Read the complete webapp-testing skill and required server-helper help. Python Playwright is absent; located and reused the existing bundled Node Playwright runtime with headless Edge.
+- Added and ran `scripts/external_proxy_ui_smoke.cjs`: one overview connection card, no duplicate IP/environment primary cards, external endpoint and dual-IP evidence, honest system-total traffic labels, diagnostics ownership detail, two themes, compact overflow 0, and zero page/console errors all PASS.
+- Closed the exact Vite session with Ctrl+C and confirmed listener count on 4194 is zero.
+- Screenshot viewer remained blocked by the known ACL helper; retained three screenshot files and hashes without claiming manual pixel review.
+- Current live v2rayN read-only gate PASS: direct and explicit-proxy exit IPs differ; proxy Google 204 and GitHub 200. Navo process count remains zero and external proxy state was not changed.
+- Phase 74.3 and 74.4 are complete. Starting the official 1.0.41 portable package path.
+- Official package script PASS after repeating full Go/frontend gates, npm audit, Wails production build, directory verification, and archive verification.
+- Built `release/Navo-1.0.41-portable-amd64` and matching ZIP; each verifier reports `issues_found=0`, and repair check reports zero issues.
+- All Navo PE versions are 1.0.41.0; ZIP SHA-256 is `2F0FDB3E58E21C64248B7BFF4A08B695D3216DC18DC636C145C4E1E630123511`.
+- Final runtime hygiene: no Navo process, no Vite listener on 4194, preserved v2rayN PID 17208 / sing-box PID 18036, and unchanged WinINet endpoint.
+- Phase 74 is complete.
+
+## 2026-08-31 Phase 75
+
+- Received the `OUTBOUND_REQUIRED` Agent/UIIPC log and the request for broader visual/layout refinement.
+- Re-read the complete planning-with-files and UI/UX skills, restored Phase 74 context and the dirty worktree, and preserved all prior changes.
+- Added Phase 75 with explicit fail-closed route admission, external-proxy ownership, state-aware recovery, responsive/accessibility, and portable-package constraints.
+- Starting the exact UI action/error/layout source map before adding regressions.
+- Ran the required UI/UX design-system plus focused UX and Vue searches. Rejected the marketing/mobile/glass/external-font recommendations and retained the applicable desktop hierarchy, density, error recovery, focus, touch-target, responsive, and reduced-motion rules.

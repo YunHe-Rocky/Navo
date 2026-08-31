@@ -44,9 +44,9 @@ button { padding-inline: 15px; font-size: var(--type-body); font-weight: 600; }
 .section-heading h3 { font-size: 18px; }
 .section-heading p { max-width: 780px; margin-top: 7px; font-size: var(--type-body); line-height: 1.65; }
 dt, dd { font-size: var(--type-meta); }
-.ip-card, .risk-card { min-height: 210px; padding: 20px; }
+.connection-evidence-card, .ip-card, .risk-card { min-height: 210px; padding: 20px; }
 .ip-card > p { font-size: var(--type-body); }
-.ip-card > small, .risk-card > small { margin-top: 14px; font-size: var(--type-caption); line-height: 1.55; }
+.ip-card > small, .risk-card > small, .connection-evidence-note { margin-top: 14px; font-size: var(--type-caption); line-height: 1.55; }
 .risk-card ul { font-size: var(--type-body); line-height: 1.75; }
 .speed-card, .chart-card { min-height: 292px; padding: 20px; }
 .speed-value small { font-size: var(--type-meta); }

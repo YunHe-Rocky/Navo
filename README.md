@@ -139,6 +139,8 @@ RequireSignature 用于已具备代码签名证书的正式环境。未签名构
 
 - 主数据目录：%LOCALAPPDATA%\Navo。
 - launcher 日志：优先写 package\log\navo.log；目录不可写时回退到 %LOCALAPPDATA%\Navo\log\navo.log。
+- 结构化日志：默认写入 %LOCALAPPDATA%\Navo\structured.log.jsonl；每条记录保存严重级别、服务分级、具体服务和组件，并在写入前脱敏。
+- 设置与日志页支持按严重级别、服务分级、具体服务和时间组合查询；首次打开默认展示“基础服务”，全部取消服务分级表示不限制分类。
 - 状态采用同目录临时文件、flush 和原子替换。
 - 订阅 URL、代理凭据和运行配置不得写入仓库、CI 日志或公开 artifacts。
 - artifacts\ 已忽略；历史诊断产物应在确认留存需求后单独脱敏或清理。

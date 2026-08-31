@@ -656,6 +656,8 @@ func (s *Service) dispatchUncached(ctx context.Context, msg map[string]interface
 		return s.handleLogsQuery(requestID, msg)
 	case "logs.services":
 		return response(requestID, map[string]interface{}{"services": logstore.Default().Services()})
+	case "logs.categories":
+		return response(requestID, map[string]interface{}{"categories": logstore.Categories()})
 	case "logs.levels":
 		return response(requestID, map[string]interface{}{"levels": []string{"DEBUG", "INFO", "WARN", "ERROR"}})
 	case "logs.clear.persisted":
@@ -1382,41 +1384,48 @@ func (s *Service) handleIPCheck(requestID string) map[string]interface{} {
 	if net.ParseIP(strings.TrimSpace(sourceResult.IP)) != nil && sourceResult.Error == "" {
 		sourceState = "available"
 	}
+	connectionKind := "direct"
+	if s.sup.State() == supervisor.StateRunning {
+		connectionKind = "navo"
+	}
 
 	return map[string]interface{}{
 		"request_id": requestID, "type": "RESPONSE",
 		"payload": map[string]interface{}{
+			"connection_kind": connectionKind,
 			"source": map[string]interface{}{
-				"available":  sourceState == "available",
-				"state":      sourceState,
-				"ip":         sourceResult.IP,
-				"country":    sourceResult.Country,
-				"city":       sourceResult.City,
-				"asn":        sourceResult.ASN,
-				"isp":        sourceResult.ISP,
-				"network":    sourceResult.Network,
-				"provider":   sourceResult.Provider,
-				"mobile":     sourceResult.Mobile,
-				"proxy":      sourceResult.Proxy,
-				"hosting":    sourceResult.Hosting,
-				"checked_at": sourceResult.CheckedAt,
-				"error":      sourceResult.Error,
+				"available":   sourceState == "available",
+				"state":       sourceState,
+				"outbound_id": sourceResult.OutboundID,
+				"ip":          sourceResult.IP,
+				"country":     sourceResult.Country,
+				"city":        sourceResult.City,
+				"asn":         sourceResult.ASN,
+				"isp":         sourceResult.ISP,
+				"network":     sourceResult.Network,
+				"provider":    sourceResult.Provider,
+				"mobile":      sourceResult.Mobile,
+				"proxy":       sourceResult.Proxy,
+				"hosting":     sourceResult.Hosting,
+				"checked_at":  sourceResult.CheckedAt,
+				"error":       sourceResult.Error,
 			},
 			"proxy": map[string]interface{}{
-				"available":  proxyState == "available",
-				"state":      proxyState,
-				"ip":         proxyResult.IP,
-				"country":    proxyResult.Country,
-				"city":       proxyResult.City,
-				"asn":        proxyResult.ASN,
-				"isp":        proxyResult.ISP,
-				"network":    proxyResult.Network,
-				"provider":   proxyResult.Provider,
-				"mobile":     proxyResult.Mobile,
-				"proxy":      proxyResult.Proxy,
-				"hosting":    proxyResult.Hosting,
-				"checked_at": proxyResult.CheckedAt,
-				"error":      proxyResult.Error,
+				"available":   proxyState == "available",
+				"state":       proxyState,
+				"outbound_id": proxyResult.OutboundID,
+				"ip":          proxyResult.IP,
+				"country":     proxyResult.Country,
+				"city":        proxyResult.City,
+				"asn":         proxyResult.ASN,
+				"isp":         proxyResult.ISP,
+				"network":     proxyResult.Network,
+				"provider":    proxyResult.Provider,
+				"mobile":      proxyResult.Mobile,
+				"proxy":       proxyResult.Proxy,
+				"hosting":     proxyResult.Hosting,
+				"checked_at":  proxyResult.CheckedAt,
+				"error":       proxyResult.Error,
 			},
 		},
 	}

@@ -1177,3 +1177,127 @@ Reproduce and repair the intermittent overview-panel data loss when TUN is enabl
 | System and bundled Python lacked the Playwright module | 2 | Used the bundled Node Playwright package with the same headless Edge timing scenario; no dependency was installed. |
 | The screenshot viewer was blocked by the managed ACL helper | 2 | Retained browser DOM/console assertions plus the generated screenshot and SHA-256; did not treat tool display as test evidence. |
 | The server helper stopped npm but left the verified workspace Vite child on port 4188 | 1 | Correlated PID 6928 by listener, executable, command line, workspace path, port, and start time; stopped only that process and confirmed zero listeners. |
+
+# Phase 73: hierarchical log persistence and user filtering (2026-08-31)
+
+## Goal
+
+Make Navo logs explicitly classified when persisted, let users select and process logs by level in the existing log UI, and make the log view open on the Basic Service category by default while preserving redaction, backward-compatible DTOs, bounded queries, and existing Service/Agent ownership boundaries.
+
+## Phases
+
+- [x] **73.1 Map the current contract** - Trace logger producers, persisted schema/files, query filters, Wails DTOs, category/level labels, UI defaults, and existing regression coverage.
+- [x] **73.2 Define red regressions** - Lock the intended persistence classification, user level filtering/handling semantics, legacy-entry compatibility, and Basic Service default selection.
+- [x] **73.3 Implement the focused change** - Extend the smallest canonical backend/frontend seams without exposing sensitive fields or duplicating log state.
+- [x] **73.4 Verify** - Run focused Go/frontend tests, full relevant gates, typecheck/build, and a browser-visible default/filter smoke; report packaging separately unless product code requires a release build.
+- [x] **73.5 Package** - Bump the continuing release to 1.0.40, build the official portable directory and ZIP, and verify package/archive manifests, versions, repair check, and SHA-256 without starting Navo or mutating networking.
+
+## Constraints
+
+- Preserve existing log redaction and never persist credentials, tokens, subscription bodies, or arbitrary unbounded structured fields.
+- Keep Service, Agent, and UI DTOs backward compatible; legacy log records without new classification fields must remain queryable.
+- User filtering must not rewrite, delete, or silently discard persisted logs unless the existing product contract already defines such an operation.
+- Opening the log view must deterministically select Basic Service without preventing the user from choosing other categories or levels.
+
+## Errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| Initial combined sandboxed read of skill, repository context, and memory failed at the managed ACL helper (`apply deny-read ACLs`) | 1 | Switched to bounded approved read-only calls; no workspace or runtime state changed. |
+| Initial sandboxed repository/planning inventory failed at the same ACL helper | 1 | Used a bounded approved read-only inventory, confirmed a clean worktree, and preserved all historical planning content. |
+| Native `apply_patch` could not read the three planning files because the managed ACL helper failed | 1 | Invoked the patch engine through its approved Windows binary with a repository-scoped patch. |
+| Two wrapper invocations lost the final patch marker before parsing and changed no files | 2 | Bypassed the batch wrapper and passed the exact multiline argument directly to the patch engine. |
+| The first direct multi-file patch applied the first two files before a stale `progress.md` anchor failed | 1 | Verified the exact partial state, preserved the correct planning/findings additions, and applied only the missing progress entry with its real EOF anchor. |
+| Read-only frontend manifest lookup used the obsolete `navo_app/frontend/package.json` path | 1 | Located the current manifest at `navo_app/package.json`; no file was changed. |
+| Read-only style lookup used the obsolete single `frontend/src/styles.css` path | 1 | Located the split stylesheet set under `frontend/src/styles/` and bounded subsequent reads to actual files. |
+| First parallel focused Go run yielded while downloading a missing locked module, so its final status was not captured | 1 | Re-ran with an explicit session poll; the preserved result exposed a network download failure rather than a source result. |
+| Focused Go red run could not fetch `golang.org/x/sys@v0.30.0` from `proxy.golang.org` over IPv6 | 1 | Treat this as an environment/cache gate, continue implementation from the already failing compile contract, then use the repository-local locked module cache or approved mirror for verification. |
+| First browser smoke used the visible navigation label as an exact accessible name | 1 | Read the rendered button contract and changed the selector to its explicit `设置与日志：<description>` aria-label prefix. |
+| The server helper stopped npm but left its verified Vite child listening on 4193 | 1 | Correlated PID 28280 by executable, exact workspace Vite command, port, and start time; stopped only that process and confirmed zero listeners. The retry starts Vite directly so the helper owns the actual server process. |
+| The helper also left its directly launched Vite process after the successful smoke | 1 | Correlated PID 27652 by exact Vite command, port 4193, and smoke start time; stopped only that process and confirmed zero listeners. Future reruns use an interactive server session with explicit Ctrl+C teardown. |
+| The managed image viewer could not read screenshots from either the workspace or the task visualization directory because the ACL helper failed | 2 | Retained browser DOM, computed overflow, theme, console/page-error assertions plus screenshot hashes; copied the images to the user-visible visualization directory and did not claim manual pixel inspection. |
+| A combined smoke/planning patch omitted the `task_plan.md` file header before an error-table hunk and failed before changing files | 1 | Verified the exact no-change state, added the missing file header, and reapplied the reviewed patch. |
+
+## Phase 73 completion evidence
+
+- Persistence/query: every new structured JSONL entry stores `level`, `category`, `service`, and `component`; legacy entries derive category from their existing service without rewriting the file.
+- User behavior: separate severity, service-category, and concrete-service filters; initial category is `basic_service`; clearing all categories means no category restriction.
+- Source gates: focused logstore/Service/Agent PASS; full `go test ./...`, `go vet ./...`, frontend 32/32, Vue typecheck, Vite build, and `git diff --check` PASS.
+- Browser gate: Basic Service default/query, Network & Capture + TUN switch, severity exclusion, day/night, 760x900, zero horizontal overflow, zero console/page errors PASS.
+- Package gate: official 1.0.40 portable directory and ZIP, directory/archive `issues_found=0`, repair `issues_found=0`, all Navo-owned PE versions 1.0.40.0, ZIP SHA-256 `66D57EC1334E375CBD5273A7C6CC9E87112CDE4FB246672B64E37D7F0FBA6517`.
+- No Navo process was launched by packaging; final Navo process count and Vite 4193 listener count are zero. Packaged/installed interactive runtime smoke was not needed for this log-only behavior and was not represented as executed.
+
+# Phase 74: unify V2 active proxy presentation, traffic attribution, and exit evidence (2026-08-31)
+
+## Goal
+
+When V2 has one effective Navo proxy connection, present it as one canonical active-connection surface. Make the real-time traffic chart and exit-IP evidence derive from the same committed capture/outbound snapshot, and expose an explicit pending/failure reason instead of labeling traffic as an unrelated local proxy or silently omitting exit detection.
+
+## Phases
+
+- [x] **74.1 Reproduce and map state ownership** - Identify the two visible boxes, their DTO/computed sources, the traffic source label, exit-IP projection, refresh cadence, and the exact V2 active/candidate/capture state returned by Dashboard.
+- [x] **74.2 Lock regressions** - Add focused tests for one canonical connection card, committed-state traffic attribution, exit evidence, and pending/error copy without weakening candidate/active semantics.
+- [x] **74.3 Implement unified projection** - Change the smallest backend/frontend seams so one active connection snapshot drives mode, route, chart source, and exit evidence.
+- [x] **74.4 Verify** - Run focused/full frontend and affected Go gates, typecheck/build, browser-visible mocked V2 smoke, and live read-only/runtime evidence where safe; keep real external traffic acceptance separate if credentials/elevation are unavailable.
+- [x] **74.5 Package** - Bump the continuing portable release to 1.0.41, run the official package gates, and verify the directory, ZIP, repair check, embedded versions, and SHA-256 without starting Navo or mutating the external proxy.
+
+## Constraints
+
+- Candidate selection must not be presented as active; only a committed `active_id` after the existing real-data-plane gate may represent the effective route.
+- `off`, `system_proxy`, and `tun` remain one mutually exclusive capture valve; do not merge their independent activation/rollback verification.
+- Preserve DTO compatibility, the shared single-flight Dashboard loader, traffic history stability, and Service child/UI parent request-ID separation.
+- Do not read or reuse v2rayN credentials/configuration, stop unrelated processes, or infer a successful exit from a listener/UI state alone.
+
+## Errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| Initial sandboxed memory/skill/repository reads failed at the managed ACL helper (`apply deny-read ACLs`) | 1 | Continued with bounded approved read-only calls; no workspace, process, or network state changed. |
+| Native `apply_patch` could not read the three planning files because the managed ACL helper failed | 1 | Invoke the same standard patch engine through its bounded approved Windows executable; the rejected attempt changed no file. |
+| A combined backend search included an incomplete regular expression for a Dashboard function | 1 | The read-only search failed before returning matches; reran the same bounded inventory with literal patterns and changed no file. |
+| The first multi-file effective-connection patch reached a stale shortened `state/runtime.ts` anchor after applying its earlier files | 1 | Inspected the exact partial state, retained the correct new module/type changes, and applied only the missing compatible Dashboard defaults with the current anchor. |
+| The first focused Agent run broke the old cached Dashboard exit-IP regression | 1 | Preserved cached Navo exit fields for direct/Navo compatibility and isolated them only when the effective source is external. |
+| The next Agent run observed the host's live external WinINet proxy inside an otherwise isolated unit test | 1 | Made effective external-proxy selection consume the published immutable Environment snapshot, restoring deterministic tests and the intended unified snapshot boundary. |
+| The first frontend green run failed because a deliberately partial projection fixture omitted the proxy DTO | 1 | Made the pure projection tolerate the missing optional nested proxy object; Vue typecheck already passed and the focused suite then passed 15/15. |
+| The first affected Service package gate failed its 10-second readiness bound and one concurrent Xray version probe | 1 | Read both exact paths, reran each test alone (PASS), then reran the complete Service package serially (PASS in 41.221s); retained the 9.16-second readiness margin as a test-timing risk. |
+| A read-only detector lookup guessed the nonexistent `internal/ipdetect/detector.go` path | 1 | Listed the package and inspected the actual `echo.go`; confirmed the direct detector explicitly sets `Transport.Proxy=nil`. |
+| Python Playwright was unavailable and the first Node fallback used the wrong bundled `NODE_PATH` | 2 | Confirmed the Python module error, located the existing Codex Playwright package, and reran the same headless Edge smoke successfully without installing dependencies. |
+| The managed image viewer could not read the new screenshots because the ACL helper failed | 1 | Retained Edge DOM/theme/layout/console assertions and SHA-256 evidence; do not claim manual pixel inspection. |
+
+## Phase 74 completion evidence
+
+- Effective connection: external WinINet proxy, committed Navo capture, and direct mode now resolve through one projection; selected/candidate-only Navo state cannot be rendered active.
+- Overview: exactly one primary connection evidence card; direct baseline is subordinate evidence and the detailed Environment aggregate is available on Network Detection.
+- Traffic: external proxy state uses real physical-interface counters labeled system total/external read-only; no external proxy-only metrics or connection counts are fabricated.
+- Exit: Agent probes the observed external endpoint and an independent no-proxy transport, caches by effective connection, and exposes provider/error/time evidence through backward-compatible DTO additions.
+- Source gates: full Go test/vet PASS; frontend 36/36, Vue typecheck and production build PASS; browser smoke PASS with zero console/page errors and zero 760px overflow.
+- Live read-only gate: current v2rayN direct/proxy exits differ, Google returns 204 and GitHub 200 through the explicit endpoint; no Navo or external network state was changed.
+- Package gate: official 1.0.41 portable directory and ZIP each report `issues_found=0`; repair check reports zero issues; all Navo-owned PE versions are 1.0.41.0; ZIP SHA-256 is `2F0FDB3E58E21C64248B7BFF4A08B695D3216DC18DC636C145C4E1E630123511`.
+
+# Phase 75: route-required recovery and overview layout refinement (2026-08-31)
+
+## Goal
+
+Stop the UI from issuing a doomed Navo capture request when only an external proxy is active and no Navo outbound is selected, present `OUTBOUND_REQUIRED` with a direct recovery action, and refine the desktop/compact layout into a clearer, more polished hierarchy without weakening backend fail-closed route admission.
+
+## Phases
+
+- [in_progress] **75.1 Reproduce and map** - Trace request `ui-1788144216306-38` from UI action through capture admission and log presentation; inventory shell, overview, grids, responsive breakpoints, and the highest-impact layout defects.
+- [ ] **75.2 Lock regressions** - Add focused tests for state-aware primary CTA, actionable `OUTBOUND_REQUIRED` feedback, and structural/responsive layout contracts before production edits.
+- [ ] **75.3 Implement** - Preserve the backend route gate while preventing the invalid UI action, add an explicit route-selection recovery path, and apply a restrained desktop-control-console visual/layout refinement using existing semantic tokens.
+- [ ] **75.4 Verify** - Run focused/full frontend and affected Go gates, typecheck/build, day/night desktop plus 1024/760/375/landscape browser checks, keyboard/focus/reduced-motion assertions, and zero-overflow/console-error checks.
+- [ ] **75.5 Package** - If source and browser gates pass, bump to 1.0.42 and produce the verified portable directory/ZIP without starting Navo or changing the external proxy.
+
+## Constraints
+
+- `OUTBOUND_REQUIRED` remains a fail-closed backend guarantee for Navo System Proxy/TUN; an observed v2rayN endpoint must never be reused as a Navo route.
+- External proxy observation remains read-only. Do not read its credentials/configuration, change WinINet, or stop v2rayN/sing-box.
+- A selected/candidate route is not active; a missing Navo route should guide the user to Connection Management rather than attempt capture.
+- Preserve Phase 73/74 dirty-worktree changes, DTO compatibility, Dashboard single-flight behavior, request-ID separation, and all existing network rollback boundaries.
+- Improve hierarchy, spacing, density, touch targets, focus visibility, and responsive reflow through shared tokens/components; avoid decorative restyling that obscures diagnostic truth.
+
+## Errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| The initial combined skill/context read exceeded the tool output limit | 1 | Paginated both required skill files to EOF, then restored the existing planning files and current diff before adding Phase 75. |

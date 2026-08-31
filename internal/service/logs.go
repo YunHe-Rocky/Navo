@@ -31,10 +31,18 @@ func (s *Service) handleLogsQuery(requestID string, msg map[string]interface{}) 
 			return errorResponse(requestID, "INVALID_ARGUMENT", fmt.Errorf("unsupported log level %q", value))
 		}
 	}
+	categories := make([]logstore.Category, 0)
+	for _, value := range logStringList(msg["categories"]) {
+		category, ok := logstore.ParseCategory(value)
+		if !ok {
+			return errorResponse(requestID, "INVALID_ARGUMENT", fmt.Errorf("unsupported log category %q", value))
+		}
+		categories = append(categories, category)
+	}
 	afterID := logNumberAsInt(msg["after_id"])
 	limit := logNumberAsInt(msg["limit"])
 	result := logstore.Default().Query(logstore.Query{
-		Levels: levels, Services: logStringList(msg["services"]),
+		Levels: levels, Categories: categories, Services: logStringList(msg["services"]),
 		From: from, To: to, AfterID: uint64(max(afterID, 0)), Limit: limit,
 	})
 	return response(requestID, map[string]interface{}{

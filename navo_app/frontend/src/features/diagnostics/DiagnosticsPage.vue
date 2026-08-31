@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NetworkEnvironmentCard from "../environment/NetworkEnvironmentCard.vue";
 import { useNavoApplicationContext } from "../application/context";
 
 const {
@@ -9,6 +10,7 @@ const {
   benchmark,
   benchmarkRunning,
   ipChecking,
+  effectiveConnection,
   directAndProxySame,
   proxyRisk,
   checkIP,
@@ -23,9 +25,11 @@ const {
 <template>
   <section class="page-content task-page ip-page">
     <div class="section-heading page-intro">
-      <div><span class="eyebrow">网络诊断</span><h2>主机与代理链路检测</h2><p>测速请求固定经过 Navo 本地代理，不会修改当前系统代理、TUN 或线路选择。</p></div>
+      <div><span class="eyebrow">网络诊断</span><h2>主机与代理链路检测</h2><p>双链路出口检测跟随当前有效连接；完整测速只使用 Navo 自有核心，所有检测均不会修改外部代理、TUN 或线路选择。</p></div>
       <button class="secondary" :disabled="ipChecking" @click="checkIP()">{{ ipChecking ? "检测中" : "检测双链路" }}</button>
     </div>
+
+    <NetworkEnvironmentCard />
   
     <div class="diagnostics-grid">
       <article class="host-panel">
@@ -66,10 +70,10 @@ const {
     </div>
   
     <div v-if="directAndProxySame" class="warning-banner">两条链路返回相同公网 IP，代理可能未生效。</div>
-    <div class="section-heading identity-heading"><div><span class="eyebrow">网络身份</span><h2>双链路 IP 检测</h2><p>直连请求和代理请求使用独立 HTTP Transport，任一风险服务失败都不会影响代理连接。</p></div></div>
+    <div class="section-heading identity-heading"><div><span class="eyebrow">网络身份</span><h2>双链路 IP 检测</h2><p>直连基线与当前有效出口使用独立 HTTP Transport；外部代理仅只读检测，不会被 Navo 接管。</p></div></div>
     <div class="ip-detail-grid">
       <article v-for="(result, key) in { source: ipDetection?.source, proxy: ipDetection?.proxy }" :key="key">
-        <div class="ip-result-heading"><span class="card-label">{{ key === "source" ? "直连公网 IP" : "代理出口 IP" }}</span><em :class="`state-${result?.state || 'unavailable'}`">{{ result?.state === "available" ? "可用" : result?.state === "inactive" ? "未启用" : "不可用" }}</em></div>
+        <div class="ip-result-heading"><span class="card-label">{{ key === "source" ? "直连基线 IP" : effectiveConnection.kind === "external_system_proxy" ? "外部代理出口 IP" : "Navo 代理出口 IP" }}</span><em :class="`state-${result?.state || 'unavailable'}`">{{ result?.state === "available" ? "可用" : result?.state === "inactive" ? "未启用" : "不可用" }}</em></div>
         <strong class="mono">{{ result?.ip || "尚未检测" }}</strong>
         <p v-if="result?.error" class="inline-error">{{ result.error }}</p>
         <dl>

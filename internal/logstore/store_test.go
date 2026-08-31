@@ -1,6 +1,7 @@
 package logstore
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,5 +68,51 @@ func TestStoreClearKeepsWritableFile(t *testing.T) {
 	}
 	if err := store.Append(Entry{Service: "Service", Message: "after"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStorePersistsCategoryAndFiltersByCategory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "structured.jsonl")
+	store := New(path, 20)
+	for _, entry := range []Entry{
+		{Level: LevelInfo, Service: "Service", Message: "service ready"},
+		{Level: LevelWarn, Service: "TUN", Message: "capture retry"},
+		{Level: LevelError, Service: "Subscription", Message: "source failed"},
+	} {
+		if err := store.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(persisted), `"category":"basic_service"`) ||
+		!strings.Contains(string(persisted), `"category":"network_capture"`) {
+		t.Fatalf("persisted categories missing: %s", persisted)
+	}
+
+	result := store.Query(Query{Categories: []Category{CategoryBasicService}})
+	if len(result.Entries) != 1 || result.Entries[0].Service != "Service" ||
+		result.Entries[0].Category != CategoryBasicService {
+		t.Fatalf("basic service result = %#v", result)
+	}
+}
+
+func TestStoreLoadsLegacyEntriesIntoDeterministicCategory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.jsonl")
+	legacy := `{"id":7,"timestamp":"2026-08-01T10:00:00Z","level":"INFO","service":"Agent","message":"legacy request"}` + "\n"
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := New(path, 20)
+	if err := store.Load(); err != nil {
+		t.Fatal(err)
+	}
+	result := store.Query(Query{Categories: []Category{CategoryBasicService}})
+	if len(result.Entries) != 1 || result.Entries[0].Category != CategoryBasicService {
+		t.Fatalf("legacy category result = %#v", result)
 	}
 }

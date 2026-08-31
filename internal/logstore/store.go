@@ -24,10 +24,29 @@ const (
 	LevelError Level = "ERROR"
 )
 
+type Category string
+
+const (
+	CategoryBasicService       Category = "basic_service"
+	CategoryNetworkCapture     Category = "network_capture"
+	CategoryCoreRuntime        Category = "core_runtime"
+	CategorySubscriptionUpdate Category = "subscription_update"
+	CategoryOther              Category = "other"
+)
+
+var categories = []Category{
+	CategoryBasicService,
+	CategoryNetworkCapture,
+	CategoryCoreRuntime,
+	CategorySubscriptionUpdate,
+	CategoryOther,
+}
+
 type Entry struct {
 	ID        uint64         `json:"id"`
 	Timestamp time.Time      `json:"timestamp"`
 	Level     Level          `json:"level"`
+	Category  Category       `json:"category"`
 	Service   string         `json:"service"`
 	Component string         `json:"component,omitempty"`
 	Message   string         `json:"message"`
@@ -35,12 +54,13 @@ type Entry struct {
 }
 
 type Query struct {
-	Levels   []Level
-	Services []string
-	From     time.Time
-	To       time.Time
-	AfterID  uint64
-	Limit    int
+	Levels     []Level
+	Categories []Category
+	Services   []string
+	From       time.Time
+	To         time.Time
+	AfterID    uint64
+	Limit      int
 }
 
 type Result struct {
@@ -95,9 +115,11 @@ func (s *Store) Append(entry Entry) error {
 	if entry.Level == "" {
 		entry.Level = LevelInfo
 	}
-	if strings.TrimSpace(entry.Service) == "" || strings.TrimSpace(entry.Message) == "" {
+	entry.Service = strings.TrimSpace(entry.Service)
+	if entry.Service == "" || strings.TrimSpace(entry.Message) == "" {
 		return fmt.Errorf("structured log service and message are required")
 	}
+	entry.Category = normalizeCategory(entry.Category, entry.Service)
 	entry.ID = s.nextID.Add(1)
 	entry.Message = redact(entry.Message)
 	entry.Fields = redactFields(entry.Fields)
@@ -148,6 +170,10 @@ func (s *Store) Query(query Query) Result {
 	for _, level := range query.Levels {
 		levels[level] = struct{}{}
 	}
+	categories := make(map[Category]struct{}, len(query.Categories))
+	for _, category := range query.Categories {
+		categories[category] = struct{}{}
+	}
 	services := make(map[string]struct{}, len(query.Services))
 	for _, service := range query.Services {
 		services[strings.ToLower(service)] = struct{}{}
@@ -160,6 +186,11 @@ func (s *Store) Query(query Query) Result {
 		}
 		if len(levels) > 0 {
 			if _, ok := levels[entry.Level]; !ok {
+				continue
+			}
+		}
+		if len(categories) > 0 {
+			if _, ok := categories[entry.Category]; !ok {
 				continue
 			}
 		}
@@ -209,6 +240,11 @@ func (s *Store) Load() error {
 		if json.Unmarshal(scanner.Bytes(), &entry) != nil || entry.ID == 0 {
 			continue
 		}
+		entry.Service = strings.TrimSpace(entry.Service)
+		if entry.Service == "" {
+			continue
+		}
+		entry.Category = normalizeCategory(entry.Category, entry.Service)
 		loaded = append(loaded, entry)
 		if entry.ID > maxID {
 			maxID = entry.ID
@@ -225,6 +261,38 @@ func (s *Store) Load() error {
 	s.nextID.Store(maxID)
 	s.mu.Unlock()
 	return nil
+}
+
+func Categories() []Category {
+	return append([]Category(nil), categories...)
+}
+
+func ParseCategory(value string) (Category, bool) {
+	category := Category(strings.ToLower(strings.TrimSpace(value)))
+	for _, known := range categories {
+		if category == known {
+			return category, true
+		}
+	}
+	return "", false
+}
+
+func normalizeCategory(category Category, service string) Category {
+	if parsed, ok := ParseCategory(string(category)); ok {
+		return parsed
+	}
+	switch strings.ToLower(strings.TrimSpace(service)) {
+	case "launcher", "ui", "agent", "service", "selfheal":
+		return CategoryBasicService
+	case "capture", "tun", "systemproxy", "networkmonitor", "ipdetection":
+		return CategoryNetworkCapture
+	case "supervisor", "sing-box", "mihomo", "xray", "coreupdate":
+		return CategoryCoreRuntime
+	case "subscription":
+		return CategorySubscriptionUpdate
+	default:
+		return CategoryOther
+	}
 }
 
 func (s *Store) Services() []string {

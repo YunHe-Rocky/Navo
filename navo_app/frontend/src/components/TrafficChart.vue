@@ -8,6 +8,7 @@ const props = defineProps<{
   stopped?: boolean;
   statusLabel?: string;
   compact?: boolean;
+  localMetricLabel?: string;
 }>();
 
 const hovered = ref<number | null>(null);
@@ -16,14 +17,14 @@ const width = 720;
 const height = 220;
 const pad = 22;
 
-const series = [
-  { id: "localUploadBps", label: "本机出口上传", symbol: "↑" },
-  { id: "localDownloadBps", label: "本机入口下载", symbol: "↓" },
+const series = computed(() => [
+  { id: "localUploadBps", label: props.localMetricLabel ? `${props.localMetricLabel}上传` : "本机出口上传", symbol: "↑" },
+  { id: "localDownloadBps", label: props.localMetricLabel ? `${props.localMetricLabel}下载` : "本机入口下载", symbol: "↓" },
   { id: "proxyUploadBps", label: "代理业务上传", symbol: "⇧" },
   { id: "proxyDownloadBps", label: "代理业务下载", symbol: "⇩" },
-] as const;
+] as const);
 
-const visible = computed(() => series.filter((item) => props.visibleSeries.includes(item.id)));
+const visible = computed(() => series.value.filter((item) => props.visibleSeries.includes(item.id)));
 const peak = computed(() => Math.max(
   1,
   ...props.points.flatMap((point) => visible.value.map((item) => point[item.id])),
@@ -31,7 +32,7 @@ const peak = computed(() => Math.max(
 const paths = computed(() => Object.fromEntries(
   visible.value.map((item) => [item.id, linePath(item.id)]),
 ) as Partial<Record<TrafficSeries, string>>);
-const averages = computed(() => Object.fromEntries(series.map((item) => [
+const averages = computed(() => Object.fromEntries(series.value.map((item) => [
   item.id,
   props.points.length
     ? props.points.reduce((sum, point) => sum + point[item.id], 0) / props.points.length

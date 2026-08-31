@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useNavoApplicationContext } from "../application/context";
 import { formatLogEvidence } from "../logs/presenter";
+import { logCategoryLabel } from "../logs/categories";
 
 const {
   page,
   logs,
   logMetadata,
   selectedLogLevels,
+  selectedLogCategories,
   selectedLogServices,
   logFrom,
   logTo,
@@ -77,7 +79,7 @@ const {
   
     <article class="settings-log-card">
       <div class="section-heading">
-        <div><span class="eyebrow">诊断日志</span><h2>结构化诊断日志</h2><p>后端按级别、服务、时间与游标查询；敏感字段写入前脱敏。</p></div>
+        <div><span class="eyebrow">诊断日志</span><h2>结构化诊断日志</h2><p>日志按严重级别和服务分级保存；打开时默认展示基础服务，敏感字段写入前脱敏。</p></div>
   			<div class="log-actions">
   				<button class="secondary" :disabled="loading" @click="refreshLogs">查询</button>
   				<button class="secondary" @click="clearVisibleLogs">清空当前显示</button>
@@ -85,16 +87,17 @@ const {
   			</div>
       </div>
   			<div class="log-filters">
-  				<fieldset><legend>级别</legend><label v-for="level in logMetadata.levels" :key="level"><input type="checkbox" :checked="selectedLogLevels.includes(level)" @change="toggleLogSelection('level', level, ($event.target as HTMLInputElement).checked)" />{{ level }}</label></fieldset>
-  				<fieldset><legend>服务</legend><label v-for="service in logMetadata.services" :key="service"><input type="checkbox" :checked="selectedLogServices.includes(service)" @change="toggleLogSelection('service', service, ($event.target as HTMLInputElement).checked)" />{{ service }}</label><small v-if="!logMetadata.services.length">尚无结构化事件</small></fieldset>
+				<fieldset><legend>日志级别</legend><label v-for="level in logMetadata.levels" :key="level"><input type="checkbox" :checked="selectedLogLevels.includes(level)" @change="toggleLogSelection('level', level, ($event.target as HTMLInputElement).checked)" />{{ level }}</label></fieldset>
+				<fieldset><legend>服务分级</legend><label v-for="category in logMetadata.categories" :key="category"><input type="checkbox" :checked="selectedLogCategories.includes(category)" @change="toggleLogSelection('category', category, ($event.target as HTMLInputElement).checked)" />{{ logCategoryLabel(category) }}</label><small>默认基础服务；全部取消表示不限分级</small></fieldset>
+				<fieldset><legend>具体服务</legend><label v-for="service in logMetadata.services" :key="service"><input type="checkbox" :checked="selectedLogServices.includes(service)" @change="toggleLogSelection('service', service, ($event.target as HTMLInputElement).checked)" />{{ service }}</label><small v-if="!logMetadata.services.length">尚无结构化事件</small></fieldset>
   				<label>起始时间<input v-model="logFrom" type="datetime-local" /></label>
   				<label>截止时间<input v-model="logTo" type="datetime-local" /></label>
   				<label class="log-follow"><input type="checkbox" :checked="logFollow" @change="setLogFollow(($event.target as HTMLInputElement).checked)" />实时跟随</label>
   			</div>
   			<div class="log-view structured">
   				<div v-if="!logs.length" class="empty-state"><strong>暂无日志</strong><p>当前筛选条件没有结构化事件。</p></div>
-  				<div v-for="entry in logs" :key="entry.id" :class="`level-${entry.level.toLowerCase()}`">
-					<span>{{ new Date(entry.timestamp).toLocaleString() }}</span><b>{{ entry.level }}</b><i>{{ entry.service }}<template v-if="entry.component"> / {{ entry.component }}</template></i><code>{{ entry.message }}</code>
+				<div v-for="entry in logs" :key="entry.id" v-memo="[entry.id, entry.category]" :class="`level-${entry.level.toLowerCase()}`">
+					<span>{{ new Date(entry.timestamp).toLocaleString() }}</span><b>{{ entry.level }}</b><i :title="`${logCategoryLabel(entry.category)} · ${entry.service}`">{{ logCategoryLabel(entry.category) }} · {{ entry.service }}<template v-if="entry.component"> / {{ entry.component }}</template></i><code>{{ entry.message }}</code>
 					<small v-if="formatLogEvidence(entry)" class="log-evidence">{{ formatLogEvidence(entry) }}</small>
   				</div>
   			</div>

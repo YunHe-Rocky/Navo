@@ -67,7 +67,7 @@ export function useNavoApplication() {
   
   const logsFeature = useLogs({ page, loading, execute });
   const {
-    logs, logMetadata, selectedLogLevels, selectedLogServices, logFrom, logTo,
+    logs, logMetadata, selectedLogLevels, selectedLogCategories, selectedLogServices, logFrom, logTo,
     logHasMore, logFollow, loadLogs, refreshLogs, loadMoreLogs, toggleLogSelection,
     clearVisibleLogs, clearPersistedLogs, setLogFollow,
   } = logsFeature;
@@ -110,7 +110,15 @@ export function useNavoApplication() {
     checkIP, checkConnection, loadHostStatus, runBenchmark, cancelBenchmark, runLayeredLatency,
   } = diagnostics;
 
-  const traffic = useTraffic({ dashboard, captureMode, benchmark, notice, failure, beginActivity, finishActivity, loadDashboard: loadDashboardSnapshot });
+  const runtimeOverview = useRuntimeOverview({ dashboard, activeRoute, captureMode, ipDetection });
+  const {
+    appState, effectiveConnection, connectionIcon, networkHealthLabel,
+    directAndProxySame, activeRisk, proxyRisk, connectionLabel,
+  } = runtimeOverview;
+  const traffic = useTraffic({
+    dashboard, effectiveConnection, benchmark, notice, failure,
+    beginActivity, finishActivity, loadDashboard: loadDashboardSnapshot,
+  });
   const {
     trafficPoints, simulatedTrafficPoints, trafficSimulationSize, trafficSimulationDirection,
     trafficTransferRunning, metricsAvailable, trafficDisplayPoints, activeTrafficSeries,
@@ -139,8 +147,6 @@ export function useNavoApplication() {
     removeSubscription, refreshAllSubscriptions,
   } = subscriptionsFeature;
 
-  const runtimeOverview = useRuntimeOverview({ dashboard, activeRoute, captureMode, ipDetection });
-  const { appState, networkHealthLabel, directAndProxySame, activeRisk, proxyRisk, connectionLabel } = runtimeOverview;
   const { startupSettings, loadStartupSettings, configureStartup } = useStartupSettings(execute);
   function setTheme(mode: ThemeMode) {
     theme.value = mode;
@@ -172,7 +178,7 @@ export function useNavoApplication() {
   
   const cardFeedbackTimers = new WeakMap<HTMLElement, number>();
   const cardFeedbackSelector = [
-    ".ip-card", ".risk-card", ".speed-card", ".chart-card", ".config-card",
+    ".connection-evidence-card", ".ip-card", ".risk-card", ".speed-card", ".chart-card", ".config-card",
     ".advanced-card", ".form-card", ".data-panel", ".core-grid article",
     ".diagnostic-card", ".ip-detail-grid article", ".risk-panel",
     ".host-panel", ".benchmark-panel", ".settings-log-card",
@@ -245,6 +251,7 @@ export function useNavoApplication() {
     logs,
     logMetadata,
     selectedLogLevels,
+    selectedLogCategories,
     selectedLogServices,
     logFrom,
     logTo,
@@ -305,6 +312,8 @@ export function useNavoApplication() {
     routingListMode,
     routingRuleCounts,
     appState,
+    effectiveConnection,
+    connectionIcon,
     pageTitle,
     currentNavigation,
     networkHealthLabel,

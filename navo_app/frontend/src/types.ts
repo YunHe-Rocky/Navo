@@ -296,16 +296,22 @@ export interface Dashboard {
   };
   metrics: MetricsStatus;
   ip: {
+    connection_kind: "direct" | "navo" | "external_system_proxy" | string;
     proxy_ip: string;
     proxy_country: string;
     direct_ip: string;
-    proxy_error?: string;
-    direct_error?: string;
+    proxy_error: string;
+    direct_error: string;
+    proxy_provider: string;
+    direct_provider: string;
+    proxy_checked_at: string;
+    direct_checked_at: string;
     probe_pending?: boolean;
   };
 }
 
 export interface IPDetectionResult {
+  outbound_id?: string;
   available?: boolean;
   state?: "available" | "inactive" | "unavailable";
   ip: string;
@@ -323,6 +329,7 @@ export interface IPDetectionResult {
 }
 
 export interface IPDetection {
+  connection_kind?: "direct" | "navo" | "external_system_proxy" | string;
   source: IPDetectionResult;
   proxy: IPDetectionResult;
 }
@@ -477,6 +484,7 @@ export interface LogEntry {
 	id: number;
 	timestamp: string;
 	level: "DEBUG" | "INFO" | "WARN" | "ERROR";
+	category: string;
 	service: string;
 	component: string;
 	message: string;
@@ -485,6 +493,7 @@ export interface LogEntry {
 
 export interface LogQuery {
 	levels: string[];
+	categories: string[];
 	services: string[];
 	from: string;
 	to: string;
@@ -500,5 +509,6 @@ export interface LogQueryResult {
 
 export interface LogMetadata {
 	levels: string[];
+	categories: string[];
 	services: string[];
 }
