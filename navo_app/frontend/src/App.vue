@@ -21,6 +21,7 @@ const {
   loading,
   notice,
   failure,
+  routeRequired,
   activityVisible,
   activityLabel,
   activityProgress,
@@ -40,6 +41,7 @@ const {
   setTheme,
   showCardFeedback,
   changePage,
+  goToRouteSelection,
   setCapture,
   connectionLabel,
   performCloseAction,
@@ -73,7 +75,7 @@ const {
       </nav>
       <div class="service-state">
         <StateGlyph :state="appState.icon" size="sm" />
-        <div><strong>{{ connectionLabel() }}</strong><small>{{ activeRoute?.name || dashboard.core.core_id }}</small></div>
+        <div><strong :title="connectionLabel()">{{ connectionLabel() }}</strong><small>{{ activeRoute?.name || dashboard.core.core_id }}</small></div>
       </div>
     </aside>
 
@@ -92,8 +94,11 @@ const {
       </div>
 
       <div class="feedback" aria-live="polite">
-        <p v-if="failure" class="error">{{ failure }}</p>
-        <p v-else-if="notice" class="success">{{ notice }}</p>
+        <section v-if="failure" class="feedback-panel error" role="alert">
+          <div><strong>操作未完成</strong><p>{{ failure }}</p></div>
+          <button v-if="routeRequired" class="feedback-action" @click="goToRouteSelection">前往连接管理</button>
+        </section>
+        <p v-else-if="notice" class="feedback-panel success" role="status">{{ notice }}</p>
       </div>
 
       <div

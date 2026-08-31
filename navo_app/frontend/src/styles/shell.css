@@ -1,33 +1,34 @@
-.app-shell { display: grid; grid-template-columns: 246px minmax(0, 1fr); height: 100%; background: radial-gradient(circle at 85% 0%, var(--shell-glow), transparent 36%); }
-.sidebar { display: flex; min-height: 0; flex-direction: column; padding: 18px 12px 14px; border-right: 2px solid var(--border); background: linear-gradient(165deg, var(--sidebar-highlight), var(--sidebar) 48%, color-mix(in srgb, var(--sidebar) 90%, var(--contrast-soft))); }
+.app-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100%; background: radial-gradient(circle at 85% 0%, var(--shell-glow), transparent 36%); }
+.sidebar { display: flex; min-height: 0; flex-direction: column; padding: 16px 11px 13px; border-right: 1px solid var(--border); background: linear-gradient(165deg, var(--sidebar-highlight), var(--sidebar) 48%, color-mix(in srgb, var(--sidebar) 90%, var(--contrast-soft))); }
 .brand { display: flex; align-items: center; gap: 11px; min-height: 54px; padding: 0 8px 16px; border-bottom: 2px solid var(--border); }
 .brand > .state-glyph { align-self: center; }
 .brand > div strong, .brand > div span { display: block; }
 .brand strong { font: 700 17px "Cascadia Code", Consolas, monospace; letter-spacing: 0.04em; }
 .brand span { margin-top: 2px; color: var(--text-dim); font-size: 10px; }
-.sidebar nav { display: grid; gap: 14px; margin-top: 16px; overflow-y: auto; }
+.sidebar nav { display: grid; gap: 10px; margin-top: 13px; overflow-y: auto; }
 .nav-group { display: grid; gap: 4px; }
 .nav-group + .nav-group { padding-top: 13px; border-top: 1px solid var(--border-soft); }
 .nav-group > h2 { margin: 0 10px 3px; color: var(--text-dim); font: 650 10px/1.4 "Segoe UI Variable", "Segoe UI", sans-serif; letter-spacing: .08em; }
-.sidebar nav button { display: flex; width: 100%; align-items: center; gap: 11px; min-height: 52px; padding: 7px 10px; border-color: transparent; text-align: left; background: transparent; }
+.sidebar nav button { display: flex; width: 100%; align-items: center; gap: 11px; min-height: 48px; padding: 7px 10px; border-color: transparent; text-align: left; background: transparent; }
 .sidebar nav button svg { width: 17px; height: 17px; color: var(--text-dim); }
 .sidebar nav button > span { display: grid; min-width: 0; gap: 2px; }
 .sidebar nav button strong { color: inherit; font-size: 12.5px; font-weight: 650; }
 .sidebar nav button small { overflow: hidden; color: var(--text-dim); font-size: 9.5px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar nav button:not(.active) small { display: none; }
 .sidebar nav button.active { position: relative; color: var(--selection-text); border-color: var(--selection-border); background: var(--selection-fill); box-shadow: var(--selection-shadow); overflow: hidden; isolation: isolate; }
 .sidebar nav button.active svg { color: var(--blue); }
 .sidebar nav button.active small { color: var(--text-muted); }
-.service-state { display: flex; align-items: center; gap: 10px; min-height: 58px; margin-top: auto; padding: 10px; border: 2px solid var(--border); border-radius: var(--radius-md); background: var(--raised-fill); box-shadow: var(--panel-shadow); }
+.service-state { display: flex; align-items: center; gap: 10px; min-height: 56px; margin-top: auto; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--raised-fill); box-shadow: var(--panel-shadow); }
 .service-state strong, .service-state small { display: block; }
-.service-state strong { font-size: 11px; }
+.service-state strong { max-width: 132px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .service-state small { max-width: 115px; margin-top: 3px; overflow: hidden; color: var(--text-dim); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 
 main { min-width: 0; overflow: auto; }
 .sidebar nav, main, .changelog-text { scrollbar-width: none; -ms-overflow-style: none; }
 .sidebar nav::-webkit-scrollbar, main::-webkit-scrollbar, .changelog-text::-webkit-scrollbar { width: 0; height: 0; }
-header { position: sticky; z-index: 20; top: 0; display: flex; align-items: center; justify-content: space-between; min-height: 82px; padding: 14px 24px; border-bottom: 2px solid var(--border); background: linear-gradient(110deg, var(--header-highlight), transparent 42%), var(--header-bg); backdrop-filter: blur(14px); }
+header { position: sticky; z-index: 20; top: 0; display: flex; align-items: center; justify-content: space-between; min-height: 68px; padding: 10px 22px; border-bottom: 1px solid var(--border); background: linear-gradient(110deg, var(--header-highlight), transparent 42%), var(--header-bg); backdrop-filter: blur(14px); }
 .page-heading > span { display: block; margin-bottom: 3px; color: var(--cyan); font-size: 10px; font-weight: 650; letter-spacing: .06em; }
-.page-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
+.page-heading p { display: none; }
 header button { display: flex; align-items: center; gap: 8px; }
 header button svg { width: 16px; height: 16px; }
 .theme-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }
@@ -46,7 +47,7 @@ header button svg { width: 16px; height: 16px; }
   pointer-events: none;
   animation: selected-edge-trace 620ms cubic-bezier(.2, .75, .2, 1) both;
 }
-.activity-progress { position: sticky; z-index: 19; top: 82px; padding: 8px 24px 9px; border-bottom: 1px solid var(--border); background: var(--surface); box-shadow: 0 8px 30px rgba(0,0,0,.14); }
+.activity-progress { position: sticky; z-index: 19; top: 68px; padding: 8px 22px 9px; border-bottom: 1px solid var(--border); background: var(--surface); box-shadow: 0 8px 30px rgba(0,0,0,.14); }
 .activity-progress > div { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px; color: var(--text-muted); font: 9px "Cascadia Code", Consolas, monospace; }
 .activity-progress > div b { color: var(--cyan); font-weight: 700; }
 .activity-progress > i { position: relative; display: block; height: 5px; overflow: hidden; border: 1px solid var(--border); background: var(--motion-surface); }
@@ -61,7 +62,12 @@ header button svg { width: 16px; height: 16px; }
   from { transform: translateX(-110%); }
   to { transform: translateX(610%); }
 }
-.feedback { position: fixed; z-index: 40; top: 16px; left: 50%; transform: translateX(-50%); }
-.feedback p { min-width: 280px; margin: 0; padding: 10px 15px; border: 1px solid; border-radius: var(--radius-sm); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35); font-size: 12px; text-align: center; }
+.feedback { position: fixed; z-index: 40; top: 12px; left: 50%; width: min(640px, calc(100vw - 32px)); transform: translateX(-50%); pointer-events: none; }
+.feedback-panel { min-width: 0; margin: 0; padding: 11px 12px 11px 15px; border: 1px solid; border-radius: var(--radius-sm); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3); font-size: var(--type-meta); text-align: left; pointer-events: auto; }
+.feedback section.feedback-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.feedback-panel strong, .feedback-panel p { display: block; margin: 0; }
+.feedback-panel strong { margin-bottom: 2px; color: currentColor; }
+.feedback-panel p { line-height: 1.45; }
 .feedback .error { color: #ffd5d8; border-color: #80414a; background: #35171d; }
-.feedback .success { color: #c9f5df; border-color: #286a4c; background: #102d21; }
+.feedback .success { color: #c9f5df; border-color: #286a4c; background: #102d21; text-align: center; }
+.feedback-action { flex: 0 0 auto; min-height: 38px; color: inherit; border-color: currentColor; background: transparent; }

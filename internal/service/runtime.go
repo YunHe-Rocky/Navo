@@ -959,6 +959,12 @@ func (s *Service) applyRuntimeConfigLocked(
 	selectedID string,
 	mode string,
 ) error {
+	if s.sup != nil && s.sup.WarmIdle() {
+		s.invalidateSystemProxyWarmLocked()
+		if err := s.stopCoreForCapture(ctx); err != nil {
+			return fmt.Errorf("stop warm System Proxy core before runtime mutation: %w", err)
+		}
+	}
 	next := s.runtime
 	if mode != "" {
 		next.Mode = mode

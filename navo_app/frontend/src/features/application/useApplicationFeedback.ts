@@ -16,6 +16,7 @@ export function useApplicationFeedback(initial: UIState, hooks: ApplicationFeedb
   const loading = ref(initial.loading);
   const notice = ref(initial.notice);
   const failure = ref(initial.failure);
+  const routeRequired = ref(false);
   const activityVisible = ref(false);
   const activityLabel = ref(initial.activityLabel);
   const activityProgress = ref(0);
@@ -48,6 +49,7 @@ export function useApplicationFeedback(initial: UIState, hooks: ApplicationFeedb
     loading.value = true;
     failure.value = "";
     notice.value = "";
+    routeRequired.value = false;
     beginActivity(progressLabel || success || "正在处理请求");
     try {
       await action();
@@ -62,6 +64,12 @@ export function useApplicationFeedback(initial: UIState, hooks: ApplicationFeedb
     }
   };
 
+  function setRouteRequired(message: string) {
+    notice.value = "";
+    failure.value = message;
+    routeRequired.value = true;
+  }
+
   onBeforeUnmount(() => {
     if (activityTimer) clearInterval(activityTimer);
     if (activityHideTimer) clearTimeout(activityHideTimer);
@@ -71,11 +79,13 @@ export function useApplicationFeedback(initial: UIState, hooks: ApplicationFeedb
     loading,
     notice,
     failure,
+    routeRequired,
     activityVisible,
     activityLabel,
     activityProgress,
     beginActivity,
     finishActivity,
     execute,
+    setRouteRequired,
   };
 }

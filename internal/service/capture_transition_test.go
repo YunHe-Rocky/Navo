@@ -11,6 +11,7 @@ import (
 	"navo/internal/domain/capture"
 	"navo/internal/monitor"
 	"navo/internal/network"
+	"navo/internal/supervisor"
 )
 
 type fakeOutboundProber struct {
@@ -116,6 +117,81 @@ func TestCaptureServiceIPCRequestTimeoutCoversHardVerification(t *testing.T) {
 	}
 	if got := serviceIPCRequestTimeout(map[string]interface{}{"method": "core.status"}); got != defaultServiceIPCRequestTimeout {
 		t.Fatalf("default timeout = %s", got)
+	}
+}
+
+func TestGatherTUNPreparationRunsIndependentReadsConcurrently(t *testing.T) {
+	directStarted := make(chan struct{}, 1)
+	planStarted := make(chan struct{}, 1)
+	release := make(chan struct{})
+	direct := func(context.Context) (string, error) {
+		directStarted <- struct{}{}
+		<-release
+		return "198.51.100.10", nil
+	}
+	plan := func(context.Context) (network.TUNActivationPlan, *compiler.Outbound, bool, error) {
+		planStarted <- struct{}{}
+		<-release
+		return network.TUNActivationPlan{SessionID: "session-parallel"}, nil, true, nil
+	}
+	done := make(chan tunPreparation, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		preparation, err := gatherTUNPreparation(context.Background(), direct, plan)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		done <- preparation
+	}()
+	select {
+	case <-directStarted:
+	case <-time.After(time.Second):
+		t.Fatal("direct baseline did not start")
+	}
+	select {
+	case <-planStarted:
+	case <-time.After(time.Second):
+		t.Fatal("activation plan did not start before direct baseline completed")
+	}
+	close(release)
+	select {
+	case err := <-errCh:
+		t.Fatal(err)
+	case preparation := <-done:
+		if preparation.directIP != "198.51.100.10" || preparation.plan.SessionID != "session-parallel" || !preparation.directMode {
+			t.Fatalf("preparation = %#v", preparation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parallel preparation did not finish")
+	}
+}
+
+func TestSystemProxyWarmLeaseRequiresExactIdentityPIDAndExpiry(t *testing.T) {
+	now := time.Date(2026, 8, 31, 11, 0, 0, 0, time.UTC)
+	identity := systemProxyWarmIdentity{
+		coreID: "sing-box", selectedOutbound: "node-1", revisionID: "runtime-1",
+		configHash: "hash-1", configPath: "runtime-1.json", pid: 1234,
+	}
+	lease := systemProxyWarmLease{}
+	lease.remember(identity, RuntimeRoutingVerification{Verified: true, VerifiedAt: now})
+	lease.retain(now, 90*time.Second)
+	status := supervisor.SupervisorStatus{State: supervisor.StateRunning, PID: 1234}
+	if !lease.reusable(identity, status, now.Add(89*time.Second)) {
+		t.Fatal("exact healthy warm identity was rejected before expiry")
+	}
+	mismatch := identity
+	mismatch.configHash = "hash-2"
+	if lease.reusable(mismatch, status, now.Add(time.Second)) {
+		t.Fatal("warm lease accepted a different config hash")
+	}
+	status.PID = 5678
+	if lease.reusable(identity, status, now.Add(time.Second)) {
+		t.Fatal("warm lease accepted a different process")
+	}
+	status.PID = 1234
+	if lease.reusable(identity, status, now.Add(90*time.Second)) {
+		t.Fatal("warm lease remained reusable at expiry")
 	}
 }
 

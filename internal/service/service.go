@@ -60,6 +60,7 @@ type Config struct {
 	DeferCoreStart       bool                 // combined desktop starts disconnected
 	EnableExternalPipe   bool                 // standalone Service IPC only; disabled in desktop process
 	TUNDataPlaneVerifier TUNDataPlaneVerifier // optional deterministic verifier for tests
+	SystemProxyWarmTTL   time.Duration        // bounded loopback-core retention after explicit user disable; zero uses 90s default, negative disables
 }
 
 // Service is the Windows Service that manages the proxy core and TUN infrastructure.
@@ -88,6 +89,12 @@ type Service struct {
 	tunFault        string
 	coreDetectOnce  sync.Once
 	coreDetections  []coreDetection
+	warmMu          sync.Mutex
+	systemProxyWarm systemProxyWarmLease
+	warmTimer       *time.Timer
+	warmGeneration  uint64
+	warmTTL         time.Duration
+	nowFn           func() time.Time
 
 	subMgr             *subscription.Manager
 	upstreamMgr        *upstreamproxy.Manager
@@ -141,6 +148,12 @@ func New(cfg Config) (*Service, error) {
 	}
 	if cfg.ProxyPort == 0 {
 		cfg.ProxyPort = 12080
+	}
+	warmTTL := cfg.SystemProxyWarmTTL
+	if warmTTL == 0 {
+		warmTTL = defaultSystemProxyWarmTTL
+	} else if warmTTL < 0 {
+		warmTTL = 0
 	}
 
 	// The launcher validates and pins this exact binary. Never replace it with
@@ -233,6 +246,8 @@ func New(cfg Config) (*Service, error) {
 		selectionRepo:    cfg.SelectionRepository,
 		revisionRepo:     cfg.RevisionRepository,
 		coreAdapters:     coreadapter.NewDefaultRegistry(),
+		warmTTL:          warmTTL,
+		nowFn:            time.Now,
 		tunVerifier:      cfg.TUNDataPlaneVerifier,
 		stopCh:           make(chan struct{}),
 		readyCh:          make(chan struct{}),
@@ -399,6 +414,7 @@ func (s *Service) shutdown() error {
 	// Wait for an in-flight selection/core switch before stopping the active host.
 	s.captureMu.Lock()
 	defer s.captureMu.Unlock()
+	s.invalidateSystemProxyWarmLocked()
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 

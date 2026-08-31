@@ -236,6 +236,24 @@ func TestCrashMonitorOutlivesStartupRequestContext(t *testing.T) {
 	t.Fatal("supervisor stopped monitoring when startup request context ended")
 }
 
+func TestWarmIdleCoreCrashDoesNotRestart(t *testing.T) {
+	mock := &mockCoreHost{}
+	s := NewSupervisor(mock, nil)
+	s.backoff = []time.Duration{time.Millisecond}
+	if err := s.Start(context.Background(), "config.json"); err != nil {
+		t.Fatal(err)
+	}
+	s.SetWarmIdle(true)
+	mock.status.State = host.HostStateFailed
+	s.handleCrash(context.Background(), "config.json")
+	if mock.startCalls != 1 {
+		t.Fatalf("warm-idle crash restarted core: start_calls=%d", mock.startCalls)
+	}
+	if s.State() != StateStopped || s.WarmIdle() {
+		t.Fatalf("warm-idle crash state = %s warm=%t", s.State(), s.WarmIdle())
+	}
+}
+
 func TestSupervisor_DoubleStart(t *testing.T) {
 	mock := &mockCoreHost{}
 	s := NewSupervisor(mock, nil)

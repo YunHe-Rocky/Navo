@@ -3,7 +3,7 @@
 .capture-modal h2 { margin: 8px 0 10px; font-size: 20px; }
 .capture-modal p { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
 .capture-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-.page-content { width: min(1420px, 100%); min-height: calc(100vh - 82px); padding: 20px 24px 32px; margin: 0 auto; }
+.page-content { width: min(1320px, 100%); min-height: calc(100vh - 68px); padding: 20px 24px 32px; margin: 0 auto; }
 
 .primary { color: #fff; border-color: var(--border); background: var(--cyan); font-weight: 700; box-shadow: var(--panel-shadow); }
 .primary:hover:not(:disabled) { color: var(--active-text); border-color: var(--text); background: var(--hover-bg); }

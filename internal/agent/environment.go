@@ -65,7 +65,9 @@ func (a *Agent) refreshEnvironment(parent context.Context) networkenv.Snapshot {
 		Version: networkenv.SnapshotVersion, CollectedAt: collectedAt,
 		Transition: networkenv.TransitionSnapshot{
 			Busy: transaction.Busy, ID: transaction.ID,
-			Operation: string(transaction.Operation), Phase: string(transaction.Phase),
+			Operation: string(transaction.Operation), Intent: string(transaction.Intent),
+			Domain: string(transaction.Domain), Priority: transaction.Priority,
+			Phase:       string(transaction.Phase),
 			FaultDomain: transaction.FaultDomain,
 		},
 		Capture: networkenv.CaptureSnapshot{

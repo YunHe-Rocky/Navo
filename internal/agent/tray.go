@@ -83,7 +83,7 @@ func (a *Agent) handleConnectionRestart(
 		ctx, requestID, connection.OperationRecovery, connection.OriginUser, "capture",
 	)
 	if err != nil {
-		return agentError(requestID, "CONNECTION_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CONNECTION_BUSY", err)
 	}
 	defer func() { finishConnectionResponse(transaction, result) }()
 	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
@@ -112,7 +112,7 @@ func (a *Agent) handleNetworkRecover(
 		ctx, requestID, connection.OperationRecovery, connection.OriginUser, "network",
 	)
 	if err != nil {
-		return agentError(requestID, "CONNECTION_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CONNECTION_BUSY", err)
 	}
 	defer func() { finishConnectionResponse(transaction, result) }()
 	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {

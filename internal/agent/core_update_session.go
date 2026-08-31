@@ -56,7 +56,7 @@ func (a *Agent) handleCoreUpdateBegin(
 		"core",
 	)
 	if err != nil {
-		return agentError(requestID, "CONNECTION_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CONNECTION_BUSY", err)
 	}
 	fail := func(code string, cause error) map[string]interface{} {
 		transaction.Finish(cause)

@@ -58,6 +58,9 @@ type TransitionSnapshot struct {
 	Busy        bool   `json:"busy"`
 	ID          string `json:"id,omitempty"`
 	Operation   string `json:"operation,omitempty"`
+	Intent      string `json:"intent,omitempty"`
+	Domain      string `json:"domain,omitempty"`
+	Priority    int    `json:"priority,omitempty"`
 	Phase       string `json:"phase,omitempty"`
 	FaultDomain string `json:"fault_domain,omitempty"`
 }

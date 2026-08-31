@@ -241,6 +241,9 @@ Phase 42 error log: the normal shell cannot query the elevated Agent pipe (`Acce
 
 | Error | Attempt | Resolution |
 |---|---:|---|
+| Phase 76 focused Go tests could not populate the isolated module cache because direct `proxy.golang.org` connections timed out | 1 | No test compiled and no product state changed; rerun with process-local HTTP(S) proxy variables through the already-preserved external endpoint. |
+| First Service build used TUN `VerifyResult` for a System Proxy warm lease | 1 | Compiler rejected the mismatch before tests; keep the model strongly typed and switch it to `RuntimeRoutingVerification` instead of using an untyped payload. |
+| Strong-type correction initially missed the two helper return signatures | 1 | Compiler caught both declarations; aligned retain/resume signatures with `RuntimeRoutingVerification` before any Service test ran. |
 | Flutter SDK missing at script default path | 1 | Replace the obsolete Flutter package pipeline with Wails. |
 | Previous planning files were absent and catch-up helper path did not exist | 1 | Recreated planning files in the repository root and continued from repository state. |
 | `go get` could not write the user-wide module and checksum caches | 2 | Use repository-local `GOPATH`, `GOMODCACHE` and `GOCACHE` paths. |
@@ -1282,11 +1285,11 @@ Stop the UI from issuing a doomed Navo capture request when only an external pro
 
 ## Phases
 
-- [in_progress] **75.1 Reproduce and map** - Trace request `ui-1788144216306-38` from UI action through capture admission and log presentation; inventory shell, overview, grids, responsive breakpoints, and the highest-impact layout defects.
-- [ ] **75.2 Lock regressions** - Add focused tests for state-aware primary CTA, actionable `OUTBOUND_REQUIRED` feedback, and structural/responsive layout contracts before production edits.
-- [ ] **75.3 Implement** - Preserve the backend route gate while preventing the invalid UI action, add an explicit route-selection recovery path, and apply a restrained desktop-control-console visual/layout refinement using existing semantic tokens.
-- [ ] **75.4 Verify** - Run focused/full frontend and affected Go gates, typecheck/build, day/night desktop plus 1024/760/375/landscape browser checks, keyboard/focus/reduced-motion assertions, and zero-overflow/console-error checks.
-- [ ] **75.5 Package** - If source and browser gates pass, bump to 1.0.42 and produce the verified portable directory/ZIP without starting Navo or changing the external proxy.
+- [x] **75.1 Reproduce and map** - Trace request `ui-1788144216306-38` from UI action through capture admission and log presentation; inventory shell, overview, grids, responsive breakpoints, and the highest-impact layout defects.
+- [x] **75.2 Lock regressions** - Add focused tests for state-aware primary CTA, actionable `OUTBOUND_REQUIRED` feedback, and structural/responsive layout contracts before production edits.
+- [x] **75.3 Implement** - Preserve the backend route gate while preventing the invalid UI action, add an explicit route-selection recovery path, and apply a restrained desktop-control-console visual/layout refinement using existing semantic tokens.
+- [x] **75.4 Verify** - Run focused/full frontend and affected Go gates, typecheck/build, day/night desktop plus 1024/760/375/landscape browser checks, keyboard/focus/reduced-motion assertions, and zero-overflow/console-error checks.
+- [x] **75.5 Package** - If source and browser gates pass, bump to 1.0.42 and produce the verified portable directory/ZIP without starting Navo or changing the external proxy.
 
 ## Constraints
 
@@ -1301,3 +1304,60 @@ Stop the UI from issuing a doomed Navo capture request when only an external pro
 | Error | Attempt | Resolution |
 |---|---:|---|
 | The initial combined skill/context read exceeded the tool output limit | 1 | Paginated both required skill files to EOF, then restored the existing planning files and current diff before adding Phase 75. |
+| The first full frontend run exceeded the existing 400-line application-controller boundary by one trailing line | 1 | Kept route navigation as a composition-time return callback instead of adding another controller method; build was already green and the boundary is rerun below. |
+| First Phase 75 Edge run found 82 px horizontal overflow on Settings at 375x812 while Overview passed | 1 | Server/browser lifecycle closed cleanly; instrumented the reusable layout assertion to name actual offending elements before changing CSS. |
+| The post-layout Edge run reached the final reduced-motion check but its regex rejected Chromium's valid scientific notation `1e-05s` | 1 | Parse CSS time units numerically and assert at most 1 ms; product motion was already correctly reduced to 0.01 ms. |
+| Manual screenshot QA showed files labeled `night` had followed Edge's light system preference | 1 | Explicitly click and assert both `night` and `day` theme state before their matrices; do not infer theme coverage from filenames. |
+| First 1.0.42 package run could not populate its isolated Go module cache because direct `proxy.golang.org` IPv6 connections timed out | 1 | The source gate failed before release output mutation. Reverified live WinINet `127.0.0.1:10808`, sing-box ownership, and HTTP 200 to the exact module through the proxy; rerun with process-local HTTP(S) proxy variables only. |
+| Second package run passed full Go tests but `npm ci` could not unlink the loaded Rolldown native binding | 1 | Found seven orphaned Vite children from this task's managed browser runs by exact `D:\WorkSpace\Navo\navo_app` path and port 4195. Stopped only those verified PIDs; no TimeBack or external proxy process was touched, and listener/wrapper counts are now zero. |
+
+## Phase 75 completion evidence
+
+- Admission/recovery: missing-route Overview renders `选择 Navo 线路`; login startup and capture preflight the shared predicate before IPC; Agent `OUTBOUND_REQUIRED` remains unchanged as the fail-closed boundary.
+- Frontend gates: focused 6/6 and full 42/42 PASS; Vue typecheck, Vite production build (70 modules), and `git diff --check` PASS.
+- Browser gate: explicit day/night, 1440x900, 1024x768, 760x900, 375x812, and 667x375; eight page-layout checks with maximum overflow 0; capture/startup bridge calls 0; visible 2 px focus; reduced motion 0.01 ms; zero console/page errors.
+- Package gate: official 1.0.42 directory and 28-file ZIP each report `issues_found=0`; independent `repair.exe check` reports zero issues; all three Navo PE files report 1.0.42.0.
+- ZIP: 64,684,118 bytes; SHA-256 `4981F15A7287F4632F720B2A0D3079AECA659FA8B9BB845E6B3AB18DCE76286B`.
+- Final hygiene: Navo process count 0, Navo Vite process count 0, port 4195 listener count 0; WinINet remains enabled at `127.0.0.1:10808`, owned by the preserved v2rayN sing-box PID 18036.
+
+# Phase 76: intent-scoped priority scheduling and warm activation leases (2026-08-31)
+
+## Goal
+
+Make user-selected actions take the highest safe priority within the affected control domain instead of forcing every Agent operation through one global ranking, and reduce repeated System Proxy/TUN activation latency by reusing exact, recently verified preparation/lifecycle evidence within bounded mode-specific leases without skipping ownership, health, data-plane, rollback, or request-identity guarantees.
+
+## Phases
+
+- [x] **76.1 Map the current control path and latency budget** - Trace UI intent through Agent dispatch, Coordinator/Service serialization, compile/CoreHost/capture verification, retry/recovery/background work, and identify which steps/processes are already long-lived versus rebuilt on every activation.
+- [x] **76.2 Define policy and red regressions** - Specify domain lanes, intent classes, preemption/coalescing rules, commit barriers, mode-specific lease keys/expiry/invalidation, and tests that prove interactive actions win only where safe.
+- [x] **76.3 Implement the minimal scheduler/lease seams** - Thread typed intent metadata through existing request boundaries, prioritize/coalesce queued work per domain, and reuse only an exact healthy warm lease while retaining fail-closed fallback to the full path.
+- [x] **76.4 Verify latency and correctness** - Run focused/full Go and frontend gates, deterministic scheduler/expiry/invalidation tests, measured cold/warm System Proxy and TUN paths where safely reproducible, cancellation/rollback/recovery races, and process/network residue checks.
+- [x] **76.5 Package** - After source and runtime gates pass, increment the portable release, produce directory/ZIP, and verify manifests, repair, versions, SHA-256, and preserved external processes.
+
+## Constraints
+
+- Priority is a policy matrix `(intent × domain × phase)`, not one global numeric queue. Independent observations may remain parallel; every network mutation stays serialized under the existing control owner.
+- A newer high-priority request may supersede queued/pre-commit work, but must not interrupt an irreversible commit/rollback section. Shutdown, rollback, and ownership-loss safety always outrank convenience.
+- Preserve UI parent versus Agent/Service child request identity, at-most-once replay behavior, Candidate/Active promotion, Dashboard single-flight loading, and the mutually exclusive OFF/System Proxy/TUN capture valve.
+- A warm lease is valid only for the exact core, outbound/revision, runtime/routing policy, capture mode, compiled config hash, ownership epoch, and verified environment fingerprint. Expiry, drift, process loss, health failure, recovery, or user configuration changes invalidate it immediately.
+- Never use a lease to present stale readiness or skip the final safe acceptance required for a changed network state. TUN may cache preparation artifacts even when its capture process cannot safely stay alive after rollback.
+- Preserve external v2rayN/sing-box and WinINet ownership; no external credentials/configuration are read or reused.
+
+## Errors encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| Managed ACL helper rejected the first sandboxed planning/repository reads and native patch call | 2 | Continued with bounded approved reads and the same standard patch engine through its Windows executable; no product or network state changed. |
+| First focused Go run could not populate the isolated module cache because direct downloads timed out | 1 | Reused the already observed external proxy only as process-local HTTP(S) transport for the test command; WinINet and v2rayN ownership stayed unchanged. |
+| Initial Service lease integration exposed a strong runtime-evidence type mismatch and then incomplete retain/resume return signatures | 2 | Tightened the lease to the exact `RuntimeRoutingVerification` type, corrected every return path, formatted, and reran the full Service package twice successfully. |
+
+## Phase 76 completion evidence
+
+- Policy: Agent/Coordinator now derives an explicit intent and domain for every transaction. Safety, interactive, recovery, startup, and background work are ranked only inside the relevant capture/routing/core/source domain; equal-rank user work remains FIFO, queued lower-priority same-domain work can be superseded with `REQUEST_SUPERSEDED`, and an active commit/rollback is never preempted.
+- System Proxy lease: explicit user OFF can retain the exact healthy owned loopback core for 90 seconds by default. Reuse requires the same core/outbound/revision/config and host hashes, config path, PID, active runtime, no TUN, selected/active agreement, and a fresh CoreHost health check; expiry, drift, crash, recovery, mutation, or shutdown invalidates it and falls back to the cold path.
+- TUN latency: no TUN process, adapter, routes, or DNS state is retained while OFF. Fresh direct-IP baseline and fresh activation-plan construction now run concurrently, followed by the unchanged pinned compile, core start, physical activation, data-plane verification, and healthy commit gates.
+- Source gates: final full `go test ./...`, `go vet ./...`, frontend 42/42, Vue typecheck, Vite production build (70 modules), and `git diff --check` PASS. Coordinator/Supervisor repeated concurrency tests PASS 20/20; warm lifecycle/TUN concurrency tests PASS 20/20.
+- Package gate: official 1.0.43 package flow repeated Go/frontend/audit/build verification and produced a 28-file portable directory and ZIP. Official plus independent verifier report `issues_found=0`; packaged repair reports `issues_found=0`, `fixable=false`.
+- Artifacts: ZIP is 66,300,689 bytes with SHA-256 `9F9FA7B1CE73AD2CEB27440AAE613A21D8F3B663310595A76EC15971F4AC4F20`. `navo.exe`, `repair.exe`, and `app_ui/navo_app.exe` all report 1.0.43.0 with SHA-256 values `F88C12D59A34F537BABF35E1EBBFA99D3A13CD31E78ADA0DF34C0F1D20711FF7`, `4D49313AD716F2109E4B507CE8E3924C8F7B1A04A6F464FFCB5E1BD29435FF65`, and `77470BF8887622F81A963015015F0E1BB040A282C20CBEE24BD47FDE35B50A4E`, respectively.
+- Final hygiene: Navo process count 0, Navo Vite process count 0, ports 4195/12080 listener count 0. WinINet remains enabled at `127.0.0.1:10808`, owned by the preserved v2rayN sing-box PID 8936; no external process or network setting was changed.
+- Residual acceptance: deterministic tests prove same-PID zero-stop/start warm reuse and exact expiry/drift fallback, but no live Navo route was configured and no physical System Proxy/TUN state was mutated. Therefore real-host warm/cold wall-clock reduction and elevated TUN DNS/TCP/HTTPS/exit-IP acceptance remain unclaimed.

@@ -796,6 +796,9 @@ func (a *Agent) setCaptureModeContext(
 		return agentError(requestID, "INVALID", fmt.Errorf("unsupported capture mode %q", mode))
 	}
 	if err := a.transitionCaptureMode(ctx, target); err != nil {
+		if errors.Is(err, connection.ErrSuperseded) {
+			return agentError(requestID, "REQUEST_SUPERSEDED", err)
+		}
 		if strings.HasPrefix(err.Error(), "TUN_REQUIRES_ADMIN:") {
 			return agentError(requestID, "TUN_REQUIRES_ADMIN", err)
 		}

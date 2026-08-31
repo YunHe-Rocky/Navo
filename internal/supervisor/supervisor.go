@@ -30,6 +30,7 @@ type Supervisor struct {
 	restartCount      int
 	totalRestarts     int
 	restartSuppressed bool
+	warmIdle          bool
 
 	// Config management
 	activeConfigPath string
@@ -66,6 +67,7 @@ func (s *Supervisor) Start(ctx context.Context, configPath string) error {
 	// A user/coordinator initiated start begins a new recovery budget. Internal
 	// crash restarts call startCore directly and retain the consecutive count.
 	s.restartCount = 0
+	s.warmIdle = false
 	s.mu.Unlock()
 
 	// Transition to RECONCILE
@@ -105,6 +107,7 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	state := s.state
 	cancel := s.cancel
+	s.warmIdle = false
 	s.mu.Unlock()
 
 	if state == StateStopped {
@@ -265,6 +268,31 @@ func (s *Supervisor) SetRestartSuppressed(suppressed bool) {
 	s.mu.Unlock()
 }
 
+// SetWarmIdle marks a running loopback-only core as retained for a bounded
+// System Proxy lease. A warm-idle crash is treated as lease loss and must not
+// consume recovery budget or restart a core while capture is committed off.
+func (s *Supervisor) SetWarmIdle(warm bool) {
+	s.mu.Lock()
+	s.warmIdle = warm && s.state == StateRunning
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) WarmIdle() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.warmIdle
+}
+
+func (s *Supervisor) consumeWarmIdle() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.warmIdle {
+		return false
+	}
+	s.warmIdle = false
+	return true
+}
+
 func (s *Supervisor) restartIsSuppressed() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -384,6 +412,11 @@ func (s *Supervisor) handleCrash(ctx context.Context, configPath string) {
 	s.mu.Unlock()
 	if previousLifecycleCancel != nil {
 		previousLifecycleCancel()
+	}
+	if s.consumeWarmIdle() {
+		s.setState(StateStopped)
+		log.Printf("[supervisor] warm-idle core exited; lease invalidated without restart")
+		return
 	}
 	if s.restartIsSuppressed() {
 		s.setState(StateFailed)

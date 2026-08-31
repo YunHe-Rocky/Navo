@@ -5,6 +5,7 @@ import type { CaptureMode, Dashboard } from "../../types";
 import { errorMessage } from "../application/formatters";
 import type { ApplicationExecute } from "../application/useApplicationFeedback";
 import { captureLabel } from "../runtime/presenter";
+import { derivePrimaryConnectionAction, requiresNavoRoute } from "../runtime/routeRecovery";
 
 interface UseCaptureOptions {
   dashboard: Ref<Dashboard>;
@@ -12,15 +13,15 @@ interface UseCaptureOptions {
   failure: Ref<string>;
   loadDashboard: () => Promise<void>;
   execute: ApplicationExecute;
+  setRouteRequired: (message: string) => void;
 }
 
-export function useCapture({ dashboard, loading, failure, loadDashboard, execute }: UseCaptureOptions) {
+export function useCapture({ dashboard, loading, failure, loadDashboard, execute, setRouteRequired }: UseCaptureOptions) {
   const dismissedFaultID = ref("");
   const tunRetryButton = ref<HTMLButtonElement>();
   const captureMode = computed(() => captureModeOf(dashboard.value));
-  const captureRouteMissing = computed(() =>
-    dashboard.value.runtime.mode !== "direct" && !dashboard.value.runtime.selected_id,
-  );
+  const captureRouteMissing = computed(() => requiresNavoRoute(dashboard.value));
+  const primaryConnectionAction = computed(() => derivePrimaryConnectionAction(dashboard.value));
   const captureTransitioning = computed(() =>
     ["starting_system_proxy", "starting_tun", "stopping", "recovering"].includes(dashboard.value.capture.state),
   );
@@ -78,7 +79,7 @@ export function useCapture({ dashboard, loading, failure, loadDashboard, execute
 
   async function setCapture(mode: CaptureMode) {
     if (mode !== "off" && captureRouteMissing.value) {
-      failure.value = "请先添加并选择一条可用线路，再开启系统代理或 TUN。";
+      setRouteRequired("请先前往连接管理添加并选择一条由 Navo 管理的可用线路，再开启系统代理或 TUN；当前外部代理不会被 Navo 借用。");
       return;
     }
     startCapturePoll();
@@ -104,6 +105,7 @@ export function useCapture({ dashboard, loading, failure, loadDashboard, execute
     tunRetryButton,
     captureMode,
     captureRouteMissing,
+    primaryConnectionAction,
     captureTransitioning,
     showTUNFault,
     toggleConnection,

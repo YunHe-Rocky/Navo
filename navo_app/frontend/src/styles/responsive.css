@@ -1,6 +1,7 @@
 @media (max-width: 1120px) {
-  .app-shell { grid-template-columns: 214px minmax(0, 1fr); }
+  .app-shell { grid-template-columns: 196px minmax(0, 1fr); }
   .overview-grid { grid-template-columns: 1fr 1fr; }
+  .connection-evidence-grid { grid-template-columns: 1fr; }
   .recovery-evidence-grid { grid-template-columns: 1fr 1fr; }
   .risk-card { grid-column: auto; min-height: auto; }
   .monitor-grid { grid-template-columns: 1fr; }
@@ -16,7 +17,7 @@
 }
 
 @media (max-width: 860px) {
-  .app-shell { grid-template-columns: 72px minmax(0, 1fr); }
+  .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
   .brand { justify-content: center; padding-inline: 0; }
   .brand > div, .sidebar nav button > span, .nav-group > h2 { display: none; }
   .sidebar nav button { justify-content: center; padding: 0; }
@@ -37,7 +38,7 @@
   .risk-signals { grid-template-columns: 1fr 1fr; }
   .benchmark-values { grid-template-columns: 1fr 1fr; }
   .settings-runtime { grid-template-columns: 1fr 1fr; }
-  .startup-settings-card { grid-template-columns: 1fr 1fr; align-items: start; }
+  .startup-settings-card { grid-template-columns: 1fr; align-items: start; }
 	.latency-metrics { grid-template-columns: 1fr 1fr; }
 	.traffic-simulation-card { align-items: stretch; flex-direction: column; }
 	.simulation-controls { justify-content: flex-start; }
@@ -54,6 +55,55 @@
 	.capture-method-options, .mode-entry-options, .routing-policy-options { grid-template-columns: 1fr; }
 	.routing-rule-heading { align-items: flex-start; flex-direction: column; }
 	.routing-list-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  .app-shell { grid-template-columns: 64px minmax(0, 1fr); }
+  .sidebar { padding-inline: 7px; }
+  header { min-height: 64px; padding-inline: 12px; }
+  .page-heading > span { display: none; }
+  .activity-progress { top: 64px; padding-inline: 12px; }
+  .page-content { padding: 16px 12px 28px; }
+  .page-intro, .connection-page-intro { min-height: 0; padding: 0 0 12px; border-left: 0; }
+  .hero-status, .hero-copy, .hero-actions, .section-heading { align-items: stretch; flex-direction: column; }
+  .hero-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
+  .hero-actions button { width: 100%; }
+  .connection-evidence-heading, .route-required-callout { align-items: stretch; flex-direction: column; }
+  .route-required-callout button { width: 100%; }
+  .connection-evidence-grid, .speed-card dl, .risk-signals, .benchmark-values { grid-template-columns: 1fr; }
+  .settings-runtime, .runtime-strip { grid-template-columns: 1fr 1fr; }
+  .startup-settings-controls, .log-filters { grid-template-columns: 1fr; }
+  .log-actions { justify-content: stretch; }
+  .log-actions button { flex: 1; }
+  .log-view.structured > div:not(.empty-state) { grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; }
+  .log-view.structured span { grid-column: 1 / -1; }
+  .log-view.structured code, .log-view.structured .log-evidence { grid-column: 1 / -1; }
+}
+
+@media (max-width: 480px) {
+  .app-shell { grid-template-columns: 58px minmax(0, 1fr); }
+  .sidebar { padding: 10px 5px; }
+  .brand { min-height: 48px; }
+  .sidebar nav { gap: 6px; margin-top: 9px; }
+  .nav-group + .nav-group { padding-top: 7px; }
+  .sidebar nav button { min-height: 44px; }
+  .service-state { min-height: 48px; padding: 5px; }
+  header { min-height: 60px; }
+  header h1 { font-size: 18px; }
+  .theme-switch button { min-width: 36px; min-height: 34px; padding-inline: 8px; }
+  .activity-progress { top: 60px; }
+  .feedback { width: calc(100vw - 16px); }
+  .feedback section.feedback-panel { align-items: stretch; flex-direction: column; }
+  .feedback-action { width: 100%; }
+  .page-content { padding: 14px 10px 24px; }
+  .task-page { gap: 11px; }
+  .hero-status, .connection-evidence-card, .risk-card, .speed-card, .chart-card, .config-card, .changelog-card, .settings-log-card { padding: 14px; }
+  .hero-copy h2 { font-size: 21px; }
+  .settings-runtime, .runtime-strip, .metric-hero { grid-template-columns: 1fr; }
+  .runtime-strip span { border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  .runtime-strip span:last-child { border-bottom: 0; }
+  .speed-card-actions { grid-template-columns: 1fr; }
+  .log-view.structured > div:not(.empty-state) { padding-inline: 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -35,8 +35,8 @@ export function useNavoApplication() {
   const initialUI = createInitialUIState();
   const feedbackHooks: ApplicationFeedbackHooks = {};
   const {
-    loading, notice, failure, activityVisible, activityLabel, activityProgress,
-    beginActivity, finishActivity, execute,
+    loading, notice, failure, routeRequired, activityVisible, activityLabel, activityProgress,
+    beginActivity, finishActivity, execute, setRouteRequired,
   } = useApplicationFeedback(initialUI, feedbackHooks);
   
   type NavigationGroup = "核心操作" | "监测诊断" | "系统管理";
@@ -89,9 +89,9 @@ export function useNavoApplication() {
     activeRoute, selectedRoute, sourceRoute, activeRouteLatency, filteredRoutes, loadRoutes,
     selectRoute, testRoute, testFilteredRoutes, benchmarkRoute, testActiveRoute,
   } = nodes;
-  const capture = useCapture({ dashboard, loading, failure, loadDashboard, execute });
+  const capture = useCapture({ dashboard, loading, failure, loadDashboard, execute, setRouteRequired });
   const {
-    dismissedFaultID, tunRetryButton, captureMode, captureRouteMissing, captureTransitioning,
+    dismissedFaultID, tunRetryButton, captureMode, captureRouteMissing, primaryConnectionAction, captureTransitioning,
     showTUNFault, toggleConnection, setCapture,
   } = capture;
   const routing = useRouting({ dashboard, loadDashboard, execute, failure });
@@ -147,7 +147,7 @@ export function useNavoApplication() {
     removeSubscription, refreshAllSubscriptions,
   } = subscriptionsFeature;
 
-  const { startupSettings, loadStartupSettings, configureStartup } = useStartupSettings(execute);
+  const { startupSettings, loadStartupSettings, configureStartup } = useStartupSettings({ execute, dashboard, setRouteRequired });
   function setTheme(mode: ThemeMode) {
     theme.value = mode;
     document.documentElement.dataset.theme = mode;
@@ -232,7 +232,7 @@ export function useNavoApplication() {
     page.value = next;
     await execute(() => loadPageData(next), "", `正在载入${navigation.find((item) => item.id === next)?.label ?? "页面"}`);
   }
-  
+
   onMounted(async () => {
     const preferred = localStorage.getItem("navo-theme");
     setTheme(preferred === "day" || preferred === "night"
@@ -279,6 +279,7 @@ export function useNavoApplication() {
     ipChecking,
     notice,
     failure,
+    routeRequired,
     activityVisible,
     activityLabel,
     activityProgress,
@@ -331,6 +332,7 @@ export function useNavoApplication() {
     proxyRisk,
     coreUpdates,
     captureRouteMissing,
+    primaryConnectionAction,
     captureTransitioning,
     showTUNFault,
     setTheme,
@@ -351,6 +353,7 @@ export function useNavoApplication() {
     openCoreRelease,
     installCoreUpdate,
     changePage,
+    goToRouteSelection: () => changePage("connection"),
     toggleConnection,
     setCapture,
     repairNetworkEnvironment,

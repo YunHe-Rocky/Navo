@@ -45,6 +45,10 @@ func (s *Service) handleCapturePrepare(
 	}
 	ctx, cancel := context.WithTimeout(parent, captureTransitionTimeout)
 	defer cancel()
+	retainWarm, _ := msg["retain_warm"].(bool)
+	if mode != capture.ModeOff {
+		retainWarm = false
+	}
 
 	if err := s.lockCapture(ctx); err != nil {
 		return errorResponse(requestID, "CAPTURE_BUSY", err)
@@ -73,7 +77,9 @@ func (s *Service) handleCapturePrepare(
 	}
 	s.sup.SetRestartSuppressed(true)
 	defer s.sup.SetRestartSuppressed(false)
-	payload, err := s.prepareCaptureLocked(ctx, mode)
+	payload, err := s.prepareCaptureLockedWithOptions(ctx, mode, serviceCaptureOptions{
+		retainSystemProxyWarm: retainWarm,
+	})
 	if err != nil {
 		rollbackCtx, rollbackCancel := context.WithTimeout(
 			context.Background(), captureRollbackTimeout,
@@ -128,8 +134,30 @@ func (s *Service) prepareCaptureLocked(
 	ctx context.Context,
 	mode capture.Mode,
 ) (map[string]interface{}, error) {
+	return s.prepareCaptureLockedWithOptions(ctx, mode, serviceCaptureOptions{})
+}
+
+type serviceCaptureOptions struct {
+	retainSystemProxyWarm bool
+}
+
+func (s *Service) prepareCaptureLockedWithOptions(
+	ctx context.Context,
+	mode capture.Mode,
+	options serviceCaptureOptions,
+) (map[string]interface{}, error) {
 	if !s.coreSupportsCapture(s.host.ID(), mode) {
 		return nil, fmt.Errorf("core %s does not support %s capture mode", s.host.ID(), mode)
+	}
+	if mode == capture.ModeSystemProxy {
+		if verification, remaining, ok := s.resumeSystemProxyWarmLocked(ctx); ok {
+			return map[string]interface{}{
+				"status": "running", "pid": s.sup.Status().PID,
+				"adapter":      capture.AdapterStatus{Name: s.runtimeTUNName(), State: capture.AdapterMissing},
+				"verification": verification, "warm_reused": true,
+				"warm_remaining_ms": remaining.Milliseconds(),
+			}, nil
+		}
 	}
 	if s.networkManager == nil {
 		recoveryManager, err := s.newTUNRecoveryManager(s.runtimeTUNName())
@@ -138,31 +166,26 @@ func (s *Service) prepareCaptureLocked(
 		}
 		s.networkManager = recoveryManager
 	}
+	if mode == capture.ModeOff && options.retainSystemProxyWarm {
+		if err := s.cleanupTUNForCaptureLocked(ctx); err != nil {
+			return nil, err
+		}
+		if verification, expiresAt, ok := s.retainSystemProxyWarmLocked(ctx); ok {
+			return map[string]interface{}{
+				"status": "warm", "pid": s.sup.Status().PID,
+				"adapter":      capture.AdapterStatus{Name: s.runtimeTUNName(), State: capture.AdapterMissing},
+				"verification": verification, "warm_retained": true,
+				"warm_expires_at": expiresAt.UTC(), "warm_ttl_ms": s.warmTTL.Milliseconds(),
+			}, nil
+		}
+	}
+	s.invalidateSystemProxyWarmLocked()
 	if err := s.stopCoreForCapture(ctx); err != nil {
 		return nil, fmt.Errorf("stop old mode core: %w", err)
 	}
-	if s.networkManager != nil {
-		if err := s.deactivateTUNNetwork(ctx); err != nil {
-			return nil, fmt.Errorf("restore old TUN routes and DNS: %w", err)
-		}
+	if err := s.cleanupTUNForCaptureLocked(ctx); err != nil {
+		return nil, err
 	}
-	tunName := s.runtimeTUNName()
-	if err := s.destroyTUNAdapter(ctx, tunName); err != nil {
-		return nil, fmt.Errorf("release old TUN adapter: %w", err)
-	}
-	adapterWaitCtx, adapterWaitCancel := context.WithTimeout(ctx, tunAdapterCleanupTimeout)
-	defer adapterWaitCancel()
-	if _, err := tun.WaitForAdapterState(
-		adapterWaitCtx, tunName,
-		capture.AdapterMissing, 200*time.Millisecond,
-	); err != nil {
-		remaining := tun.InspectAdapter(ctx, tunName)
-		return nil, fmt.Errorf(
-			"stale TUN adapter %q remains %s after cleanup: %w",
-			tunName, remaining.State, err,
-		)
-	}
-	s.clearTUNRuntimeResult()
 
 	if mode == capture.ModeOff {
 		if err := s.compileCaptureConfig(ctx, false); err != nil {
@@ -196,12 +219,40 @@ func (s *Service) prepareCaptureLocked(
 	if err := s.commitHealthyRuntime(ctx); err != nil {
 		return nil, fmt.Errorf("commit system-proxy runtime: %w", err)
 	}
+	s.rememberSystemProxyWarmLocked(verification)
 	return map[string]interface{}{
 		"status":       "running",
 		"pid":          s.sup.Status().PID,
 		"adapter":      capture.AdapterStatus{Name: s.runtimeTUNName(), State: capture.AdapterMissing},
 		"verification": verification,
+		"warm_ttl_ms":  s.warmTTL.Milliseconds(),
 	}, nil
+}
+
+func (s *Service) cleanupTUNForCaptureLocked(ctx context.Context) error {
+	if s.networkManager != nil {
+		if err := s.deactivateTUNNetwork(ctx); err != nil {
+			return fmt.Errorf("restore old TUN routes and DNS: %w", err)
+		}
+	}
+	tunName := s.runtimeTUNName()
+	if err := s.destroyTUNAdapter(ctx, tunName); err != nil {
+		return fmt.Errorf("release old TUN adapter: %w", err)
+	}
+	adapterWaitCtx, adapterWaitCancel := context.WithTimeout(ctx, tunAdapterCleanupTimeout)
+	defer adapterWaitCancel()
+	if _, err := tun.WaitForAdapterState(
+		adapterWaitCtx, tunName,
+		capture.AdapterMissing, 200*time.Millisecond,
+	); err != nil {
+		remaining := tun.InspectAdapter(ctx, tunName)
+		return fmt.Errorf(
+			"stale TUN adapter %q remains %s after cleanup: %w",
+			tunName, remaining.State, err,
+		)
+	}
+	s.clearTUNRuntimeResult()
+	return nil
 }
 
 type captureTransitionError struct {
@@ -278,15 +329,25 @@ func (s *Service) prepareTUNLocked(ctx context.Context) (map[string]interface{},
 	if err := preflightManager.Preflight(ctx); err != nil {
 		return nil, fmt.Errorf("TUN preflight: %w", err)
 	}
-	directIP, err := s.tunVerifier.CaptureDirectIP(ctx)
-	if err != nil {
-		return nil, &network.TUNError{Code: network.ErrTUNPreflightFailed, Stage: network.TUNStageBaselineCaptured, Resource: "direct_ip", Expected: "valid public IP before TUN", Actual: "unavailable", Cause: err}
-	}
-	s.setTUNStage(network.TUNStageBaselineCaptured)
-	plan, selected, directMode, err := s.buildTUNActivationPlan(ctx, name)
+	preparation, err := gatherTUNPreparation(
+		ctx,
+		func(readCtx context.Context) (string, error) {
+			directIP, captureErr := s.tunVerifier.CaptureDirectIP(readCtx)
+			if captureErr != nil {
+				return "", &network.TUNError{Code: network.ErrTUNPreflightFailed, Stage: network.TUNStageBaselineCaptured, Resource: "direct_ip", Expected: "valid public IP before TUN", Actual: "unavailable", Cause: captureErr}
+			}
+			return directIP, nil
+		},
+		func(readCtx context.Context) (network.TUNActivationPlan, *compiler.Outbound, bool, error) {
+			return s.buildTUNActivationPlan(readCtx, name)
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
+	s.setTUNStage(network.TUNStageBaselineCaptured)
+	directIP, plan := preparation.directIP, preparation.plan
+	selected, directMode := preparation.selected, preparation.directMode
 	manager, err := s.newTUNNetworkManager(plan)
 	if err != nil {
 		return nil, fmt.Errorf("prepare planned TUN network transaction: %w", err)
@@ -330,6 +391,69 @@ func (s *Service) prepareTUNLocked(ctx context.Context) (map[string]interface{},
 		"status": "running", "pid": s.sup.Status().PID,
 		"stage": network.TUNStageHealthCommitted, "adapter": adapter,
 		"verification": verification,
+	}, nil
+}
+
+type tunPreparation struct {
+	directIP   string
+	plan       network.TUNActivationPlan
+	selected   *compiler.Outbound
+	directMode bool
+}
+
+func gatherTUNPreparation(
+	ctx context.Context,
+	captureDirectIP func(context.Context) (string, error),
+	buildPlan func(context.Context) (network.TUNActivationPlan, *compiler.Outbound, bool, error),
+) (tunPreparation, error) {
+	type directResult struct {
+		ip  string
+		err error
+	}
+	type planResult struct {
+		plan       network.TUNActivationPlan
+		selected   *compiler.Outbound
+		directMode bool
+		err        error
+	}
+	readCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	directCh := make(chan directResult, 1)
+	planCh := make(chan planResult, 1)
+	go func() {
+		ip, err := captureDirectIP(readCtx)
+		directCh <- directResult{ip: ip, err: err}
+	}()
+	go func() {
+		plan, selected, directMode, err := buildPlan(readCtx)
+		planCh <- planResult{plan: plan, selected: selected, directMode: directMode, err: err}
+	}()
+	var direct directResult
+	var plan planResult
+	for directCh != nil || planCh != nil {
+		select {
+		case result := <-directCh:
+			direct = result
+			directCh = nil
+			if result.err != nil {
+				cancel()
+			}
+		case result := <-planCh:
+			plan = result
+			planCh = nil
+			if result.err != nil {
+				cancel()
+			}
+		case <-ctx.Done():
+			return tunPreparation{}, ctx.Err()
+		}
+	}
+	if err := errors.Join(direct.err, plan.err); err != nil {
+		return tunPreparation{}, err
+	}
+	return tunPreparation{
+		directIP: direct.ip, plan: plan.plan,
+		selected: plan.selected, directMode: plan.directMode,
 	}, nil
 }
 

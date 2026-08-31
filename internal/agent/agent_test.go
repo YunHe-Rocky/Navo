@@ -914,6 +914,78 @@ func TestCaptureTransitionSameHealthyModeIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestConnectionAdmissionResponsePreservesSupersededAndBusyCodes(t *testing.T) {
+	superseded := connectionAdmissionResponse("superseded", "CAPTURE_BUSY", connection.ErrSuperseded)
+	if responseCode(superseded) != "REQUEST_SUPERSEDED" {
+		t.Fatalf("superseded response = %#v", superseded)
+	}
+	busy := connectionAdmissionResponse("busy", "CAPTURE_BUSY", connection.ErrBusy)
+	if responseCode(busy) != "CAPTURE_BUSY" {
+		t.Fatalf("busy response = %#v", busy)
+	}
+}
+
+func TestExplicitSystemProxyDisableRequestsWarmRetention(t *testing.T) {
+	var retainWarm interface{}
+	instance, err := New(Config{
+		CaptureJournalPath: filepath.Join(t.TempDir(), "capture.json"),
+		ProxyManager:       systemproxy.NewManagerWithDirectory(t.TempDir()),
+		SendToServiceFn: func(msg map[string]interface{}) (map[string]interface{}, error) {
+			switch msg["method"] {
+			case "capture.prepare":
+				retainWarm = msg["retain_warm"]
+				return map[string]interface{}{"type": "RESPONSE", "payload": map[string]interface{}{"mode": "off"}}, nil
+			case "tun.status":
+				return map[string]interface{}{"type": "RESPONSE", "payload": map[string]interface{}{"name": "Navo", "state": "missing"}}, nil
+			default:
+				return nil, fmt.Errorf("unexpected service method %v", msg["method"])
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.setCaptureSnapshot(capture.Snapshot{
+		State: capture.StateRunningSystemProxy, Phase: capture.PhaseRunning,
+		DesiredMode: capture.ModeSystemProxy, CommittedMode: capture.ModeSystemProxy,
+	})
+	if err := instance.transitionCaptureMode(context.Background(), capture.ModeOff); err != nil {
+		t.Fatal(err)
+	}
+	if retainWarm != true {
+		t.Fatalf("ordinary system-proxy disable retain_warm = %#v, want true", retainWarm)
+	}
+}
+
+func TestCaptureFailureRollbackForcesColdServiceCleanup(t *testing.T) {
+	var offRequest map[string]interface{}
+	instance, err := New(Config{
+		CaptureJournalPath: filepath.Join(t.TempDir(), "capture.json"),
+		ProxyManager:       systemproxy.NewManagerWithDirectory(t.TempDir()),
+		SendToServiceFn: func(msg map[string]interface{}) (map[string]interface{}, error) {
+			if msg["method"] != "capture.prepare" || msg["mode"] != "off" {
+				return nil, fmt.Errorf("unexpected service message %#v", msg)
+			}
+			offRequest = msg
+			return map[string]interface{}{"type": "RESPONSE", "payload": map[string]interface{}{"mode": "off"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := capture.TransitionJournal{
+		ID: "warm-rollback", From: capture.ModeSystemProxy, To: capture.ModeTUN,
+		CurrentStep: capture.PhaseStartingCore, StartedAt: time.Now().UTC(),
+	}
+	_ = instance.captureFailure(capture.ModeTUN, journal, errors.New("activation failed"))
+	if offRequest == nil {
+		t.Fatal("capture failure did not request Service cleanup")
+	}
+	if retain, supplied := offRequest["retain_warm"]; supplied || retain == true {
+		t.Fatalf("failure rollback retained warm core: %#v", offRequest)
+	}
+}
+
 func TestCaptureRollbackFailureRetainsPreviousCommittedMode(t *testing.T) {
 	journalPath := filepath.Join(t.TempDir(), "capture.json")
 	instance, err := New(Config{

@@ -167,6 +167,9 @@ export interface NetworkEnvironmentSnapshot {
     busy: boolean;
     id?: string;
     operation?: string;
+    intent?: string;
+    domain?: string;
+    priority?: number;
     phase?: string;
     fault_domain?: string;
   };
@@ -283,6 +286,9 @@ export interface Dashboard {
       id: string;
       operation: string;
       origin: string;
+      intent?: string;
+      domain?: string;
+      priority?: number;
       phase: string;
       fault_domain: string;
       started_at: string;

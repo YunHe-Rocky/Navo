@@ -104,6 +104,9 @@ type Snapshot struct {
 	ID          string
 	Operation   Operation
 	Origin      Origin
+	Intent      Intent
+	Domain      Domain
+	Priority    int
 	Phase       Phase
 	FaultDomain string
 	StartedAt   time.Time
@@ -116,7 +119,10 @@ type Snapshot struct {
 	CompletedAt   time.Time
 }
 
-var ErrBusy = errors.New("connection transaction is busy")
+var (
+	ErrBusy       = errors.New("connection transaction is busy")
+	ErrSuperseded = errors.New("connection transaction was superseded by higher-priority work in the same domain")
+)
 
 type BusyError struct {
 	Current Snapshot
@@ -135,17 +141,27 @@ func (e *BusyError) Error() string {
 func (e *BusyError) Unwrap() error { return ErrBusy }
 
 type Coordinator struct {
-	token chan struct{}
-	seq   atomic.Uint64
+	seq atomic.Uint64
 
 	mu       sync.RWMutex
 	snapshot Snapshot
+	waiters  []*waiter
 }
 
 func NewCoordinator() *Coordinator {
-	c := &Coordinator{token: make(chan struct{}, 1)}
-	c.token <- struct{}{}
-	return c
+	return &Coordinator{}
+}
+
+type beginResult struct {
+	transaction *Transaction
+	err         error
+}
+
+type waiter struct {
+	request  Request
+	policy   Policy
+	sequence uint64
+	ready    chan beginResult
 }
 
 func (c *Coordinator) Begin(ctx context.Context, request Request) (*Transaction, error) {
@@ -155,14 +171,44 @@ func (c *Coordinator) Begin(ctx context.Context, request Request) (*Transaction,
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	c.adjustQueued(1)
+	policy := PolicyFor(request)
+	c.mu.Lock()
+	if !c.snapshot.Busy && len(c.waiters) == 0 {
+		transaction := c.startLocked(request, policy)
+		c.mu.Unlock()
+		return transaction, nil
+	}
+	wait := &waiter{
+		request: request, policy: policy, sequence: c.seq.Add(1),
+		ready: make(chan beginResult, 1),
+	}
+	superseded := c.supersedeLowerPriorityLocked(wait)
+	c.waiters = append(c.waiters, wait)
+	c.snapshot.Queued = len(c.waiters)
+	c.mu.Unlock()
+	for _, previous := range superseded {
+		previous.ready <- beginResult{err: fmt.Errorf(
+			"%w: %s/%s replaced %s/%s",
+			ErrSuperseded, wait.policy.Intent, wait.policy.Domain,
+			previous.policy.Intent, previous.policy.Domain,
+		)}
+	}
+
 	select {
 	case <-ctx.Done():
-		c.adjustQueued(-1)
-		return nil, fmt.Errorf("wait for connection transaction: %w", ctx.Err())
-	case <-c.token:
-		c.adjustQueued(-1)
-		return c.start(request), nil
+		if c.removeWaiter(wait) {
+			return nil, fmt.Errorf("wait for connection transaction: %w", ctx.Err())
+		}
+		// Admission won the race with cancellation. Release the newly granted
+		// transaction immediately so ownership cannot leak.
+		result := <-wait.ready
+		if result.transaction != nil {
+			result.transaction.Finish(ctx.Err())
+			return nil, fmt.Errorf("wait for connection transaction: %w", ctx.Err())
+		}
+		return nil, result.err
+	case result := <-wait.ready:
+		return result.transaction, result.err
 	}
 }
 
@@ -170,13 +216,12 @@ func (c *Coordinator) TryBegin(request Request) (*Transaction, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	select {
-	case <-c.token:
-		return c.start(request), nil
-	default:
-		snapshot := c.Snapshot()
-		return nil, &BusyError{Current: snapshot}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.snapshot.Busy || len(c.waiters) > 0 {
+		return nil, &BusyError{Current: c.snapshot}
 	}
+	return c.startLocked(request, PolicyFor(request)), nil
 }
 
 func (c *Coordinator) Snapshot() Snapshot {
@@ -185,14 +230,13 @@ func (c *Coordinator) Snapshot() Snapshot {
 	return c.snapshot
 }
 
-func (c *Coordinator) start(request Request) *Transaction {
+func (c *Coordinator) startLocked(request Request, policy Policy) *Transaction {
 	now := time.Now().UTC()
 	id := strings.TrimSpace(request.ID)
 	if id == "" {
 		id = fmt.Sprintf("connection-%d-%d", now.UnixNano(), c.seq.Add(1))
 	}
-	c.mu.Lock()
-	queued := c.snapshot.Queued
+	queued := len(c.waiters)
 	lastID := c.snapshot.LastID
 	lastOperation := c.snapshot.LastOperation
 	lastPhase := c.snapshot.LastPhase
@@ -200,22 +244,61 @@ func (c *Coordinator) start(request Request) *Transaction {
 	completedAt := c.snapshot.CompletedAt
 	c.snapshot = Snapshot{
 		Busy: true, ID: id, Operation: request.Operation, Origin: request.Origin,
+		Intent: policy.Intent, Domain: policy.Domain, Priority: policy.Rank,
 		Phase: PhasePreparing, FaultDomain: strings.TrimSpace(request.FaultDomain),
 		StartedAt: now, Queued: queued,
 		LastID: lastID, LastOperation: lastOperation, LastPhase: lastPhase,
 		LastError: lastError, CompletedAt: completedAt,
 	}
-	c.mu.Unlock()
 	return &Transaction{coordinator: c, id: id}
 }
 
-func (c *Coordinator) adjustQueued(delta int) {
-	c.mu.Lock()
-	c.snapshot.Queued += delta
-	if c.snapshot.Queued < 0 {
-		c.snapshot.Queued = 0
+func (c *Coordinator) supersedeLowerPriorityLocked(next *waiter) []*waiter {
+	if next == nil {
+		return nil
 	}
-	c.mu.Unlock()
+	kept := c.waiters[:0]
+	var superseded []*waiter
+	for _, current := range c.waiters {
+		if current.policy.Domain == next.policy.Domain && current.policy.Rank < next.policy.Rank {
+			superseded = append(superseded, current)
+			continue
+		}
+		kept = append(kept, current)
+	}
+	c.waiters = kept
+	return superseded
+}
+
+func (c *Coordinator) removeWaiter(target *waiter) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for index, current := range c.waiters {
+		if current != target {
+			continue
+		}
+		c.waiters = append(c.waiters[:index], c.waiters[index+1:]...)
+		c.snapshot.Queued = len(c.waiters)
+		return true
+	}
+	return false
+}
+
+func (c *Coordinator) popNextLocked() *waiter {
+	if len(c.waiters) == 0 {
+		return nil
+	}
+	best := 0
+	for index := 1; index < len(c.waiters); index++ {
+		candidate, current := c.waiters[index], c.waiters[best]
+		if candidate.policy.Rank > current.policy.Rank ||
+			(candidate.policy.Rank == current.policy.Rank && candidate.sequence < current.sequence) {
+			best = index
+		}
+	}
+	next := c.waiters[best]
+	c.waiters = append(c.waiters[:best], c.waiters[best+1:]...)
+	return next
 }
 
 type Transaction struct {
@@ -261,15 +344,22 @@ func (t *Transaction) Finish(result error) {
 				phase = PhaseFailed
 				message = result.Error()
 			}
-			queued := c.snapshot.Queued
+			queued := len(c.waiters)
 			c.snapshot = Snapshot{
 				Queued: queued, LastID: t.id,
 				LastOperation: c.snapshot.Operation, LastPhase: phase,
 				LastError: message, CompletedAt: time.Now().UTC(),
 			}
 		}
+		next := c.popNextLocked()
+		var granted *Transaction
+		if next != nil {
+			granted = c.startLocked(next.request, next.policy)
+		}
 		c.mu.Unlock()
-		c.token <- struct{}{}
+		if next != nil {
+			next.ready <- beginResult{transaction: granted}
+		}
 	})
 }
 

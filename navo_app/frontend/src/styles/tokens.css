@@ -3,9 +3,9 @@
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-data: "Cascadia Code", Consolas, monospace;
-  --type-caption: 11px;
-  --type-meta: 12px;
-  --type-body: 13px;
+  --type-caption: 12px;
+  --type-meta: 13px;
+  --type-body: 14px;
   --bg: #07050d;
   --sidebar: #0d0918;
   --sidebar-highlight: #130d24;
@@ -66,13 +66,13 @@
   --card-press-fill: linear-gradient(145deg, rgba(190, 159, 235, .2), rgba(101, 79, 157, .11)), var(--panel-bg);
   --card-press-border: #8672b5;
   --shadow-offset: rgba(104, 79, 166, 0);
-  --panel-shadow: 0 14px 34px rgba(48, 92, 216, .2), inset 0 1px rgba(141, 174, 255, .055);
-  --panel-shadow-strong: 0 22px 52px rgba(53, 98, 232, .26), inset 0 1px rgba(141, 174, 255, .07);
-  --radius-lg: 24px 38px 22px 34px;
-  --radius-md: 17px 27px 15px 23px;
-  --radius-sm: 10px 17px 9px 15px;
-  --radius-chip: 7px 12px 6px 10px;
-  --motion: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --panel-shadow: 0 10px 26px rgba(20, 12, 52, .24), inset 0 1px rgba(141, 174, 255, .05);
+  --panel-shadow-strong: 0 16px 38px rgba(20, 12, 52, .3), inset 0 1px rgba(141, 174, 255, .065);
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --radius-chip: 999px;
+  --motion: 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 :root[data-theme="day"] {
@@ -130,17 +130,12 @@
   --card-press-fill: linear-gradient(145deg, rgba(119, 82, 54, .17), rgba(155, 113, 78, .08)), #e5d1bd;
   --card-press-border: #76563f;
   --shadow-offset: rgba(93, 65, 48, .34);
-  --panel-shadow: 4px 4px 0 rgba(0, 0, 0, .72), 0 14px 28px rgba(0, 0, 0, .12);
-  --panel-shadow-strong: 6px 6px 0 rgba(0, 0, 0, .78), 0 20px 38px rgba(0, 0, 0, .15);
-  --radius-lg: 2px 16px 2px 12px;
-  --radius-md: 2px 12px 2px 9px;
-  --radius-sm: 2px 9px 2px 7px;
-  --radius-chip: 1px 7px 1px 5px;
-  --motion: 140ms steps(2, end);
+  --panel-shadow: 0 8px 22px rgba(61, 40, 27, .12), inset 0 1px rgba(255, 255, 255, .5);
+  --panel-shadow-strong: 0 14px 34px rgba(61, 40, 27, .16), inset 0 1px rgba(255, 255, 255, .62);
 }
 
 * { box-sizing: border-box; }
-html, body, #app { width: 100%; min-width: 760px; height: 100%; margin: 0; overflow: hidden; }
+html, body, #app { width: 100%; min-width: 320px; height: 100%; margin: 0; overflow: hidden; }
 body {
   color: var(--text);
   background:
@@ -155,7 +150,7 @@ body::before {
   position: fixed;
   z-index: 1000;
   inset: 0;
-  background: repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0, rgba(255,255,255,.012) 1px, transparent 1px, transparent 4px);
+  background: linear-gradient(135deg, rgba(255,255,255,.012), transparent 42%);
   content: "";
   pointer-events: none;
 }
@@ -166,7 +161,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 button:disabled { opacity: 0.42; cursor: not-allowed; }
 svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 h1, h2, h3, p { margin-top: 0; }
-h1 { margin-bottom: 0; font: 680 24px/1.2 "Segoe UI Variable", "Segoe UI", sans-serif; letter-spacing: -0.025em; }
+h1 { margin-bottom: 0; font: 680 21px/1.2 "Segoe UI Variable", "Segoe UI", sans-serif; letter-spacing: -0.02em; }
 h2 { margin-bottom: 7px; font: 660 21px/1.3 "Segoe UI Variable", "Segoe UI", sans-serif; letter-spacing: -0.015em; }
 h3 { margin-bottom: 6px; font-family: "Segoe UI Variable", "Segoe UI", sans-serif; }
 .mono { font-family: "Cascadia Code", Consolas, monospace; font-variant-numeric: tabular-nums; }

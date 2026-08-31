@@ -16,6 +16,7 @@ const {
   logFollow,
   hostStatus,
   startupSettings,
+  captureRouteMissing,
   loading,
   changelogText,
   refreshLogs,
@@ -25,6 +26,7 @@ const {
   clearPersistedLogs,
   setLogFollow,
   configureStartup,
+  goToRouteSelection,
   formatDuration,
 } = useNavoApplicationContext();
 </script>
@@ -41,35 +43,42 @@ const {
     </article>
 
     <article class="config-card startup-settings-card">
-      <div>
+      <div class="startup-settings-copy">
         <span class="card-label">登录启动</span>
         <strong>开机连接</strong>
         <small>登录 Windows 后延迟 15 秒静默启动，并在健康验证通过后才接管流量。</small>
       </div>
-      <label class="checkbox startup-toggle">
-        <input
-          type="checkbox"
-          :checked="startupSettings?.enabled || false"
-          :disabled="loading || !startupSettings?.supported"
-          @change="configureStartup(($event.target as HTMLInputElement).checked, startupSettings?.mode || 'system_proxy')"
-        />
-        启用开机连接
-      </label>
-      <label>
-        接管方式
-        <select
-          :value="startupSettings?.mode || 'system_proxy'"
-          :disabled="loading || !startupSettings?.supported"
-          @change="configureStartup(startupSettings?.enabled || false, ($event.target as HTMLSelectElement).value as 'system_proxy' | 'tun')"
-        >
-          <option value="system_proxy">系统代理</option>
-          <option value="tun">TUN</option>
-        </select>
-      </label>
-      <small v-if="!startupSettings">正在读取开机连接状态…</small>
-      <small v-else-if="!startupSettings.supported" class="faulted">当前环境不支持登录启动。</small>
-      <small v-else-if="startupSettings.last_error" class="faulted">登录任务异常：{{ startupSettings.last_error }}</small>
-      <small v-else>{{ startupSettings.enabled && startupSettings.registered ? "登录任务已注册" : "当前不会在登录后自动连接" }}</small>
+      <div class="startup-settings-controls">
+        <label class="checkbox startup-toggle">
+          <input
+            type="checkbox"
+            :checked="startupSettings?.enabled || false"
+            :disabled="loading || !startupSettings?.supported || (captureRouteMissing && !startupSettings?.enabled)"
+            aria-describedby="startup-route-status"
+            @change="configureStartup(($event.target as HTMLInputElement).checked, startupSettings?.mode || 'system_proxy')"
+          />
+          启用开机连接
+        </label>
+        <label class="startup-mode-field">
+          接管方式
+          <select
+            :value="startupSettings?.mode || 'system_proxy'"
+            :disabled="loading || !startupSettings?.supported || (captureRouteMissing && startupSettings?.enabled)"
+            @change="configureStartup(startupSettings?.enabled || false, ($event.target as HTMLSelectElement).value as 'system_proxy' | 'tun')"
+          >
+            <option value="system_proxy">系统代理</option>
+            <option value="tun">TUN</option>
+          </select>
+        </label>
+      </div>
+      <div v-if="captureRouteMissing" id="startup-route-status" class="route-required-callout" role="status">
+        <div><strong>需要先配置 Navo 线路</strong><small>V2 外部代理只用于状态观测，不会被 Navo 当成开机连接线路。</small></div>
+        <button class="secondary" @click="goToRouteSelection">前往连接管理</button>
+      </div>
+      <small v-if="!startupSettings" class="startup-settings-status">正在读取开机连接状态…</small>
+      <small v-else-if="!startupSettings.supported" class="startup-settings-status faulted">当前环境不支持登录启动。</small>
+      <small v-else-if="startupSettings.last_error" class="startup-settings-status faulted">登录任务异常：{{ startupSettings.last_error }}</small>
+      <small v-else class="startup-settings-status">{{ startupSettings.enabled && startupSettings.registered ? "登录任务已注册" : "当前不会在登录后自动连接" }}</small>
     </article>
   
     <article class="changelog-card">

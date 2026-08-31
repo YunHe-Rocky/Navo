@@ -1870,3 +1870,80 @@
 - Added Phase 75 with explicit fail-closed route admission, external-proxy ownership, state-aware recovery, responsive/accessibility, and portable-package constraints.
 - Starting the exact UI action/error/layout source map before adding regressions.
 - Ran the required UI/UX design-system plus focused UX and Vue searches. Rejected the marketing/mobile/glass/external-font recommendations and retained the applicable desktop hierarchy, density, error recovery, focus, touch-target, responsive, and reduced-motion rules.
+- Traced the reported error to login-startup configuration, not normal capture activation. Confirmed normal capture already blocks a missing route locally, while startup configuration does not.
+- Identified two related UI defects: misleading Overview activation CTA when no Navo route exists, and global failure feedback without a route-selection recovery action.
+- Continuing with Settings/startup and shell/layout source reads before defining red regressions.
+- Read Settings/startup/Connection Management and the shared style layers. Confirmed the missing startup preflight, an existing reusable no-route pattern, an unreachable 375px layout due to global `min-width:760px`, inconsistent theme geometry, undersized text, and rigid startup columns.
+### 2026-08-31 Phase 75 layout evidence
+
+- Inspected the complete shared shell and responsive rule set plus the exact overview/settings selectors.
+- Confirmed the actionable scope: remove the root 760 px floor, add a compact intermediate shell, restructure startup controls, convert feedback into an actionable alert, and reduce duplicated page hierarchy without changing runtime ownership.
+- Phase 75.1 is complete. Added red contracts for the shared route requirement, state-aware primary action, startup IPC preflight, actionable feedback, grouped settings controls, shared theme geometry, compact accessible navigation, and 320 px shell reflow.
+- Confirmed the new Phase 75 suite is genuinely red: 0/6 PASS. The failures map one-to-one to the reported bypass and current shared-layout defects; no backend acceptance condition has been changed.
+- Implemented the functional recovery path and shared layout refinement. Phase 75 focused suite is green 6/6 and Vue typecheck is green; starting the full frontend/build and browser-visible gates.
+- First full build PASS (70 modules). Full tests were 41/42: only the pre-existing thin-controller size contract failed because the controller crossed its exact 400-line threshold; removed the extra wrapper without changing behavior and retained the regression record.
+- Full frontend rerun PASS 42/42 and `git diff --check` PASS (only repository CRLF notices). Loaded the complete webapp-testing instructions and verified the lifecycle helper CLI; preparing the mocked Wails browser acceptance.
+- First managed Edge pass reached all Overview size checks but correctly failed Settings at 375x812 with 82 px inner-main overflow. Vite and Edge were closed by the helper; added bounded offender diagnostics for the next run instead of masking overflow.
+- Second offender pass isolated the overflow to `.startup-settings-controls > .startup-toggle`: its checkbox inherited the global 100% text-input width. Added an 18 px flex-none checkbox rule and preserved content reflow; rerunning the full browser matrix.
+- Post-fix Edge run cleared every route/layout/theme/focus assertion and reached reduced-motion last. Chromium returned the correct `1e-05s`; fixed the smoke's scientific-notation parser before the final rerun.
+- Automated smoke then PASSed, but manual screenshot inspection found its initial `night` filenames were actually light because Edge inherited system preference. Added explicit night/day clicks plus DOM theme assertions and will regenerate the matrix before accepting visual coverage.
+- Explicit theme matrix PASSed. Manual night inspection found correct colors/hierarchy and no clipping, then identified that screenshots should wait past the transient 100% progress state; added a bounded steady-state wait and will regenerate final artifacts.
+- Steady-state Edge matrix PASSed and representative screenshots were manually inspected. Applied the two final visual QA refinements for 1024 px evidence readability and compact sidebar status truncation; one final source/browser pass remains before packaging.
+- Final source/browser rerun PASS: frontend 42/42, Vue typecheck plus Vite production build (70 modules), explicit day/night Edge matrix, eight layout assertions with maximum overflow 0, capture/startup bridge calls 0, visible 2 px keyboard focus, and 0.01 ms reduced motion. Managed Vite/Edge shutdown PASS.
+- Phase 75.3 and 75.4 are complete. Confirmed the official `scripts/package.ps1` repeats Go test/vet, npm clean install/test/typecheck/build, Wails build, directory/archive verification, PE metadata, and SHA-256 before output; starting 1.0.42 packaging.
+- First 1.0.42 packaging stopped safely at the Go download gate before release output changes: isolated cache downloads timed out on direct IPv6. Read-only live check confirms unchanged V2 WinINet/10808 and HTTP 200 to the exact module via that proxy; rerunning with only child-process HTTP(S) proxy variables.
+- Second packaging passed the complete Go test gate but stopped at `npm ci` because orphaned Phase 75 Vite children held Rolldown. Stopped seven processes only after exact Navo path/port correlation; Navo Vite and 4195 listener counts are zero, while unrelated TimeBack and V2 processes remain untouched.
+- Third official package run PASSed every gate and produced `release/Navo-1.0.42-portable-amd64` plus ZIP. Independent verifier and `repair.exe check` both report zero issues; all three PE versions are 1.0.42.0.
+- Final ZIP: 64,684,118 bytes, SHA-256 `4981F15A7287F4632F720B2A0D3079AECA659FA8B9BB845E6B3AB18DCE76286B`. Final Navo/Vite/4195 counts are zero; WinINet remains `127.0.0.1:10808` and preserved sing-box PID 18036.
+- Phase 75 is complete.
+
+## 2026-08-31 Phase 76
+
+- Received two linked requirements: choice-specific Agent priority rather than one enormous global priority order, and bounded component lifetimes to accelerate repeated System Proxy/TUN activation.
+- Re-read the complete planning-with-files workflow, restored the completed Phase 75 plan, and reviewed prior Coordinator/CoreHost/request-identity lifecycle guidance.
+- Added Phase 76 with typed intent/domain/phase policy, non-preemptible commit/rollback barriers, exact warm-lease keys, mode-specific safety, latency measurement, and portable-release constraints.
+- Starting current source/test mapping before choosing whether the lease can retain a process, only preparation artifacts, or both per capture mode.
+- Mapped the Agent-side latency/control path. Confirmed the Coordinator is a global channel token with no policy queue; capture activation enters applying before Service preparation and only supports same-mode healthy idempotence.
+- Confirmed Agent itself is already persistent. Phase 76 will optimize the Service/Supervisor/CoreHost boundary with exact health-keyed leases rather than adding an Agent-process TTL.
+- Mapped Service/Supervisor cold activation. Every target currently tears down core/TUN state first; System Proxy repeats reachability, compile, reconcile, start, verify, and commit, while TUN additionally repeats physical adapter/network/data-plane acceptance.
+- Chosen mode split: permit a bounded System Proxy loopback-core warm lease only with crash-restart suppression and exact invalidation; TUN retains no running capture process/routes while off and may reuse only exact preparation artifacts.
+- Confirmed every runtime compile produces a new validated candidate and running-core swap. The healthy runtime already exposes revision/config hash/core/outbound/policy identity needed for exact System Proxy lease matching.
+- Confirmed Agent's final route probe remains after Service preparation. Warm System Proxy reuse can skip compile/reconcile/start while preserving fresh Agent-side data-plane acceptance.
+- Completed the cold-path map. Identified safe TUN parallelism (fresh direct-IP baseline plus fresh activation-plan build) and a required `retain_warm` distinction so failure rollback always forces cold cleanup.
+- Verified the shipped combined launcher injects the final Agent route probe. Defined the complete intent/domain queue policy and the red regression matrix; starting tests before production edits.
+- Located reusable Supervisor and Agent test fixtures. Ready to add failing scheduler, warm-off/rollback, warm-idle crash, lease validity, and TUN concurrency contracts before implementation.
+- Added all planned focused regressions. Initial focused execution was blocked before compile by direct Go module-download timeouts; rerun will use only process-local HTTP(S) proxy variables and will preserve the external proxy process/settings.
+- Focused proxy-assisted rerun reached the expected red state in all four affected packages. Confirmed the production Agent probe is an independent current-user System Proxy/TUN path gate; beginning production implementation.
+- Implemented and formatted the central intent/domain policy plus deterministic priority waiter queue. Next gate is the focused Coordinator suite before adding lifecycle leases.
+- Coordinator focused tests PASS. Added Supervisor warm-idle lifecycle semantics; formatting and focused Supervisor verification are next.
+- Supervisor focused package PASS. Beginning Agent `retain_warm` threading and Service exact-identity lease/timer integration.
+- Implemented and formatted Agent warm-retention threading with cold-by-default options. Agent focused tests are next before Service lease integration.
+- Agent full package PASS. Added Service lease identity/configuration primitives; next is capture-path retain/resume/expiry integration and TUN concurrent reads.
+- Integrated System Proxy remember/retain/resume/expiry into Service capture preparation with cold fallback and mandatory TUN cleanup. Next is mutation/shutdown invalidation, TUN parallel preparation, formatting, and focused Service tests.
+- Added mutation/shutdown invalidation and concurrent TUN read-only preparation; formatted all Service changes. Running focused Service compile/tests next.
+- First Service compile stopped on the expected evidence-type mismatch before tests. Updating the lease/test to exact `RuntimeRoutingVerification`, then rerunning.
+- Applied and formatted the strong System Proxy evidence type correction; rerunning Service compile/tests.
+- Corrected the remaining retain/resume return signatures exposed by the compiler; rerunning after formatting.
+- Service full package PASS (40.122s). Core implementation is green in all four affected packages; adding deeper timer/integration invalidation tests before full-repository gates.
+- Added and formatted deeper warm lifecycle tests for same-PID resume, runtime drift, and timed stop. Running the Service package again.
+- Service full package rerun PASS (28.750s). Reviewing the complete diff and running all-repository Go/vet gates next.
+- Diff/lock review is clean overall and identified two final refinements: unordered TUN read-result collection for fast cancellation, and explicit intent/domain/priority projection into Agent status payloads.
+- Located both explicit transaction projections. Preparing compatible DTO additions plus the TUN unordered-result fix before full gates.
+- Confirmed additive optional DTO changes are compatible. Applying policy projection and unordered TUN result collection now.
+- Applied and formatted both final refinements. Starting full Go test/vet and frontend type/test/build gates.
+- Full repository Go tests PASS. Running `go vet ./...`, then frontend tests/typecheck/build.
+- `go vet ./...` PASS and frontend tests PASS 42/42. Running frontend typecheck/production build and final diff/race/latency evidence next.
+- Frontend typecheck/build PASS (70 modules). Coordinator/Supervisor repeated concurrency gate PASS 20/20. Repeating warm lease lifecycle tests and adding explicit latency-path assertions next.
+- Warm/TUN focused repetition PASS 20/20. Final correctness refinement is typed Agent propagation of queued-request supersession before rerunning all gates.
+- Implemented typed REQUEST_SUPERSEDED propagation with a focused regression. Formatting and affected/full gate reruns are next.
+- Affected Agent/Coordinator/Service/Supervisor packages PASS after the final error mapping. Running final full Go/vet/frontend/diff gates, then version/package.
+- Final full Go test/vet PASS. Running final frontend/diff hygiene once more, then bumping to 1.0.43 and invoking the official portable packager.
+- Final frontend tests/typecheck/build PASS. Checking exact worktree/process/listener hygiene, then bumping VERSION to 1.0.43 and packaging.
+- Pre-package process/network/diff hygiene PASS. External v2rayN ownership is preserved. Bumping VERSION from 1.0.42 to 1.0.43 and starting the official package script.
+- Official 1.0.43 package run PASS with directory/archive verifier issues zero and reported ZIP SHA-256. Running independent verifier, repair, PE version/hash, and final process/network residue checks.
+- Independent directory/archive verifier PASS with zero issues. Running repair self-check, independent hashes/PE metadata, and final residue checks.
+- Repair self-check PASS. ZIP size/hash match; rerunning PE metadata in non-truncated form, then final residue/hygiene and Phase 76 closure.
+- Explicit packaged PE verification PASS: all three binaries report 1.0.43.0; SHA-256 values are recorded in `task_plan.md` and `findings.md`.
+- Final runtime hygiene PASS: no Navo process, no Navo Vite child, no 4195/12080 listener; WinINet and the external v2rayN sing-box remain unchanged.
+- Phase 76.5 is complete. Released verified `release/Navo-1.0.43-portable-amd64` and matching ZIP; the only remaining gate is optional real-host latency/elevated network acceptance with a configured Navo route.
+- Phase 76 is complete.

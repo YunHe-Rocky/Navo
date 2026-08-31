@@ -74,7 +74,11 @@ func (a *Agent) transitionCaptureModeWithOrigin(
 		transaction.Finish(err)
 		return err
 	}
-	resultErr = a.transitionCaptureModeLocked(ctx, target)
+	options := captureTransitionOptions{}
+	if target == capture.ModeOff && (origin == connection.OriginUser || origin == connection.OriginTray) {
+		options.retainSystemProxyWarm = a.captureSnapshot().CommittedMode == capture.ModeSystemProxy
+	}
+	resultErr = a.transitionCaptureModeLockedWithOptions(ctx, target, options)
 	// Release the user transaction before SelfHeal acquires Coordinator
 	// ownership. Calling recovery while this transaction is active would
 	// deterministically return CONNECTION_BUSY and suppress the repair.
@@ -105,6 +109,18 @@ func (a *Agent) transitionCaptureModeWithOrigin(
 // such as core switching keep
 // stop/switch/re-enable atomic across the Agent boundary.
 func (a *Agent) transitionCaptureModeLocked(ctx context.Context, target capture.Mode) error {
+	return a.transitionCaptureModeLockedWithOptions(ctx, target, captureTransitionOptions{})
+}
+
+type captureTransitionOptions struct {
+	retainSystemProxyWarm bool
+}
+
+func (a *Agent) transitionCaptureModeLockedWithOptions(
+	ctx context.Context,
+	target capture.Mode,
+	options captureTransitionOptions,
+) error {
 	if target == capture.ModeTUN && !a.cfg.IsElevatedFn() {
 		return fmt.Errorf("TUN_REQUIRES_ADMIN: TUN requires Navo to run as administrator")
 	}
@@ -179,7 +195,7 @@ func (a *Agent) transitionCaptureModeLocked(ctx context.Context, target capture.
 			return a.captureFailure(target, journal, err)
 		}
 	}
-	servicePayload, err := a.prepareServiceCapture(ctx, target)
+	servicePayload, err := a.prepareServiceCaptureWithOptions(ctx, target, options)
 	if err != nil {
 		return a.captureFailure(target, journal, err)
 	}
@@ -267,7 +283,7 @@ func (a *Agent) selectCoreWithCapture(
 		ctx, requestID, connection.OperationCoreSwitch, connection.OriginUser, "core",
 	)
 	if err != nil {
-		return agentError(requestID, "CAPTURE_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CAPTURE_BUSY", err)
 	}
 	defer func() { finishConnectionResponse(transaction, result) }()
 	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
@@ -339,7 +355,7 @@ func (a *Agent) selectOutboundWithCapture(
 		ctx, requestID, connection.OperationNodeSwitch, connection.OriginUser, "node",
 	)
 	if err != nil {
-		return agentError(requestID, "CAPTURE_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CAPTURE_BUSY", err)
 	}
 	defer func() { finishConnectionResponse(transaction, result) }()
 	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
@@ -405,7 +421,7 @@ func (a *Agent) mutateSourcesWithCapture(
 		ctx, requestID, connection.OperationSourceMutation, connection.OriginUser, "source",
 	)
 	if err != nil {
-		return agentError(requestID, "CAPTURE_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CAPTURE_BUSY", err)
 	}
 	defer func() { finishConnectionResponse(transaction, result) }()
 	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
@@ -634,6 +650,13 @@ func (a *Agent) beginConnection(
 	})
 }
 
+func connectionAdmissionResponse(requestID, busyCode string, err error) map[string]interface{} {
+	if errors.Is(err, connection.ErrSuperseded) {
+		return agentError(requestID, "REQUEST_SUPERSEDED", err)
+	}
+	return agentError(requestID, busyCode, err)
+}
+
 func finishConnectionResponse(
 	transaction *connection.Transaction,
 	result map[string]interface{},
@@ -659,7 +682,7 @@ func (a *Agent) forwardConnectionMutation(
 		ctx, requestID, operation, connection.OriginUser, "",
 	)
 	if err != nil {
-		return agentError(requestID, "CONNECTION_BUSY", err)
+		return connectionAdmissionResponse(requestID, "CONNECTION_BUSY", err)
 	}
 	defer func() { finishConnectionResponse(transaction, result) }()
 	if err := transaction.SetPhase(connection.PhaseApplying); err != nil {
@@ -884,11 +907,23 @@ func (a *Agent) captureFailure(
 }
 
 func (a *Agent) prepareServiceCapture(ctx context.Context, mode capture.Mode) (map[string]interface{}, error) {
-	response, err := a.SendToServiceContext(ctx, map[string]interface{}{
+	return a.prepareServiceCaptureWithOptions(ctx, mode, captureTransitionOptions{})
+}
+
+func (a *Agent) prepareServiceCaptureWithOptions(
+	ctx context.Context,
+	mode capture.Mode,
+	options captureTransitionOptions,
+) (map[string]interface{}, error) {
+	request := map[string]interface{}{
 		"request_id": fmt.Sprintf("capture-service-%d", time.Now().UnixNano()),
 		"method":     "capture.prepare",
 		"mode":       mode.String(),
-	})
+	}
+	if options.retainSystemProxyWarm {
+		request["retain_warm"] = true
+	}
+	response, err := a.SendToServiceContext(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("service capture transaction: %w", err)
 	}
@@ -1077,7 +1112,9 @@ func (a *Agent) captureStatusPayload() map[string]interface{} {
 		"transaction": map[string]interface{}{
 			"busy": transaction.Busy, "id": transaction.ID,
 			"operation": transaction.Operation, "origin": transaction.Origin,
-			"phase": transaction.Phase, "fault_domain": transaction.FaultDomain,
+			"intent": transaction.Intent, "domain": transaction.Domain,
+			"priority": transaction.Priority,
+			"phase":    transaction.Phase, "fault_domain": transaction.FaultDomain,
 			"started_at": transaction.StartedAt, "queued": transaction.Queued,
 			"last_id": transaction.LastID, "last_operation": transaction.LastOperation,
 			"last_phase": transaction.LastPhase, "last_error": transaction.LastError,

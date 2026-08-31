@@ -15,6 +15,7 @@ const {
   activeRoute,
   activeRouteLatency,
   captureMode,
+  primaryConnectionAction,
   effectiveConnection,
   connectionIcon,
   networkHealthLabel,
@@ -32,6 +33,7 @@ const {
   runBenchmark,
   changePage,
   toggleConnection,
+  goToRouteSelection,
   testActiveRoute,
   captureLabel,
   recoveryStateLabel,
@@ -58,7 +60,11 @@ const {
       </div>
       <div class="hero-actions">
         <button class="secondary" :disabled="loading || ipChecking" @click="checkConnection">{{ ipChecking ? "验证中" : effectiveConnection.kind === "external_system_proxy" ? "检测外部代理出口" : effectiveConnection.kind === "direct" ? "检测公网出口" : "验证 ChatGPT 链路" }}</button>
-        <button class="primary" :disabled="loading" @click="toggleConnection">{{ dashboard.core.state === "running" ? "停止 Navo 代理" : "启动 Navo 代理" }}</button>
+        <button
+          class="primary"
+          :disabled="loading"
+          @click="primaryConnectionAction.kind === 'select_route' ? goToRouteSelection() : toggleConnection()"
+        >{{ primaryConnectionAction.label }}</button>
       </div>
     </article>
   
